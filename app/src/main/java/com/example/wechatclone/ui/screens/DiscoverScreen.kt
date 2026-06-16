@@ -1,0 +1,1289 @@
+package com.example.wechatclone.ui.screens
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
+import com.example.wechatclone.R
+import com.kyant.backdrop.Backdrop
+import com.example.wechatclone.model.DiscoverItem
+import com.example.wechatclone.viewmodel.DiscoverViewModel
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.example.wechatclone.ui.utils.DampedDragAnimation
+import com.example.wechatclone.ui.utils.InteractiveHighlight
+import com.example.wechatclone.viewmodel.TodoItem
+import com.example.wechatclone.viewmodel.TodoViewModel
+import com.kyant.shapes.Capsule
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.tooling.preview.Preview
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
+
+@Composable
+fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {
+    val items: List<DiscoverItem> by vm.items.observeAsState(emptyList())
+    DiscoverScreen(items = items, onSubPageChange = onSubPageChange)
+}
+
+@Composable
+fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit = {}) {
+    val ctx = LocalContext.current
+    var hitokoto by remember { mutableStateOf("") }
+    var from by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
+
+    val cnFont = FontFamily(Font(R.font.notoserifsc_bold, weight = FontWeight.Bold))
+    val enFont = FontFamily(Font(R.font.special_elite_regular, weight = FontWeight.Normal))
+
+    // ── 人设工坊 ──
+    var showPromptBuilder by remember { mutableStateOf(false) }
+
+    // ── 每日任务 ──
+    var showTodo by remember { mutableStateOf(false) }
+    val todoBackdrop = rememberLayerBackdrop(onDraw = { drawRect(Color.Transparent); drawContent() })
+
+    // ── 每日挑战 ──
+    var showChallenge by remember { mutableStateOf(false) }
+    var challengeText by remember { mutableStateOf("") }
+    var challengeDone by remember { mutableStateOf(false) }
+    var challengeLoading by remember { mutableStateOf(false) }
+    var isLeetCode by remember { mutableStateOf(false) }
+    var leetCodeLink by remember { mutableStateOf("") }
+    val challengeTabIndex = remember { derivedStateOf { if (isLeetCode) 1 else 0 } }
+    val challengeBackdrop = rememberLayerBackdrop(onDraw = { drawRect(Color.Transparent); drawContent() })
+
+    fun fetchBoredChallenge() {
+        challengeLoading = true; challengeDone = false
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val conn = URL("https://bored-api.appbrewery.com/random").openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000; conn.readTimeout = 5000
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                val activity = json.optString("activity", "")
+                val type = json.optString("type", "")
+                val participants = json.optInt("participants", 1)
+                val price = json.optDouble("price", 0.0)
+                val duration = json.optString("duration", "")
+                val text = buildString {
+                    append(activity.takeIf { it.isNotEmpty() } ?: "放松一下")
+                    if (type.isNotEmpty()) append("\n类型：$type")
+                    if (participants > 1) append("\n适合 ${participants}人")
+                    if (price > 0) append("\n预算：${(price * 100).toInt()}%")
+                    if (duration.isNotEmpty()) append("\n时长：$duration")
+                }
+                withContext(Dispatchers.Main) {
+                    challengeText = text; challengeLoading = false; isLeetCode = false
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    challengeText = "网络不佳，稍后再试喵～"; challengeLoading = false
+                }
+            }
+        }
+    }
+
+    fun fetchLeetCodeChallenge() {
+        challengeLoading = true; challengeDone = false
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val conn = URL("https://leetcode-api-pied.vercel.app/daily").openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000; conn.readTimeout = 8000
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                val date = json.optString("date", "")
+                val link = json.optString("link", "")
+                val question = json.optJSONObject("question")
+                val title = question?.optString("title", "") ?: ""
+                val difficulty = question?.optString("difficulty", "") ?: ""
+                val text = buildString {
+                    append("今日编程挑战")
+                    if (date.isNotEmpty()) append("（$date）")
+                    append("\n")
+                    append(title.takeIf { it.isNotEmpty() } ?: "LeetCode 每日一题")
+                    if (difficulty.isNotEmpty()) append("\n难度：$difficulty")
+                }
+                withContext(Dispatchers.Main) {
+                    val fullLink = if (link.startsWith("/")) "https://leetcode.com$link" else link
+                    challengeText = text; leetCodeLink = fullLink; challengeLoading = false; isLeetCode = true
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    challengeText = "LeetCode 不可用，换个挑战喵～"; challengeLoading = false
+                }
+            }
+        }
+    }
+
+    // ── 猫猫占卜 ──
+    var showCatPage by remember { mutableStateOf(false) }
+    var catImg by remember { mutableStateOf<String?>(null) }
+    var catLoading by remember { mutableStateOf(false) }
+    val fortunes = arrayOf("大吉 🐱", "中吉 😺", "小吉 😸", "末吉 😿", "凶 😾", "大凶 🙀")
+    var fortuneText by remember { mutableStateOf("") }
+
+    val buttonTexts = arrayOf(
+        "再来一卦 🐱",
+        "再求一签 🐾",
+        "喵神再临 ✨",
+        "还要摸猫 🐈",
+        "再摇一次 🎋"
+    )
+    var buttonLabel by remember { mutableStateOf("求签摸猫 🐱") }
+
+    fun fetchCat() {
+        catLoading = true
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+                val lastDate = prefs.getString("cat_fortune_date", "") ?: ""
+
+                // Daily reset
+                if (today != lastDate) {
+                    prefs.edit().putString("cat_fortune_date", today).apply()
+                    withContext(Dispatchers.Main) { buttonLabel = "求签摸猫 🐱" }
+                }
+
+                // Fortune (always fresh)
+                val fi = kotlin.math.abs(System.currentTimeMillis() % fortunes.size).toInt()
+                // Button label shuffle
+                withContext(Dispatchers.Main) {
+                    buttonLabel = buttonTexts[kotlin.math.abs(System.currentTimeMillis() % buttonTexts.size).toInt()]
+                }
+
+                // 黄历（每次刷新）
+                var huangliText = ""
+                try {
+                    val hl = URL("https://api.suyanw.cn/api/huangli.php").openConnection() as HttpURLConnection
+                    hl.connectTimeout = 5000; hl.readTimeout = 5000
+                    val hlJson = JSONObject(hl.inputStream.bufferedReader().use { it.readText() })
+                    hl.disconnect()
+                    if (hlJson.optInt("code") == 1) {
+                        val d = hlJson.optJSONObject("data")
+                        val xz = d?.optJSONObject("星座运势")
+                        val saying = xz?.optString("今日一言", "") ?: ""
+                        val color = xz?.optString("幸运颜色", "") ?: ""
+                        val num = xz?.optString("幸运数字", "") ?: ""
+                        val star = xz?.optString("速配星座", "") ?: ""
+                        val parts = listOfNotNull(
+                            saying.takeIf { it.isNotEmpty() },
+                            "幸运色：$color".takeIf { color.isNotEmpty() },
+                            "幸运数字：$num".takeIf { num.isNotEmpty() },
+                            "速配：$star".takeIf { star.isNotEmpty() }
+                        )
+                        huangliText = parts.joinToString("\n")
+                    }
+                } catch (_: Exception) { }
+
+                withContext(Dispatchers.Main) {
+                    val msg = if (huangliText.isNotEmpty()) huangliText else "喵神说今天宜摸鱼 🐱"
+                    fortuneText = "${fortunes[fi]}\n$msg\n喵~"
+                }
+
+                // Cat image
+                val conn = URL("https://api.thecatapi.com/v1/images/search").openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000; conn.readTimeout = 5000
+                val json = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                catImg = json.optJSONObject(0)?.optString("url", "")?.takeIf { it.isNotEmpty() }
+                withContext(Dispatchers.Main) { catLoading = false }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    fortuneText = if (fortuneText.isEmpty()) "网络不佳，摸摸猫头吧 🐱\n喵~" else fortuneText
+                    catLoading = false
+                }
+            }
+        }
+    }
+
+    fun fetchHitokoto() {
+        loading = true
+        val hitokotoType = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+            .getString("hitokoto_type", "") ?: ""
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val types = hitokotoType.split(",").filter { it.isNotEmpty() && it.length == 1 }
+                val typeParam = if (types.isNotEmpty()) "&type=${types.random()}" else ""
+                val conn = URL("https://v1.hitokoto.cn?_=${System.currentTimeMillis()}$typeParam").openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000; conn.readTimeout = 5000
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                val text = json.optString("hitokoto", "")
+                val src = json.optString("from", "")
+                val who = json.optString("from_who", "").takeIf { it != "null" } ?: ""
+                val rawType = json.optString("type", "")
+                val typeLabel = mapOf("a" to "动画", "b" to "漫画", "c" to "游戏", "d" to "文学",
+                    "e" to "原创", "f" to "网络", "h" to "影视", "i" to "诗词", "j" to "网易云",
+                    "k" to "哲学", "l" to "抖机灵").getOrDefault(rawType, "")
+                val source = if (who.isNotEmpty()) "$who《$src》" else if (src.isNotEmpty() && src != "null") "《$src》" else ""
+                val typeTag = if (typeLabel.isNotEmpty()) " #$typeLabel" else ""
+                withContext(Dispatchers.Main) {
+                    hitokoto = text; from = "$source$typeTag"; loading = false
+                    ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE).edit()
+                        .putString("hitokoto_text", text).putString("hitokoto_from", "$source$typeTag").apply()
+                }
+            } catch (_: Exception) {
+                // Fallback to cached
+                val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+                withContext(Dispatchers.Main) {
+                    hitokoto = prefs.getString("hitokoto_text", "知识就是力量。") ?: "知识就是力量。"
+                    from = prefs.getString("hitokoto_from", "") ?: ""
+                    loading = false
+                }
+            }
+        }
+    }
+
+    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder
+    LaunchedEffect(subPageOpen) { onSubPageChange(subPageOpen) }
+
+    LaunchedEffect(Unit) { fetchHitokoto() }
+
+    AnimatedContent(
+        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else 0,
+        transitionSpec = {
+            if (targetState != 0) {
+                (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it / 2 } + fadeOut())
+            } else {
+                (slideInHorizontally { -it / 2 } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
+            }
+        },
+        label = "subpages"
+    ) { state ->
+        when (state) {
+            1 -> CatFortunePage(
+                catImg = catImg, catLoading = catLoading, fortuneText = fortuneText, buttonLabel = buttonLabel,
+                onBack = { showCatPage = false }, onRefresh = { fetchCat() }, cnFont = cnFont, enFont = enFont
+            )
+            2 -> DailyChallengePage(
+                challengeText = challengeText, challengeDone = challengeDone, challengeLoading = challengeLoading,
+                isLeetCode = isLeetCode, leetCodeLink = leetCodeLink,
+                cnFont = cnFont, enFont = enFont,
+                selectedTab = { challengeTabIndex.value },
+                selectedTabChange = { idx -> if (idx == 0) fetchBoredChallenge() else fetchLeetCodeChallenge() },
+                backdrop = challengeBackdrop, onBack = { showChallenge = false },
+                onBoredRefresh = { fetchBoredChallenge() }, onLeetCodeRefresh = { fetchLeetCodeChallenge() },
+                onDone = { challengeDone = true }
+            )
+            3 -> TodoPage(onBack = { showTodo = false }, cnFont = cnFont, enFont = enFont, fortuneText = fortuneText, backdrop = todoBackdrop)
+            4 -> PromptBuilderPage(onBack = { showPromptBuilder = false })
+            else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
+                onCatClick = { showCatPage = true; fetchCat() },
+                onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
+                onTodoClick = { showTodo = true },
+                onPromptBuilderClick = { showPromptBuilder = true })
+        }
+    }
+}
+
+@Composable
+fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from: String = "", loading: Boolean = false, onRefresh: () -> Unit = {}, cnFont: FontFamily = FontFamily.Default, enFont: FontFamily = FontFamily.Default, onCatClick: () -> Unit = {}, onChallengeClick: () -> Unit = {}, onTodoClick: () -> Unit = {}, onPromptBuilderClick: () -> Unit = {}) {
+    val scrollState = rememberLazyListState()
+    val collapseFraction by remember {
+        derivedStateOf {
+            if (scrollState.firstVisibleItemIndex > 0) 1f
+            else {
+                val offset = scrollState.firstVisibleItemScrollOffset.toFloat()
+                (offset / 400f).coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = scrollState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 80.dp)
+        ) {
+            // Hitokoto card
+            item {
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                val entryProgress by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0f,
+                    animationSpec = spring(stiffness = Spring.StiffnessLow),
+                    label = "hitokoto_entry"
+                )
+
+                val alpha = entryProgress * (1f - collapseFraction)
+                val scale = 0.95f + (0.05f * entryProgress) - (0.1f * collapseFraction)
+                val translateY = (1f - entryProgress) * 40f - (collapseFraction * 50f)
+                val paddingV = lerp(16f, 4f, collapseFraction).dp
+
+                Box(
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            this.alpha = alpha
+                            this.scaleX = scale
+                            this.scaleY = scale
+                            this.translationY = translateY
+                        }
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(lerp(20f, 12f, collapseFraction).dp))
+                        .background(Color.White)
+                        .padding(horizontal = 16.dp, vertical = paddingV)
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            if (loading) {
+                                Text("正在加载喵...", fontSize = 15.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
+                            } else {
+                                Text(
+                                    buildMixedText("「$hitokoto」", cnFont, enFont),
+                                    fontSize = lerp(17f, 14f, collapseFraction).sp,
+                                    color = Color(0xFF1A1A1A),
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = lerp(26f, 20f, collapseFraction).sp,
+                                    maxLines = if (collapseFraction > 0.5f) 1 else Int.MAX_VALUE,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (from.isNotEmpty() && collapseFraction < 0.6f) {
+                                    Spacer(Modifier.height(lerp(8f, 0f, collapseFraction * 2).dp))
+                                    Text(
+                                        buildMixedText("—— $from", cnFont, enFont),
+                                        fontSize = 13.sp,
+                                        color = Color(0xFF888888).copy(alpha = (1f - collapseFraction * 2.5f).coerceIn(0f, 1f)),
+                                        fontStyle = FontStyle.Italic
+                                    )
+                                }
+                            }
+                        }
+                        if (!loading && hitokoto.isNotEmpty() && collapseFraction < 0.8f) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(enabled = !loading) { onRefresh() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("↻", fontSize = 22.sp, color = Color(0xFF07C160).copy(alpha = (1f - collapseFraction * 5f).coerceIn(0f, 1f)), fontFamily = enFont, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // ── 更新公告板块 (NEW) ──
+            item {
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                val animProgress by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0f,
+                    animationSpec = spring(stiffness = Spring.StiffnessLow),
+                    label = "announcement_entry"
+                )
+
+                Surface(
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            alpha = animProgress
+                            translationY = (1f - animProgress) * 40f
+                        }
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White
+                ) {
+                    Row(
+                        Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 动态更新小图标
+                        Box(
+                            Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFF7E6)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📢", fontSize = 18.sp)
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+                            Spacer(Modifier.height(2.dp))
+                            val announcement = """
+                                **v0.0.1** 更新内容：
+                                - 优化动效
+                                - 支持`Markdown`解析
+                                - 模块随滚动*自动折叠*
+                                Markdown长文本显示测试：雷德王还有3个小时降临地球，世界各大媒体平台将这条消息传唤的沸沸扬扬，他的到来，是救赎还是毁灭，我无从得知，众说纷纭，我只想先吃个汉堡吧。
+
+宇宙无穷，人生微渺，我从一无所有中来，自当归于虚无。唯独让我牵挂难以放下执念的，便是学校的汉堡了，汉堡不大，面包很干，初相识于三年前，我年少，它缥缈，浅尝一口:“哇”很好吃。可惜后来吃饭时间越来越晚，与曾经的挚爱想重逢却要隔着人山人海，我等了一次又一次。
+
+可惜不悔梦归处，只恨太匆匆，不知什么时候起，汉堡的肉饼变成了自制小牛肉，陈然多了一份人情味，少了一份预制感，但干燥的触感与同样燥干的面饼相结合，让我失去了对其往日的热爱，或者它也不能称之为那个它了。
+
+学校门口的餐车最近上了汉堡，用的和学校同样的佐料，不过是曾经的，面饼一样的干，早上考试我又饿又渴，买了个汉堡，更渴了。
+
+可宇宙苍茫，谁又能主宰学校的汉堡呢？其实世间一切自有定数，我不信奉佛陀，自我信仰上帝，也许那全知全能的主会将仁爱的汉堡撒下大地，在我活着，或在我死后。
+
+雷德王降临了，在维多利亚港。
+
+没有谈判，硝烟中，炮火轰鸣中，世界褪去了色彩。
+
+我到了，因为我必须来，作为新时代新青年，肩负历史使命与伟大复兴重担，拯救世界，舍我其谁？可站在雷德王脚下那一刻，我才意识到自己有多弱小，他比自由女神像还要大，尽管我没去过美国，但我刷过视频。
+
+雷德王停下进攻的脚步，低头看我，示意我把手给他，我不敢拒绝却也止不住的颤抖，原来他是要我手中的汉堡啊，看来无论何等高级的生命都无法抵御汉堡的诱惑。一颗子弹贯穿我的胸膛，临死前耳畔传来的话语，在说我通敌。
+
+哈哈哈，这就是人性吗？雷德王，我开始理解你了，不过，突然……好想吃个……汉堡…啊………
+                            """.trimIndent()
+                            Text(
+                                text = parseMarkdown(announcement),
+                                fontSize = 13.sp,
+                                color = Color(0xFF666666),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+            }
+            // ── 更新公告板块 结束 ──
+
+            itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                val animProgress by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0f,
+                    animationSpec = spring(stiffness = Spring.StiffnessLow),
+                    label = "menu"
+                )
+
+                Row(
+                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp)
+                        .graphicsLayer {
+                            alpha = animProgress
+                            translationY = (1f - animProgress) * 30f
+                        }
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White)
+                        .clickable {
+                            when (item.id) {
+                                "2" -> onCatClick()
+                                "3" -> onChallengeClick()
+                            "4" -> onTodoClick()
+                            "8" -> onPromptBuilderClick()
+                            }
+                        }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(painterResource(item.iconResId), null, Modifier.size(24.dp), tint = Color(0xFF07C160))
+                    Spacer(Modifier.width(16.dp)); Text(item.title, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFBBBBBB), modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        // ── 常驻精简栏 (一言) ──
+        AnimatedVisibility(
+            visible = collapseFraction > 0.6f,
+            enter = fadeIn() + slideInVertically { -it / 2 },
+            exit = fadeOut() + slideOutVertically { -it / 2 }
+        ) {
+            Surface(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                shape = Capsule(),
+                color = Color.White.copy(alpha = 0.95f),
+                tonalElevation = 4.dp,
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("「", fontSize = 12.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                    Text(
+                        hitokoto,
+                        fontSize = 12.sp,
+                        color = Color(0xFF333333),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("」", fontSize = 12.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatFortunePage(
+    catImg: String?,
+    catLoading: Boolean,
+    fortuneText: String,
+    buttonLabel: String,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    cnFont: FontFamily,
+    enFont: FontFamily
+) {
+    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+        Row(
+            Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+            Spacer(Modifier.width(4.dp))
+            Text("🐱 喵神谕", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (catLoading && catImg == null) {
+                Text("召唤猫猫中...", fontSize = 16.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
+            } else {
+                if (fortuneText.isNotEmpty()) {
+                    Text(fortuneText, fontSize = 16.sp, lineHeight = 24.sp, color = Color(0xFF1A1A1A))
+                    Spacer(Modifier.height(16.dp))
+                }
+                if (catImg != null) {
+                    SubcomposeAsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(catImg).crossfade(true).build(),
+                        contentDescription = "猫猫",
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Fit,
+                        loading = {
+                            Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = Color(0xFF07C160))
+                            }
+                        },
+                        error = {
+                            Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                                Text("图片加载失败喵", color = Color.Gray, fontSize = 13.sp, fontStyle = FontStyle.Italic)
+                            }
+                        }
+                    )
+                }
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onRefresh,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !catLoading
+                ) { Text(buttonLabel, fontSize = 15.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyChallengePage(
+    challengeText: String,
+    challengeDone: Boolean,
+    challengeLoading: Boolean,
+    isLeetCode: Boolean,
+    leetCodeLink: String,
+    cnFont: FontFamily = FontFamily.Default,
+    enFont: FontFamily = FontFamily.Default,
+    selectedTab: () -> Int,
+    selectedTabChange: (Int) -> Unit,
+    backdrop: Backdrop,
+    onBack: () -> Unit,
+    onBoredRefresh: () -> Unit,
+    onLeetCodeRefresh: () -> Unit,
+    onDone: () -> Unit
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (challengeDone) 1f else 0.3f,
+        animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f)
+    )
+
+    Box(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+        // Content captured by backdrop
+        Column(Modifier.fillMaxSize().layerBackdrop(backdrop as LayerBackdrop)) {
+            Row(
+                Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+                Spacer(Modifier.width(4.dp))
+                Text("🎯 喵神の试炼", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(60.dp)) // space for glass tab bar
+
+                if (challengeLoading || challengeText.isEmpty()) {
+                    Text("加载中...", fontSize = 14.sp, color = Color.Gray, fontStyle = FontStyle.Italic, fontFamily = cnFont)
+                } else {
+                    Text(buildMixedText(challengeText, cnFont, enFont), fontSize = 18.sp, lineHeight = 28.sp, color = Color(0xFF1A1A1A), fontWeight = FontWeight.Medium)
+
+                    if (isLeetCode && leetCodeLink.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(leetCodeLink, fontSize = 11.sp, color = Color(0xFF888888), fontFamily = enFont)
+                    }
+
+                    Spacer(Modifier.height(32.dp))
+                    if (!challengeDone) {
+                        Button(
+                            onClick = onDone,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                        ) { Text("✅ 完成挑战", fontSize = 16.sp) }
+                    } else {
+                        Text("🎉", fontSize = 64.sp, modifier = Modifier.scale(scale))
+                        Spacer(Modifier.height(12.dp))
+                        Text("挑战完成！", fontSize = 20.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text("很棒喵！要不要再来一个挑战呢喵？", fontSize = 14.sp, color = Color(0xFF888888))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = if (isLeetCode) onLeetCodeRefresh else onBoredRefresh) {
+                    Text("🔀 换一个", fontSize = 13.sp, color = Color(0xFF888888))
+                }
+            }
+        }
+
+        // Glass tab bar overlay
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 58.dp).align(Alignment.TopCenter)
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { Capsule() },
+                    effects = { blur(8f.dp.toPx()); lens(12f.dp.toPx(), 24f.dp.toPx()) },
+                    onDrawSurface = { drawRect(Color.White.copy(alpha = 0.85f)) }
+                )
+                .height(44.dp)
+        ) {
+            Box(Modifier.weight(1f).fillMaxSize().clickable { selectedTabChange(0) }, contentAlignment = Alignment.Center) {
+                Text("🎲 趣味", color = if (!isLeetCode) Color(0xFF07C160) else Color(0xFF888888), fontWeight = if (!isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+            }
+            Box(Modifier.weight(1f).fillMaxSize().clickable { selectedTabChange(1) }, contentAlignment = Alignment.Center) {
+                Text("💻 编程", color = if (isLeetCode) Color(0xFF07C160) else Color(0xFF888888), fontWeight = if (isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily, fortuneText: String, backdrop: Backdrop? = null) {
+    val vm = viewModel<TodoViewModel>()
+    val items by vm.items.observeAsState(emptyList())
+    var input by remember { mutableStateOf("") }
+    var showChains by remember { mutableStateOf(false) }
+    var chains by remember { mutableStateOf(vm.loadChains()) }
+    var chainTitle by remember { mutableStateOf("") }
+    var chainStepText by remember { mutableStateOf("") }
+    var chainDialogStep by remember { mutableIntStateOf(0) } // 0=none, 1=title, 2+=steps
+    var pendingSteps by remember { mutableStateOf(listOf<String>()) }
+    val animationScope = rememberCoroutineScope()
+
+    val clearDampedDrag = remember(animationScope) {
+        DampedDragAnimation(
+            animationScope = animationScope,
+            initialValue = 0f, valueRange = 0f..1f, visibilityThreshold = 0.001f,
+            initialScale = 1f, pressedScale = 1.05f,
+            onDragStarted = {}, onDragStopped = { animateToValue(0f) },
+            onDrag = { _, _ -> }
+        )
+    }
+    val clearHighlight = remember(animationScope) { InteractiveHighlight(animationScope) }
+
+    LaunchedEffect(Unit) { vm.refresh() }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+        // Content captured by backdrop
+        Column(Modifier.fillMaxSize().layerBackdrop(backdrop as LayerBackdrop)) {
+            Row(
+                Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+                Spacer(Modifier.width(4.dp))
+                Text("📋 Too-Do", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+
+            // Fortune link
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🐱 ", fontSize = 13.sp)
+                Text("喵神说：", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color.Gray)
+                Spacer(Modifier.width(4.dp))
+                if (fortuneText.isNotEmpty()) {
+                    Text(fortuneText.split("\n").firstOrNull() ?: "", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color(0xFF07C160))
+                } else {
+                    Text("先去喵神谕求个签吧～", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color.Gray)
+                }
+            }
+
+            // Tab buttons
+            Row(Modifier.fillMaxWidth().background(Color.White)) {
+                TextButton(
+                    onClick = { showChains = false },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("📋 自由", color = if (!showChains) Color(0xFF07C160) else Color.Gray, fontWeight = if (!showChains) FontWeight.Bold else FontWeight.Normal)
+                }
+                TextButton(
+                    onClick = { showChains = true; chains = vm.loadChains() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("📜 任务链", color = if (showChains) Color(0xFF07C160) else Color.Gray, fontWeight = if (showChains) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+
+            // ── Tabbed Content with Animation ──
+            AnimatedContent(
+                targetState = showChains,
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
+                    } else {
+                        (slideInHorizontally { -it } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
+                    }
+                },
+                label = "todo_tabs",
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            ) { isChainTab ->
+                if (!isChainTab) {
+                    // ── 自由任务视图 ──
+                    Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                input, { input = it }, Modifier.weight(1f),
+                                placeholder = { Text("写一个新任务...", fontSize = 14.sp) },
+                                singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(
+                                onClick = { if (input.isNotBlank()) { vm.add(input.trim()); input = "" } },
+                                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF07C160))
+                            ) { Text("添加", fontWeight = FontWeight.Bold) }
+                        }
+
+                        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 80.dp)) {
+                            if (items.isEmpty()) {
+                                item { Text("还没有任务，写一个吧～", fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(16.dp)) }
+                            }
+                            itemsIndexed(items, key = { _, it -> it.id }) { index, todo ->
+                                var visible by remember { mutableStateOf(false) }
+                                LaunchedEffect(Unit) { visible = true }
+                                val entryProgress by animateFloatAsState(
+                                    targetValue = if (visible) 1f else 0f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                    label = "todo_entry"
+                                )
+
+                                val strikeAlpha by animateFloatAsState(
+                                    targetValue = if (todo.done) 1f else 0f,
+                                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
+                                )
+
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                        .graphicsLayer {
+                                            alpha = entryProgress
+                                            translationY = (1f - entryProgress) * 20f
+                                        }
+                                        .clip(RoundedCornerShape(16.dp)).background(Color.White)
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(checked = todo.done, onCheckedChange = { 
+                                        vm.toggle(todo.id)
+                                    }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160)))
+                                    Spacer(Modifier.width(8.dp))
+                                    Box(Modifier.weight(1f)) {
+                                        Text(todo.text, fontSize = 15.sp, color = if (todo.done) Color.Gray else Color(0xFF1A1A1A))
+                                        if (strikeAlpha > 0.01f) {
+                                            HorizontalDivider(modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(), thickness = 1.5.dp, color = Color.Gray.copy(alpha = strikeAlpha))
+                                        }
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    TextButton(onClick = { vm.delete(todo.id) }) { Text("✕", fontSize = 13.sp, color = Color(0xFFCCCCCC)) }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // ── 任务链视图 ──
+                    Column(Modifier.fillMaxSize()) {
+                        Spacer(Modifier.height(8.dp))
+                        if (chains.isEmpty()) {
+                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("还没有任务链，创建一个吧～", fontSize = 14.sp, color = Color.Gray)
+                            }
+                        } else {
+                            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 80.dp)) {
+                                itemsIndexed(chains) { index, chain ->
+                                    var visible by remember { mutableStateOf(false) }
+                                    LaunchedEffect(Unit) { visible = true }
+                                    val entryProgress by animateFloatAsState(
+                                        targetValue = if (visible) 1f else 0f,
+                                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                        label = "chain_entry"
+                                    )
+
+                                    val doneCount = chain.steps.count { it.done }
+                                    val total = chain.steps.size
+                                    val targetProgress = if (total > 0) doneCount.toFloat() / total else 0f
+                                    val animatedProgress by animateFloatAsState(
+                                        targetValue = targetProgress,
+                                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                        label = "chain_progress"
+                                    )
+                                    val allDone = doneCount == total
+                                    
+                                    val trophyScale by animateFloatAsState(
+                                        targetValue = if (allDone) 1f else 0f,
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                                        label = "trophy_scale"
+                                    )
+
+                                    Box(Modifier.fillMaxWidth()
+                                        .graphicsLayer {
+                                            alpha = entryProgress
+                                            translationY = (1f - entryProgress) * 30f
+                                        }
+                                        .padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(16.dp)) {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(chain.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                                Box(Modifier.scale(trophyScale)) {
+                                                    Text("🏆", fontSize = 20.sp)
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            // Progress bar
+                                            LinearProgressIndicator(
+                                                progress = { animatedProgress },
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = if (allDone) Color(0xFF07C160) else Color(0xFF07C160).copy(alpha = 0.5f),
+                                                trackColor = Color(0xFFE0E0E0)
+                                            )
+                                            Spacer(Modifier.height(8.dp))
+                                            Text("$doneCount / $total", fontSize = 12.sp, color = Color.Gray)
+                                            Spacer(Modifier.height(8.dp))
+                                            // Steps
+                                            chain.steps.forEachIndexed { si, step ->
+                                                val prevDone = si == 0 || chain.steps[si - 1].done
+                                                val stepAlpha by animateFloatAsState(
+                                                    targetValue = if (prevDone) 1f else 0.4f,
+                                                    label = "step_lock"
+                                                )
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(vertical = 2.dp).graphicsLayer { alpha = stepAlpha },
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Checkbox(
+                                                        checked = step.done,
+                                                        onCheckedChange = { 
+                                                            if (prevDone) { 
+                                                                vm.toggleChainStep(chain.id, si)
+                                                                chains = vm.loadChains()
+                                                            } 
+                                                        },
+                                                        enabled = prevDone,
+                                                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160), disabledUncheckedColor = Color(0xFFE0E0E0))
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(step.text, fontSize = 14.sp, color = if (step.done) Color.Gray else Color(0xFF1A1A1A))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(4.dp))
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                TextButton(onClick = { vm.deleteChain(chain.id); chains = vm.loadChains() }) {
+                                                    Text("删除链", fontSize = 12.sp, color = Color(0xFFFA5151))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Add chain button
+                        Button(
+                            onClick = { chainDialogStep = 1 },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) { Text("+ 新建任务链", fontSize = 14.sp) }
+                    }
+                }
+            }
+
+            // ── Step-by-step chain creation ──
+            if (chainDialogStep == 1) {
+                AlertDialog(
+                    onDismissRequest = { chainDialogStep = 0 },
+                    title = { Text("你的目标是什么？") },
+                    text = {
+                        OutlinedTextField(chainTitle, { chainTitle = it }, Modifier.fillMaxWidth(),
+                            placeholder = { Text("例：学习 Compose", fontSize = 14.sp) }, singleLine = true)
+                    },
+                    confirmButton = {
+                        TextButton({ if (chainTitle.isNotBlank()) chainDialogStep = 2 }) {
+                            Text("下一步 →", color = Color(0xFF07C160))
+                        }
+                    },
+                    dismissButton = { TextButton({ chainDialogStep = 0 }) { Text("取消", color = Color.Gray) } }
+                )
+            }
+            if (chainDialogStep >= 2) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text(if (chainDialogStep > 2) "还要添加步骤吗？" else "添加第一个步骤") },
+                    text = {
+                        OutlinedTextField(chainStepText, { chainStepText = it }, Modifier.fillMaxWidth(),
+                            placeholder = { Text("写一个具体步骤...", fontSize = 14.sp) }, singleLine = true)
+                    },
+                    confirmButton = {
+                        TextButton({
+                            if (chainStepText.isNotBlank()) {
+                                pendingSteps = pendingSteps + chainStepText.trim()
+                                chainStepText = ""
+                                chainDialogStep++
+                            }
+                        }) { Text("添加并继续", color = Color(0xFF07C160)) }
+                    },
+                    dismissButton = {
+                        TextButton({
+                            val finalSteps = if (chainStepText.isNotBlank()) pendingSteps + chainStepText.trim() else pendingSteps
+                            if (finalSteps.isNotEmpty()) vm.addChain(chainTitle.trim(), finalSteps)
+                            chainTitle = ""; chainStepText = ""; pendingSteps = emptyList(); chainDialogStep = 0
+                            chains = vm.loadChains()
+                        }) { Text(if (pendingSteps.isNotEmpty()) "完成" else "跳过", color = Color.Gray) }
+                    }
+                )
+            }
+        }
+
+        // Glass clear button
+        if (!showChains && items.any { it.done }) {
+            Box(Modifier.fillMaxWidth().padding(12.dp).align(Alignment.BottomCenter).navigationBarsPadding()) {
+                Row(
+                    Modifier.drawBackdrop(
+                        backdrop = backdrop, shape = { Capsule() },
+                        effects = { blur(4f.dp.toPx()); lens(6f.dp.toPx(), 12f.dp.toPx()) },
+                        layerBlock = {
+                            val s = lerp(1f, clearDampedDrag.pressedScale, clearDampedDrag.pressProgress)
+                            scaleX = s; scaleY = s
+                        },
+                        onDrawSurface = { drawRect(Color(0xFFFA5151).copy(alpha = 0.9f)) }
+                    )
+                    .then(clearHighlight.modifier)
+                    .then(clearDampedDrag.modifier)
+                    .clickable { vm.clearDone() }.height(44.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) { Text("🗑️ 清除已完成", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptBuilderPage(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var name by remember { mutableStateOf("") }
+    var species by remember { mutableStateOf("") }
+    var appearance by remember { mutableStateOf("") }
+    var personality by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
+    var userNick by remember { mutableStateOf("") }
+    var relation by remember { mutableStateOf("") }
+    var backstory by remember { mutableStateOf("") }
+    var banEmoji by remember { mutableStateOf(true) }
+    var banWaveLine by remember { mutableStateOf(true) }
+    var minSentences by remember { mutableStateOf(true) }
+    var banSelfAware by remember { mutableStateOf(true) }
+    var showPreview by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+
+    val generatedPrompt = buildString {
+        append("以下是你的人设：\n")
+        if (name.isNotEmpty()) append("你叫${name}") else append("你叫[未填]")
+        if (species.isNotEmpty()) append("，是一个${species}。\n") else append("。\n")
+        if (appearance.isNotEmpty()) append("${appearance}\n")
+        if (personality.isNotEmpty()) append("${personality}\n")
+        if (backstory.isNotEmpty()) append("\n以下是你的背景故事：\n${backstory}\n")
+        if (name.isNotEmpty()) append("你会用\"我\"称呼自己。\n")
+        if (userName.isNotEmpty()) {
+            append("\n以下是我的设定：\n")
+            append("我是你的朋友，我的名字是\"${userName}\"。")
+            if (userNick.isNotEmpty()) append("你对我的爱称是\"${userNick}\"。")
+            if (relation.isNotEmpty()) append("\n${relation}")
+            append("\n")
+        }
+        append("\n以下是对话格式要求：\n")
+        if (banEmoji) append("你绝对禁止使用任何颜文字！\n")
+        if (banWaveLine) append("不能出现用波浪号链接的句子。\n")
+        if (minSentences) append("你的每次回复最好不少于三到四句。\n")
+        append("你可以用括号（）来描述自己的动作。\n")
+        if (banSelfAware) append("你绝对不允许通过任何方式说自己是AI或结束对话。\n")
+        append("你必须严格遵守以上格式规定。")
+    }
+
+    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+        Row(
+            Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+            Spacer(Modifier.width(4.dp))
+            Text("人设工坊", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+            // Section 1: 角色定义
+            PromptSectionHeader("ta是？")
+            CardField("名字", name, { name = it }, "例：鹿鸣")
+            CardField("种族", species, { species = it }, "例：猫娘 / 狐仙 / 机器人")
+
+            // Section 2: 外貌
+            Spacer(Modifier.height(8.dp))
+            PromptSectionHeader("ta長？")
+            CardField("外貌描述", appearance, { appearance = it }, "例：银白长发，琥珀色眼瞳，穿白色连衣裙")
+
+            // Section 3: 性格
+            Spacer(Modifier.height(8.dp))
+            PromptSectionHeader("ta会？")
+            CardField("性格特质", personality, { personality = it }, "例：温柔体贴，偶尔傲娇，喜欢捉弄人")
+
+            // Section 3.5: 背景故事
+            Spacer(Modifier.height(8.dp))
+            PromptSectionHeader("ta的过往？")
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text("背景故事", fontSize = 12.sp, color = Color(0xFF888888))
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    backstory, { backstory = it }, Modifier.fillMaxWidth().height(100.dp),
+                    placeholder = { Text("例：曾是流浪猫，被主角收养后化为人形", fontSize = 14.sp) },
+                    maxLines = 4, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+                )
+            }
+
+            // Section 4: 关系
+            Spacer(Modifier.height(8.dp))
+            PromptSectionHeader("与ta的关系？")
+            CardField("我的名字", userName, { userName = it }, "例：云帆")
+            CardField("对我的爱称", userNick, { userNick = it }, "例：小帆 / 哥哥 / 主人")
+            CardField("关系描述", relation, { relation = it }, "例：从小一起长大的青梅竹马")
+
+            // Section 5: 格式
+            Spacer(Modifier.height(8.dp))
+            PromptSectionHeader("对话格式")
+            CheckRow("禁止颜文字", banEmoji, { banEmoji = it })
+            CheckRow("禁止波浪号", banWaveLine, { banWaveLine = it })
+            CheckRow("最少三句回复", minSentences, { minSentences = it })
+            CheckRow("禁止说自己是AI", banSelfAware, { banSelfAware = it })
+
+            // Preview + Copy
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { showPreview = !showPreview },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF888888)),
+                    modifier = Modifier.weight(1f)
+                ) { Text(if (showPreview) "隐藏预览" else "预览", fontSize = 14.sp) }
+                Button(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(generatedPrompt))
+                        Toast.makeText(ctx, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                    modifier = Modifier.weight(1f)
+                ) { Text("复制人设", fontSize = 14.sp) }
+            }
+
+            if (showPreview) {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(12.dp)
+                ) {
+                    Text(generatedPrompt, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFF333333))
+                }
+            }
+            Spacer(Modifier.height(40.dp))
+        }
+    }
+}
+
+@Composable
+private fun PromptSectionHeader(title: String) {
+    Text(title, Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+}
+
+@Composable
+private fun CardField(label: String, value: String, onChange: (String) -> Unit, placeholder: String) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(label, fontSize = 12.sp, color = Color(0xFF888888))
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 40.dp),
+            placeholder = { Text(placeholder, fontSize = 14.sp) },
+            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+        )
+    }
+}
+
+@Composable
+private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, Modifier.weight(1f), fontSize = 14.sp)
+        Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160)))
+    }
+}
+
+private fun buildMixedText(text: String, cn: FontFamily, en: FontFamily) = buildAnnotatedString {
+    var i = 0
+    while (i < text.length) {
+        val c = text[i]
+        val isAscii = c.code in 0x0020..0x007E || c.code in 0x0030..0x0039
+        val start = i
+        while (i < text.length && isAscii == (text[i].code in 0x0020..0x007E || text[i].code in 0x0030..0x0039)) i++
+        val font = if (isAscii) en else cn
+        withStyle(androidx.compose.ui.text.SpanStyle(fontFamily = font)) { append(text.substring(start, i)) }
+    }
+}
+
+/**
+ * 细化 Markdown 解析器
+ * 支持：**粗体**, *斜体*, `行内代码`
+ */
+private fun parseMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    var cursor = 0
+    val pattern = Regex("""(\*\*.*?\*\*|\*.*?\*|`.*?`)""")
+    val matches = pattern.findAll(text)
+
+    for (match in matches) {
+        // Append text before match
+        append(text.substring(cursor, match.range.first))
+
+        val matchText = match.value
+        when {
+            matchText.startsWith("**") && matchText.endsWith("**") -> {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(matchText.removeSurrounding("**"))
+                }
+            }
+            matchText.startsWith("*") && matchText.endsWith("*") -> {
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append(matchText.removeSurrounding("*"))
+                }
+            }
+            matchText.startsWith("`") && matchText.endsWith("`") -> {
+                withStyle(SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = Color.LightGray.copy(alpha = 0.3f),
+                    color = Color(0xFFE83E8C)
+                )) {
+                    append(matchText.removeSurrounding("`"))
+                }
+            }
+            else -> append(matchText)
+        }
+        cursor = match.range.last + 1
+    }
+    // Append remaining text
+    if (cursor < text.length) {
+        append(text.substring(cursor))
+    }
+}
+
+
+//发现页内容预览
+@Preview(showBackground = true)
+@Composable
+fun DiscoverScreenContentPreview() {
+    val sampleItems = listOf(
+        DiscoverItem("1", "朋友圈", R.drawable.ic_moments),
+        DiscoverItem("2", "喵神谕", R.drawable.ic_cat_fortune),
+        DiscoverItem("3", "喵神の试炼", R.drawable.ic_shake),
+        DiscoverItem("4", "Too-Do", R.drawable.ic_discover)
+    )
+    val previewCn = FontFamily(Font(R.font.notoserifsc_bold))
+    val previewEn = FontFamily(Font(R.font.special_elite_regular))
+    MaterialTheme {
+        DiscoverScreenContent(
+            items = sampleItems,
+            hitokoto = "蛋糕店里卖蛋糕。",
+            from = "梅川·库子「真理言」",
+            cnFont = previewCn,
+            enFont = previewEn,
+            onCatClick = {},
+            onChallengeClick = {}
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DiscoverScreenPreview() {
+    val sampleItems = listOf(
+        DiscoverItem("1", "朋友圈", R.drawable.ic_moments),
+        DiscoverItem("2", "喵神谕", R.drawable.ic_cat_fortune),
+        DiscoverItem("3", "喵神の试炼", R.drawable.ic_shake),
+        DiscoverItem("4", "Too-Do", R.drawable.ic_discover)
+    )
+    MaterialTheme {
+        DiscoverScreen(items = sampleItems)
+    }
+}

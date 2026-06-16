@@ -1,0 +1,55 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="128dp"
+    android:height="128dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- 猫头外轮廓 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="
+            M130,150
+            L195,200
+            Q256,180 317,200
+            L382,150
+            Q390,190 390,250
+            Q410,340 350,400
+            Q310,440 256,440
+            Q202,440 162,400
+            Q102,340 122,250
+            Q122,190 130,150 Z"/>
+
+    <!-- 中间圆 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="16"
+        android:pathData="
+            M256,180
+            A95,95 0 1,1 255.9,180"/>
+
+    <!-- 高光 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:pathData="
+            M205,235
+            Q180,260 180,300"/>
+
+    <!-- 底部连接 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:pathData="
+            M205,385
+            Q256,405 307,385"/>
+
+</vector>
