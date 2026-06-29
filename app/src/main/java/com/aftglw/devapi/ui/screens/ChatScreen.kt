@@ -47,7 +47,6 @@ import com.aftglw.devapi.MoodInfo
 import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.MemoryStore
 import com.aftglw.devapi.model.ChatMessage
-import java.net.URL
 import com.aftglw.devapi.network.AiServiceFactory
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -99,19 +98,11 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                     val msgs = saved.takeLast(20)
                     val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
                     val text = msgs.joinToString("\n") { "${if (it.second) "我" else name}：${it.first}" }
-                    val apiKey = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getString("ai_api_key", "") ?: ""
-                    if (apiKey.isNotBlank()) {
-                        try {
-                            val conn = URL("https://api.deepseek.com/v1/chat/completions").openConnection() as java.net.HttpURLConnection
-                            conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Authorization", "Bearer $apiKey")
-                            conn.doOutput = true; conn.connectTimeout = 15000; conn.readTimeout = 15000
-                            val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"概括这段对话的核心内容和情绪，像日记一样写两句话。"},{"role":"user","content":"$text"}]}"""
-                            java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                            val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
-                            val summary = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim() ?: ""
-                            if (summary.isNotBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                        } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */ /* 非关键，API 失败不影响聊天 */ /* 非关键，API 失败不影响聊天 */
-                    }
+                    try {
+                        val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
+                            .sendMessage(emptyList(), text, "概括这段对话的核心内容和情绪，像日记一样写两句话。")
+                        if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
+                    } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */
                 }
             }
         }
@@ -146,19 +137,11 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
             bubbles.removeAll(old)
             val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
             kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                val apiKey = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getString("ai_api_key", "") ?: ""
-                if (apiKey.isNotBlank()) {
-                    try {
-                        val conn = URL("https://api.deepseek.com/v1/chat/completions").openConnection() as java.net.HttpURLConnection
-                        conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Authorization", "Bearer $apiKey")
-                        conn.doOutput = true; conn.connectTimeout = 15000; conn.readTimeout = 15000
-                        val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"用两句话概括这段对话。"},{"role":"user","content":"$text"}]}"""
-                        java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                        val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
-                        val summary = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim() ?: ""
-                        if (summary.isNotBlank()) com.aftglw.devapi.MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                    } catch (_: Exception) {}
-                }
+                try {
+                    val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
+                        .sendMessage(emptyList(), text, "用两句话概括这段对话。")
+                    if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
+                } catch (_: Exception) {} /* 非关键 */
             }
         }
         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) })
@@ -170,18 +153,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
             val recent = bubbles.takeLast(10).joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
             kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val conn = URL("https://api.deepseek.com/v1/chat/completions").openConnection() as java.net.HttpURLConnection
-                    val apiKey = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getString("ai_api_key", "") ?: ""
-                    if (apiKey.isNotBlank()) {
-                        conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json")
-                        conn.setRequestProperty("Authorization", "Bearer $apiKey"); conn.doOutput = true
-                        conn.connectTimeout = 15000; conn.readTimeout = 15000
-                        // 一次调用同时提取事实 + 人设
-                        val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"从对话中提取信息，按以下格式输出：\n---FACTS---\n3-5条关于对方的事实和偏好，每行一条\n---SUMMARY---\n用一句话概括对方的聊天偏好和习惯。例如：'对方喜欢深夜聊天，回复要简短。'"},{"role":"user","content":"$recent"}]}"""
-                        java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                        val resp = conn.inputStream.bufferedReader().use { it.readText() }
-                        conn.disconnect()
-                        val full = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "") ?: ""
+                    val full = com.aftglw.devapi.network.AiServiceFactory.getService()
+                        .sendMessage(emptyList(), recent, "从对话中提取信息，按以下格式输出：\n---FACTS---\n3-5条关于对方的事实和偏好，每行一条\n---SUMMARY---\n用一句话概括对方的聊天偏好和习惯。例如：'对方喜欢深夜聊天，回复要简短。'")
+                    if (!full.isNullOrBlank()) {
                         val parts = full.split("---SUMMARY---")
                         val facts = parts.getOrElse(0) { "" }.replace("---FACTS---", "").trim()
                         val summary = parts.getOrElse(1) { "" }.trim()
@@ -191,7 +165,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                                 .putString("persona_optimized_$name", summary).apply()
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {} /* 非关键 */
             }
         }
     }
@@ -204,21 +178,14 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
             val all = bubbles.joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
             kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val apiKey = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getString("ai_api_key", "") ?: ""
-                    if (apiKey.isNotBlank()) {
-                        val conn = URL("https://api.deepseek.com/v1/chat/completions").openConnection() as java.net.HttpURLConnection
-                        conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Authorization", "Bearer $apiKey")
-                        conn.doOutput = true; conn.connectTimeout = 15000; conn.readTimeout = 15000
-                        val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"你是对话分析师。分析这段对话中用户的说话特点：语气偏好、常用词汇、话题倾向、回复长度偏好、什么情况下会沉默或生气。输出一句话总结，不要超过40个字。"},{"role":"user","content":"$all"}]}"""
-                        java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                        val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
-                        val text = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "") ?: ""
-                        if (text.isNotBlank()) {
+                    try {
+                        val text = com.aftglw.devapi.network.AiServiceFactory.getService()
+                            .sendMessage(emptyList(), all, "你是对话分析师。分析这段对话中用户的说话特点：语气偏好、常用词汇、话题倾向、回复长度偏好、什么情况下会沉默或生气。输出一句话总结，不要超过40个字。")
+                        if (!text.isNullOrBlank()) {
                             ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
                                 .putString("persona_dialogue_traits_$name", text).apply()
                         }
-                    }
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {} /* 非关键 */
             }
         }
     }
@@ -608,6 +575,7 @@ private fun ChatInfoPage(
             InfoRow("AI 模型", model)
             InfoRow("API 地址", apiUrl)
             InfoRow("API 密钥", if (hasKey) "已配置 🔒" else "未配置")
+            InfoRow("通信协议", com.aftglw.devapi.network.AiServiceFactory.getProtocolName())
             InfoRow("消息总数", "$msgCount 条")
 
 
@@ -751,21 +719,14 @@ private fun ChatInfoPage(
                             val msgs = ChatHistory.load(ctx, name).takeLast(30)
                             if (msgs.isEmpty()) return@launch
                             val text = msgs.joinToString("\n") { "${if (it.second) "我" else name}：${it.first}" }
-                            val apiKey = prefs.getString("ai_api_key", "") ?: ""
-                            if (apiKey.isBlank()) return@launch
                             try {
-                                val conn = java.net.URL("https://api.deepseek.com/v1/chat/completions").openConnection() as java.net.HttpURLConnection
-                                conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Authorization", "Bearer $apiKey")
-                                conn.doOutput = true; conn.connectTimeout = 15000; conn.readTimeout = 15000
-                                val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"用两句话概括最近的聊天内容，像日记一样自然。"},{"role":"user","content":"$text"}]}"""
-                                java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                                val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
-                                val summary = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim() ?: ""
-                                if (summary.isNotBlank()) {
+                                val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
+                                    .sendMessage(emptyList(), text, "用两句话概括最近的聊天内容，像日记一样自然。")
+                                if (!summary.isNullOrBlank()) {
                                     val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-                                    com.aftglw.devapi.MemoryStore.save(ctx, "$today $summary", "diary:$name")
+                                    MemoryStore.save(ctx, "$today $summary", "diary:$name")
                                 }
-                            } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */
+                            } catch (_: Exception) {} /* 非关键 */
                         }
                     }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(36.dp)) {
                         Text("生成今日日记", fontSize = 13.sp)

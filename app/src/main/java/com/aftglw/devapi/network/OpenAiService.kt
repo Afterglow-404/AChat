@@ -8,7 +8,7 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
-class RealAiService(private val context: Context) : AiService {
+class OpenAiService(private val context: Context) : AiService {
 
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String): String? {
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
