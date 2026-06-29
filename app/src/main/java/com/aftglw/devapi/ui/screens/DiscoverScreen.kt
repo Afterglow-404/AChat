@@ -28,7 +28,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import kotlinx.coroutines.delay
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -69,12 +68,9 @@ import com.aftglw.devapi.ui.utils.InteractiveHighlight
 import com.aftglw.devapi.viewmodel.TodoItem
 import com.aftglw.devapi.viewmodel.TodoViewModel
 import com.kyant.shapes.Capsule
-import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
 import androidx.compose.ui.tooling.preview.Preview
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlinx.coroutines.delay
 
 @Composable
 fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {

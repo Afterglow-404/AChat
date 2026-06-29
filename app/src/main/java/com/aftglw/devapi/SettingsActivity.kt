@@ -39,7 +39,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp

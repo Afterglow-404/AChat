@@ -81,7 +81,7 @@ class RealAiService(private val context: Context) : AiService {
                 reply
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            
             null
         }
     }

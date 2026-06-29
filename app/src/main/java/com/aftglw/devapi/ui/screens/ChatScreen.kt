@@ -110,7 +110,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                             val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
                             val summary = org.json.JSONObject(resp).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim() ?: ""
                             if (summary.isNotBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                        } catch (_: Exception) {}
+                        } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */ /* 非关键，API 失败不影响聊天 */ /* 非关键，API 失败不影响聊天 */
                     }
                 }
             }
@@ -765,7 +765,7 @@ private fun ChatInfoPage(
                                     val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
                                     com.aftglw.devapi.MemoryStore.save(ctx, "$today $summary", "diary:$name")
                                 }
-                            } catch (_: Exception) {}
+                            } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */
                         }
                     }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(36.dp)) {
                         Text("生成今日日记", fontSize = 13.sp)

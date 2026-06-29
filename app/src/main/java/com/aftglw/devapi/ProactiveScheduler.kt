@@ -12,7 +12,7 @@ class ProactiveReceiver : BroadcastReceiver() {
         val result = goAsync()
         Thread {
             StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().permitAll().build())
-            try { ProactiveScheduler.runOnce(context) } catch (e: Exception) { android.util.Log.e("Proactive", "runOnce", e) }
+            try { ProactiveScheduler.runOnce(context) } catch (e: Exception) {  }
             result.finish()
         }.start()
     }
@@ -81,7 +81,7 @@ object ProactiveScheduler {
                 sendNotif(context, chat, msg)
                 prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
             }
-        } catch (e: Exception) { android.util.Log.e("ProactiveScheduler", "runOnce", e) }
+        } catch (e: Exception) {  }
     }
 
     private fun generateMessage(ctx: Context, chatName: String): String {
