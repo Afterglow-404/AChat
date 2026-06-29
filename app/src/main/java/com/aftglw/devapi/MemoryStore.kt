@@ -32,15 +32,17 @@ object MemoryStore {
     fun init(context: Context) { if (db == null) db = MemoryDB(context).writableDatabase }
 
     fun embed(ctx: Context, text: String): FloatArray? {
-        val apiKey = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
-            .getString("ai_api_key", "") ?: return null
+        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+        val apiKey = prefs.getString("ai_api_key", "") ?: return null
+        val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: return null
+        val embedModel = prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
         return try {
             android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().permitAll().build())
-            val conn = URL("https://api.deepseek.com/v1/embeddings").openConnection() as HttpURLConnection
+            val conn = URL("$baseUrl/embeddings").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Authorization", "Bearer $apiKey")
             conn.doOutput = true; conn.connectTimeout = 10000; conn.readTimeout = 10000
-            val body = """{"model":"text-embedding-v2","input":${JSONObject.quote(text)}}"""
+            val body = """{"model":"$embedModel","input":${JSONObject.quote(text)}}"""
             OutputStreamWriter(conn.outputStream).use { it.write(body) }
             val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
             val arr = JSONObject(resp).optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")

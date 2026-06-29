@@ -97,6 +97,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var physicsEnabled by remember { mutableStateOf(prefs.getBoolean("physics_enabled", true)) }
     var customFont by remember { mutableStateOf(initialCustom) }
     var longContextMode by remember { mutableStateOf(prefs.getBoolean("long_context_mode", true)) }
+    var embeddingModel by remember { mutableStateOf(prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2") }
     var showTimestamps by remember { mutableStateOf(prefs.getBoolean("show_timestamps", true)) }
     var hitokotoType by remember { mutableStateOf(prefs.getString("hitokoto_type", "") ?: "") }
     var moodEnabled by remember { mutableStateOf(prefs.getBoolean("mood_enabled", false)) }
@@ -172,7 +173,8 @@ private fun SettingsRoot(onBack: () -> Unit) {
             model, { model = it; prefs.edit().putString("ai_model", it).apply() },
             mockReplies, { mockReplies = it; prefs.edit().putString("mock_replies", it).apply() },
             mockDelay, { mockDelay = it; prefs.edit().putString("mock_delay_ms", it).apply() },
-            longContextMode, { longContextMode = it; prefs.edit().putBoolean("long_context_mode", it).apply() }
+            longContextMode, { longContextMode = it; prefs.edit().putBoolean("long_context_mode", it).apply() },
+            embeddingModel, { embeddingModel = it; prefs.edit().putString("embedding_model", it).apply() }
         )
         is SettingsPage.ManageRoles -> ManageRolesPage(
             onBack = goBack,
@@ -348,7 +350,8 @@ private fun AiApiPage(
     model: String, onModelChange: (String) -> Unit,
     mockReplies: String, onMockRepliesChange: (String) -> Unit,
     mockDelay: String, onMockDelayChange: (String) -> Unit,
-    longContext: Boolean, onLongContextChange: (Boolean) -> Unit
+    longContext: Boolean, onLongContextChange: (Boolean) -> Unit,
+    embeddingModel: String, onEmbeddingModelChange: (String) -> Unit
 ) {
     SubPageScaffold("AI 接口", onBack) {
         Spacer(Modifier.height(8.dp))
@@ -356,6 +359,7 @@ private fun AiApiPage(
         PasswordRow("API Key", "sk-1145141919810", apiKey, onApiKeyChange)
         TextFieldRow("模型名", "gpt-114514", model, onModelChange)
         ToggleRow("长上下文模式", "DeepSeek/GPT 等长上下文模型无需重注入提示，关闭可节省小模型 tokens", longContext, onLongContextChange)
+        TextFieldRow("Embedding 模型", "按供应商填写，如 text-embedding-v2", embeddingModel, onEmbeddingModelChange)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SettingsMainHeader("离线回复（未接入 API 时生效）")
         TextFieldRow("回复词库", "用 | 分隔，如：好的|行|不行|...", mockReplies, onMockRepliesChange)
