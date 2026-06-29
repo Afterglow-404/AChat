@@ -35,7 +35,13 @@ object MemoryStore {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("ai_api_key", "") ?: return null
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: return null
-        val embedModel = prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
+        // 从 URL 自动推断 embedding 模型名
+        val embedModel = when {
+            baseUrl.contains("deepseek", ignoreCase = true) -> "text-embedding-v2"
+            baseUrl.contains("openai", ignoreCase = true) -> "text-embedding-3-small"
+            baseUrl.contains("dashscope", ignoreCase = true) || baseUrl.contains("aliyun", ignoreCase = true) -> "text-embedding-v1"
+            else -> prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
+        }
         return try {
             android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().permitAll().build())
             val conn = URL("$baseUrl/embeddings").openConnection() as HttpURLConnection
