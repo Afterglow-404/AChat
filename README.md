@@ -7,9 +7,10 @@
 
 ## 截图
 
-<div align="center">
+<p align="center">
   <img src="docs/logo.png" width="128" alt="AChat Logo"/>
-</div>
+</p>
+<p align="center"><strong>AChat</strong><br/>一个 Android 端的 AI 陪伴聊天应用</p>
 
 ## 功能
 
