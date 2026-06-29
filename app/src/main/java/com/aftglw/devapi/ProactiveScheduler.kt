@@ -39,7 +39,8 @@ object ProactiveScheduler {
     }
 
     fun runOnce(context: Context) {
-        StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().permitAll().build())
+        // 确保网络请求在 IO 线程
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
@@ -81,7 +82,8 @@ object ProactiveScheduler {
                 sendNotif(context, chat, msg)
                 prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
             }
-        } catch (e: Exception) {  }
+        } catch (_: Exception) {}
+        }
     }
 
     private fun generateMessage(ctx: Context, chatName: String): String {

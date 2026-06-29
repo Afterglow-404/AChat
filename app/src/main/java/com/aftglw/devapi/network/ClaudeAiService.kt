@@ -58,9 +58,7 @@ class ClaudeAiService(private val context: Context) : AiService {
             conn.disconnect()
 
             val json = JSONObject(response)
-            val reply = json.optJSONObject("content")?.optString("text", "")
-                ?: json.optJSONArray("content")?.optJSONObject(0)?.optString("text", "")
-                ?: json.optString("text", "")
+            val reply = json.optJSONArray("content")?.optJSONObject(0)?.optString("text", "")
             if (reply.isNotBlank()) {
                 prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).apply()
                 prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()

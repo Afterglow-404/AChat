@@ -43,7 +43,6 @@ object MemoryStore {
             else -> prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
         }
         return try {
-            android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().permitAll().build())
             val conn = URL("$baseUrl/embeddings").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Authorization", "Bearer $apiKey")
