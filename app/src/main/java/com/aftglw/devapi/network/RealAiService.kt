@@ -69,7 +69,7 @@ class RealAiService(private val context: Context) : AiService {
             val choices = json.getJSONArray("choices")
             if (choices.length() > 0) {
                 val reply = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
-                // Track approximate tokens
+                
                 val usage = json.optJSONObject("usage")
                 if (usage != null) {
                     prefs.edit().putInt("last_tokens_in", usage.optInt("prompt_tokens", 0)).apply()

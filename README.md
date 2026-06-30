@@ -7,7 +7,9 @@
 
 ## 截图
 
-（待添加）
+<div align="center">
+  <img src="docs/logo.png" width="128" alt="AChat Logo"/>
+</div>
 
 ## 功能
 

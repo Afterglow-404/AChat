@@ -88,7 +88,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     LaunchedEffect(Unit) {
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
-        // 自动归档：每次打开检查未归档片段，用最近 20 条消息生成日记
+        // 自动归档：未归档时用最近 20 条生成日记
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             val saved = ChatHistory.load(ctx, name)
             if (saved.size >= 5) {
@@ -117,7 +117,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         }
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", name).apply()
-        // 模型加载丢到 IO 线程，不阻塞 UI
+        // 模型丢 IO 线程，不阻塞 UI
         launch(Dispatchers.IO) {
             if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                     .getBoolean("mood_enabled", false)) {
@@ -137,7 +137,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     }
 
     fun save() {
-        // 超过 60 条时，将最旧的 20 条归档为日记后清理
+        // 超过 60 条时归档最旧 20 条
         val isArchiveEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
             .getBoolean("auto_archive_$name", true)
         if (bubbles.size > 60 && isArchiveEnabled) {
@@ -164,7 +164,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) })
     }
 
-    // 长时记忆 + 人设浓缩：每 10 轮提取一次
+        // 长时记忆 + 人设浓缩：每 10 轮提取
     LaunchedEffect(bubbles.size / 10) {
         if (bubbles.size >= 10 && bubbles.size % 10 == 0) {
             val recent = bubbles.takeLast(10).joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
@@ -176,7 +176,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                         conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json")
                         conn.setRequestProperty("Authorization", "Bearer $apiKey"); conn.doOutput = true
                         conn.connectTimeout = 15000; conn.readTimeout = 15000
-                        // 一次 API 调用同时提取事实 + 人设浓缩
+                        // 一次调用同时提取事实 + 人设
                         val body = """{"model":"deepseek-chat","messages":[{"role":"system","content":"从对话中提取信息，按以下格式输出：\n---FACTS---\n3-5条关于对方的事实和偏好，每行一条\n---SUMMARY---\n用一句话概括对方的聊天偏好和习惯。例如：'对方喜欢深夜聊天，回复要简短。'"},{"role":"user","content":"$recent"}]}"""
                         java.io.OutputStreamWriter(conn.outputStream).use { it.write(body) }
                         val resp = conn.inputStream.bufferedReader().use { it.readText() }
@@ -196,7 +196,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         }
     }
 
-    // 对话优化：每 20 轮分析用户说话特点
+    // 对话优化：每 20 轮
     LaunchedEffect(bubbles.size / 20) {
         val enabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
             .getBoolean("dialogue_optimization_$name", false)
@@ -223,12 +223,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         }
     }
 
-    // 注入相关记忆（异步检索）
+    
     var memoryContext by remember { mutableStateOf("") }
     LaunchedEffect(bubbles.size / 5) {
         withContext(Dispatchers.IO) {
             val last = if (bubbles.isNotEmpty()) bubbles.last().text else ""
-            // 情绪驱动检索：根据当前情绪加权查询词
+            // 情绪驱动检索
             val moodQuery = when (com.aftglw.devapi.MoodDetector.lastMood) {
                 "悲伤" -> "$last 需要安慰关心"
                 "害怕" -> "$last 安全感安抚"
@@ -242,20 +242,20 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         }.also { memoryContext = it }
     }
 
-    // 人设浓缩指令 + 记忆（只取最相关 1 条）
+    
     val optimized = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_optimized_$name", "") ?: ""
     val optimizedBlock = if (optimized.isNotBlank()) "\n\n【聊天偏好】$optimized" else ""
-    // 对话优化：用户说话特点分析
+    
     val traits = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_dialogue_traits_$name", "") ?: ""
     val traitsBlock = if (traits.isNotBlank()) "\n\n【用户特点】$traits" else ""
     val memoryBlock = if (memoryContext.isNotBlank()) "\n\n【关于对方的记忆】\n$memoryContext" else ""
 
-    // 时间感知（使用 NTP 校准后的时间）
+    
     val timeBlock = "\n\n【时间】${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.TimeService.getTimeOfDay(ctx)}）"
 
-    // 最近日记 → 直接注入为角色的自然记忆（不标记为"日记"）
+    
     val recentDiary = com.aftglw.devapi.MemoryStore.search(ctx, "最近", 1, "diary:$name")
     val diaryMemoryBlock = recentDiary.firstOrNull()?.let {
         val content = it.text.drop(11).take(80) // 去掉日期前缀，取正文
@@ -301,17 +301,17 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                 bubbles.add(Bubble(text, true))
                 history.add(ChatMessage("user", text))
                 save()
-                // 记录最后活跃时间
+                
                 ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
                     .putLong("last_active_$name", System.currentTimeMillis()).apply()
-                // 撤回机制：检测到用户回复时判断是否拒绝主动消息
+                // 撤回机制
                 val proPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                 val lastProactive = proPrefs.getLong("proactive_last_$name", 0L)
                 if (lastProactive > 0 && System.currentTimeMillis() - lastProactive < 3600000) {
                     val rejectWords = listOf("别发了","别烦我","别吵","别说了","不要发","别打扰","你好烦","好烦啊","能不能别","够了别说了")
                     val rejected = rejectWords.any { text.contains(it) }
                     if (rejected) {
-                        // 明确拒绝 → 降频 + 临时关闭 24h
+                        
                         val curLimit = proPrefs.getInt("proactive_daily_limit_$name", 3)
                         proPrefs.edit()
                             .putInt("proactive_daily_limit_$name", maxOf(1, curLimit - 1))
@@ -325,7 +325,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                         proPrefs.edit().putBoolean("proactive_need_care_$name", true).apply()
                     }
                 }
-                // 全局协程，退出界面后仍可完成回复
+                
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
                     val moodEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                         .getBoolean("mood_enabled", false)
@@ -334,9 +334,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                     val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
                     val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
                     if (reply != null) {
-                        // 先存持久化（确保不丢失）
+                        
                         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
-                        // UI 还在的话也更新
+                        
                         withContext(Dispatchers.Main) {
                             bubbles.add(Bubble(reply, false))
                             history.add(ChatMessage("assistant", reply))
@@ -474,7 +474,7 @@ fun ChatContent(
                                 Column {
                                     Text(b.text, fontSize = 15.sp)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // 情绪可视化：需开启 + 情绪模型在线
+                                        // 情绪可视化
                                         val moodVis = prefs.getBoolean("mood_visualization", false) && prefs.getBoolean("mood_enabled", false)
                                         if (b.isMe && b == bubbles.lastOrNull() && moodVis) {
                                             val moodEmoji = when (com.aftglw.devapi.MoodDetector.lastMood) {
