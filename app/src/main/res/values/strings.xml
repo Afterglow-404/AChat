@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">api测试</string>
+    <string name="app_name">AChat</string>
     <string name="tab_chats">对话</string>
     <string name="tab_contacts">联系人</string>
     <string name="tab_discover">工具</string>
