@@ -1,5 +1,8 @@
 # AChat
 
+> 代码由 AI 辅助生成，功能设计来自个人经历。
+> 代码可读性一般，架构仍在迭代中。
+
 一个 Android 端的 AI 陪伴聊天应用。基于 JetBrains Compose Multiplatform 构建，支持情绪感知、好感度系统、RAG 记忆、主动关怀等功能。
 
 ## 截图
