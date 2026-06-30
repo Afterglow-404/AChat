@@ -177,7 +177,6 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         if (enabled && bubbles.size >= 20 && bubbles.size % 20 == 0) {
             val all = bubbles.joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
             kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                try {
                     try {
                         val text = com.aftglw.devapi.network.AiServiceFactory.getService()
                             .sendMessage(emptyList(), all, "你是对话分析师。分析这段对话中用户的说话特点：语气偏好、常用词汇、话题倾向、回复长度偏好、什么情况下会沉默或生气。输出一句话总结，不要超过40个字。")

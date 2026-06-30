@@ -13,7 +13,6 @@ class ProactiveReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val result = goAsync()
         Thread {
-            StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().permitAll().build())
             try { ProactiveScheduler.runOnce(context) } catch (e: Exception) {  }
             result.finish()
         }.start()
