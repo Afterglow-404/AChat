@@ -5,7 +5,9 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.StrictMode
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class ProactiveReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
