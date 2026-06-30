@@ -67,7 +67,8 @@ Apache-2.0 License
 
 ## 致谢
 
-- [EmotionTalk](https://github.com/NKU-HLT/EmotionTalk) — 情绪训练数据集
+- [EmotionTalk](https://github.com/NKU-HLT/EmotionTalk) — 情绪模型训练数据
 - [ex-skill](https://github.com/perkfly/ex-skill) — 角色导入格式参考
 - [LingChat](https://github.com/SlimeBoyOwO/LingChat) — 设计思路参考
-- [Operit](https://github.com/AAswordman/Operit) — 架构参考
+- [Operit](https://github.com/AAswordman/Operit) — 架构与功能参考
+- [SillyTavern](https://github.com/SillyTavern/SillyTavern) — 角色卡/世界书功能参考

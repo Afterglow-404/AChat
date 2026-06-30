@@ -9,7 +9,7 @@ local.properties
 *.log
 *.data
 *.jsonl
-app/src/main/assets/model.onnx
+# app/src/main/assets/model.onnx — tracked via Git LFS
 emotion_model_cpu/
 emotion_model_7class/
 tokenizer_out/
