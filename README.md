@@ -1,28 +1,36 @@
-# AChat
+<p align="center">
+  <img src="docs/logo.png" width="128" alt="AChat Logo"/>
+</p>
+<p align="center"><strong>AChat</strong><br/>一个 AI 聊天应用</p>
 
-> 代码由 AI 辅助生成，功能设计来自个人经历。
-> 代码可读性一般，架构仍在迭代中。
+> 代码由 AI 生成，功能设计参考了类似项目。
 
-一个 Android 端的 AI 陪伴聊天应用。基于 JetBrains Compose Multiplatform 构建，支持情绪感知、好感度系统、RAG 记忆、主动关怀等功能。
+> 代码可读性一般，欢迎指指点点。
+
+一个 Android 端的 AI 聊天应用。支持情绪感知、好感度系统、RAG 记忆、主动关怀等功能。
 
 ## 截图
 
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="AChat Logo"/>
+  <img src="screenshots/ChatsScreen.jpg" width="200" alt="对话列表"/>
+  <img src="screenshots/DiscoverScreen.jpg" width="200" alt="发现页面"/>
+  <img src="screenshots/MeScreen.jpg" width="200" alt="我的页面"/>
 </p>
-<p align="center"><strong>AChat</strong><br/>一个 Android 端的 AI 陪伴聊天应用</p>
 
 ## 功能
 
-- **情绪感知** — 本地 ONNX 7 类情绪模型实时检测对话情绪
-- **好感度系统** — 7 级关系，好感度动态影响 AI 语气
+- **情绪感知** — 本地 7 类情绪模型检测用户对话情绪
+- **好感度系统** — 7 级关系，好感度影响 AI 回复
 - **主动关怀** — AI 闲时主动问候，支持多种触发条件
-- **RAG 长期记忆** — DeepSeek embedding + SQLite 向量检索
-- **情绪可视化** — 消息旁显示情绪表情
-- **时间感知** — NTP 校准 + 时区选择
-- **导入 Skill** — 支持 ex-skill 格式导入角色人设
+- **情绪可视化** — 用户消息旁显示情绪表情
+- **时间感知** — 联网校准
+- **导入 Skill** — 支持 ex-skill 格式导入角色人设，未来支持酒馆角色卡
 
-## 快速开始
+## 注意
+
+AChat 使用了 kyant0 的 AndroidLiquidGlass 库，建议使用 **Android 12 以上**。
+
+## 我要玩！
 
 ### 1. 下载
 
@@ -32,43 +40,38 @@
 
 进入设置 → AI 接口，填写以下信息：
 
-| 字段 | 推荐值 |
+| 字段 |  |
 |---|---|
-| API 地址 | `https://api.deepseek.com/v1` |
-| API Key | 你的 DeepSeek API 密钥 |
-| 模型名 | `deepseek-chat` 或 `deepseek-reasoner` |
+| API 地址 | `https://api.cat.com/v1` |
+| API Key | 你的 API 密钥 |
+| 模型名 | 名字 |
 
-DeepSeek API 密钥可在 [platform.deepseek.com](https://platform.deepseek.com) 获取。
+DeepSeek API 可在 [这里](https://platform.deepseek.com) 获取。
+
+ChatGPT API 在 [那里](https://platform.openai.com/api-keys)。
+
+Claude API 在 [哪里](https://console.anthropic.com/)。
+
+
 
 ### 3. 开始聊天
 
 创建一个对话角色，即可开始聊天。
 
-## 技术栈
-
-- **UI**: JetBrains Compose Multiplatform + Material3 + LiquidGlass
-- **情绪模型**: ONNX Runtime (chinese-roberta-wwm-ext, 7 类)
-- **RAG**: DeepSeek text-embedding-v2 + SQLite + 余弦检索
-- **AI 对话**: DeepSeek V4-Flash API (OpenAI 兼容协议)
-- **主动关怀**: AlarmManager + BroadcastReceiver
-- **数据存储**: SharedPreferences + SQLite
-- **构建**: Gradle 9.4.1, compileSdk 37, minSdk 30
-
-## 隐私说明
-
-- 聊天记录存储在本地 SharedPreferences，不上传任何服务器
-- 情绪分析在本地 ONNX 模型完成，数据不出手机
-- API 调用直接连接 DeepSeek 服务端，不经过第三方中转
-- 应用不收集任何用户数据
-
 ## 许可证
 
-Apache-2.0 License
+基于 Apache-2.0 开源：
+- ✅ 你可以自由使用、修改、分发
+- ✅ 可以用于个人或商业项目
+- ✅ 修改后可以闭源发布
+- ❗ 需保留原始版权声明和免责声明
 
 ## 致谢
 
+- [Reasonix](https://github.com/esengine/deepseek-reasonix) — 给我省了很多钱 :)
 - [EmotionTalk](https://github.com/NKU-HLT/EmotionTalk) — 情绪模型训练数据
 - [ex-skill](https://github.com/perkfly/ex-skill) — 角色导入格式参考
 - [LingChat](https://github.com/SlimeBoyOwO/LingChat) — 设计思路参考
 - [Operit](https://github.com/AAswordman/Operit) — 架构与功能参考
 - [SillyTavern](https://github.com/SillyTavern/SillyTavern) — 角色卡/世界书功能参考
+- [LiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) — 液态玻璃效果
