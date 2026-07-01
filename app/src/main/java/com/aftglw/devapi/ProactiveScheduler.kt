@@ -77,7 +77,7 @@ object ProactiveScheduler {
                 }
                 if (!shouldTrigger) continue
                 val msg = generateMessage(context, chat)
-                if (msg == "在干嘛呢？") continue  // fallback 不计入
+                if (msg.isBlank() || msg == "在干嘛呢？") continue  // 跳过
                 val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
                 ChatHistory.save(context, chat, ChatHistory.load(context, chat) + Triple(msg, false, now))
                 sendNotif(context, chat, msg)
@@ -88,6 +88,10 @@ object ProactiveScheduler {
     }
 
     private fun generateMessage(ctx: Context, chatName: String): String {
+        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+        val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
+        if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
+        // 以下为原有的自定义规则模式
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         if (apiKey.isBlank()) return "在干嘛呢？"
@@ -118,6 +122,52 @@ object ProactiveScheduler {
             com.aftglw.devapi.network.AiServiceFactory.getService()
                 .sendMessage(msgHistory, "自然地开启聊天", systemPrompt) ?: "在干嘛呢？"
         } catch (_: Exception) { "在干嘛呢？" }
+    }
+
+    private fun generateMessageAiDriven(ctx: Context, chatName: String): String {
+        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+        val persona = loadPersona(ctx, chatName)
+        val chatHistory = ChatHistory.load(ctx, chatName)
+        val lastMsg = chatHistory.lastOrNull()?.first ?: ""
+        val hoursSince = if (chatHistory.isNotEmpty()) {
+            val lastTime = prefs.getLong("last_active_$chatName", 0L)
+            if (lastTime > 0) (System.currentTimeMillis() - lastTime) / 3600000 else 0
+        } else 0
+        val affinity = AffinityManager.getAffinity(prefs, chatName).toInt()
+        val level = AffinityManager.getLevel(affinity.toFloat())
+        val longContext = prefs.getBoolean("proactive_long_history_$chatName", false)
+        val needCare = prefs.getBoolean("proactive_need_care_$chatName", false)
+        if (needCare) prefs.edit().putBoolean("proactive_need_care_$chatName", false).apply()
+        val memo = MemoryStore.search(ctx, chatName, 2).joinToString("\n") { "- ${it.text}" }
+
+        val prompt = buildString {
+            appendLine("你在考虑要不要主动找对方聊天。请看以下信息：")
+            if (longContext && chatHistory.size >= 3) {
+                appendLine("\n【最近对话】")
+                chatHistory.takeLast(6).forEach { appendLine("  ${if (it.second) "对方" else "你"}：${it.first}") }
+            } else {
+                appendLine("\n距上次聊天：${hoursSince}小时")
+                appendLine("对方上一条消息：$lastMsg")
+                appendLine("你们的关系：${level.name}")
+                if (memo.isNotEmpty()) appendLine("记忆片段：$memo")
+            }
+            if (needCare) appendLine("\n（对方似乎需要关心）")
+            if (persona.isNotBlank()) appendLine("\n你的人物设定：$persona")
+            appendLine("\n如果你觉得现在适合主动说话，按以下格式回复：")
+            appendLine("决定：发")
+            appendLine("消息：[你想说的话]")
+            appendLine("\n如果觉得不适合，只回复：决定：不发")
+        }
+
+        try {
+            val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
+                .sendMessage(emptyList(), prompt, "你是角色本人。")
+            if (reply != null && reply.contains("决定：发")) {
+                val msg = reply.substringAfter("消息：").trim().take(100)
+                return if (msg.isNotBlank()) msg else "在干嘛呢？"
+            }
+        } catch (_: Exception) {}
+        return ""  // 返回空 = 跳过本次
     }
 
     private fun loadPersona(ctx: Context, chatName: String): String {

@@ -560,6 +560,24 @@ private fun ChatInfoPage(
                         }, valueRange = 0f..1f, steps = 0, modifier = Modifier.width(120.dp))
                         Text(if (idleHours == 0) "立即" else "${idleHours}h", fontSize = 13.sp)
                     }
+                    var triggerMode by remember { mutableStateOf(prefs.getString("proactive_trigger_mode_$name", "custom") ?: "custom") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("触发方式", Modifier.weight(1f), fontSize = 13.sp, color = Color.Gray)
+                        androidx.compose.material3.RadioButton(selected = triggerMode == "custom", onClick = { triggerMode = "custom"; prefs.edit().putString("proactive_trigger_mode_$name", "custom").apply() })
+                        Text("自定义", fontSize = 13.sp)
+                        Spacer(Modifier.width(8.dp))
+                        androidx.compose.material3.RadioButton(selected = triggerMode == "ai", onClick = { triggerMode = "ai"; prefs.edit().putString("proactive_trigger_mode_$name", "ai").apply() })
+                        Text("AI决定", fontSize = 13.sp)
+                    }
+                    if (triggerMode == "ai") {
+                        var longHistory by remember { mutableStateOf(prefs.getBoolean("proactive_long_history_$name", false)) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("长历史模式", Modifier.weight(1f), fontSize = 14.sp)
+                            Text("AI 读完整对话", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
+                            Switch(checked = longHistory, onCheckedChange = { v -> longHistory = v; prefs.edit().putBoolean("proactive_long_history_$name", v).apply() })
+                        }
+                    }
+                    if (triggerMode == "custom") {
                     var checkMode by remember { mutableStateOf(prefs.getString("proactive_check_mode_$name", "random") ?: "random") }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("检查模式", Modifier.weight(1f), fontSize = 13.sp, color = Color.Gray)
@@ -595,6 +613,7 @@ private fun ChatInfoPage(
                             }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160)))
                             Text(triggerLabels[i], fontSize = 13.sp)
                         }
+                    }
                     }
                 }
             }
