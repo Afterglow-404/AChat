@@ -95,7 +95,6 @@ object ProactiveScheduler {
         val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
         if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
         // 以下为原有的自定义规则模式
-        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         if (apiKey.isBlank()) return "在干嘛呢？"
         val persona = loadPersona(ctx, chatName)

@@ -829,7 +829,6 @@ private fun ChatInfoPage(
     }
 }
 
-@Composable
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DiaryPage(name: String, onBack: () -> Unit) {
@@ -916,6 +915,7 @@ private fun MemoryPage(name: String, onBack: () -> Unit) {
     }
 }
 
+@Composable
 private fun InfoRow(label: String, value: String) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp),
