@@ -677,6 +677,39 @@ private fun ChatInfoPage(
                     Switch(checked = reflection, onCheckedChange = { v -> reflection = v; prefs.edit().putBoolean("reflection_$name", v).apply() })
                 }
             }
+            // 聊天偏好（人设浓缩）可编辑
+            Spacer(Modifier.height(4.dp))
+            var optimizedText by remember { mutableStateOf(prefs.getString("persona_optimized_$name", "") ?: "") }
+            var showEditOpt by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp).clickable { showEditOpt = true }, verticalAlignment = Alignment.CenterVertically) {
+                Text("聊天偏好", fontSize = 12.sp, color = Color(0xFF888888), modifier = Modifier.width(64.dp))
+                Text(if (optimizedText.isNotBlank()) optimizedText else "AI 每 10 轮自动生成", fontSize = 12.sp, color = if (optimizedText.isNotBlank()) Color(0xFF333333) else Color(0xFFBBBBBB), modifier = Modifier.weight(1f), maxLines = 2)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = Color(0xFFCCCCCC), modifier = Modifier.size(18.dp))
+            }
+            if (showEditOpt) {
+                var editText by remember { mutableStateOf(optimizedText) }
+                AlertDialog(
+                    onDismissRequest = { showEditOpt = false },
+                    title = { Text("编辑聊天偏好", fontSize = 16.sp) },
+                    text = {
+                        OutlinedTextField(
+                            value = editText, onValueChange = { editText = it },
+                            modifier = Modifier.fillMaxWidth(), placeholder = { Text("AI 自动总结的聊天偏好...") },
+                            maxLines = 4, singleLine = false
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            optimizedText = editText
+                            prefs.edit().putString("persona_optimized_$name", editText).apply()
+                            showEditOpt = false
+                        }) { Text("保存") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showEditOpt = false }) { Text("取消") }
+                    }
+                )
+            }
 
             // 情绪可视化
             if (prefs.getBoolean("mood_enabled", false)) {
