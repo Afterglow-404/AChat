@@ -540,7 +540,43 @@ private fun ChatInfoPage(
             }
 
             InfoRow("对话名称", name)
-            if (persona.isNotEmpty()) InfoRow("角色人设", persona)
+            if (persona.isNotEmpty()) {
+                var showEditPersona by remember { mutableStateOf(false) }
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp).clickable { showEditPersona = true }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("角色人设", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.weight(0.3f))
+                    Spacer(Modifier.width(8.dp))
+                    Text(persona, fontSize = 14.sp, color = Color(0xFF1A1A1A), maxLines = 2, modifier = Modifier.weight(0.6f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = Color(0xFFCCCCCC), modifier = Modifier.size(18.dp))
+                }
+                if (showEditPersona) {
+                    var editP by remember { mutableStateOf(persona) }
+                    AlertDialog(
+                        onDismissRequest = { showEditPersona = false },
+                        title = { Text("编辑角色人设", fontSize = 16.sp) },
+                        text = {
+                            OutlinedTextField(
+                                value = editP, onValueChange = { editP = it },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp),
+                                maxLines = 8, singleLine = false
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
+                                for (i in 0 until chats.length()) {
+                                    if (chats.getJSONObject(i).getString("name") == name) {
+                                        chats.getJSONObject(i).put("persona", editP)
+                                        break
+                                    }
+                                }
+                                ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).edit().putString("chats", chats.toString()).apply()
+                                showEditPersona = false
+                            }) { Text("保存") }
+                        },
+                        dismissButton = { TextButton(onClick = { showEditPersona = false }) { Text("取消") } }
+                    )
+                }
+            }
             InfoRow("AI 模型", model)
             InfoRow("API 地址", apiUrl)
             InfoRow("API 密钥", if (hasKey) "已配置 🔒" else "未配置")
