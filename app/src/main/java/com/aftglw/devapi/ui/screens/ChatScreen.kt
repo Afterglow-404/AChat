@@ -502,8 +502,13 @@ private fun ChatInfoPage(
     val hasKey = prefs.getString("ai_api_key", "")?.isNotEmpty() == true
 
     var showDiary by remember { mutableStateOf(false) }
+    var showMemory by remember { mutableStateOf(false) }
     if (showDiary) {
         DiaryPage(name = name, onBack = { showDiary = false })
+        return
+    }
+    if (showMemory) {
+        MemoryPage(name = name, onBack = { showMemory = false })
         return
     }
     Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
@@ -697,6 +702,10 @@ private fun ChatInfoPage(
                     Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
                 }
+                Row(Modifier.fillMaxWidth().clickable { showMemory = true }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("🧠 全部记忆", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
+                }
                 Spacer(Modifier.height(6.dp))
                 Text("⭐ 收藏 (${starred.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
                 if (starred.isEmpty()) Text("暂无收藏", fontSize = 12.sp, color = Color(0xFFBBBBBB))
@@ -769,6 +778,51 @@ private fun DiaryPage(name: String, onBack: () -> Unit) {
                                 "删除", tint = Color(0xFFCCCCCC),
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MemoryPage(name: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var query by remember { mutableStateOf("") }
+    var items by remember { mutableStateOf(com.aftglw.devapi.MemoryStore.search(ctx, "", 100, "$name")) }
+    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+        CenterAlignedTopAppBar(
+            title = { Text("🧠 全部记忆", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) } },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            modifier = Modifier.statusBarsPadding())
+        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        OutlinedTextField(
+            value = query, onValueChange = { q -> query = q; items = com.aftglw.devapi.MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name") },
+            modifier = Modifier.fillMaxWidth().padding(12.dp), placeholder = { Text("搜索记忆...", fontSize = 14.sp) },
+            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+        )
+        if (items.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无记忆", fontSize = 14.sp, color = Color(0xFFBBBBBB))
+            }
+        } else LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            itemsIndexed(items, key = { i, _ -> i }) { _, m ->
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val topicTag = m.topic.take(12)
+                        Column(Modifier.weight(1f)) {
+                            Text(topicTag, fontSize = 10.sp, color = Color(0xFFAAAAAA))
+                            Text(m.text, fontSize = 13.sp, color = Color(0xFF333333), maxLines = 3)
+                        }
+                        IconButton(onClick = {
+                            com.aftglw.devapi.MemoryStore.deleteByText(m.text, "$name")
+                            items = com.aftglw.devapi.MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = Color(0xFFCCCCCC), modifier = Modifier.size(16.dp))
                         }
                     }
                 }
