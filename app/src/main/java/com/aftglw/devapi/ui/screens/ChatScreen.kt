@@ -87,14 +87,21 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     LaunchedEffect(Unit) {
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
-        // 自动归档：未归档时用最近 20 条生成日记
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            val saved = ChatHistory.load(ctx, name)
+        // 一次性加载历史 + 触发归档检查（异步）
+        val saved = ChatHistory.load(ctx, name)
+        bubbles.clear()
+        bubbles.addAll(saved.map { Bubble(it.first, it.second, it.third) })
+        history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first) })
+        ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
+            .putString("last_active_chat", name).apply()
+        // 异步：模型加载 + 归档检查
+        launch(Dispatchers.IO) {
+            if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+                    .getBoolean("mood_enabled", false)) MoodModel.load(ctx)
+            // 归档检查：用已加载的 saved，不再重复 load
             if (saved.size >= 5) {
-                val total = saved.size
-                val chunkKey = "chunk:$name:$total"
-                val existing = MemoryStore.search(ctx, chunkKey, 1, "diary:$name")
-                if (existing.isEmpty()) {
+                val chunkKey = "chunk:$name:${saved.size}"
+                if (MemoryStore.search(ctx, chunkKey, 1, "diary:$name").isEmpty()) {
                     val msgs = saved.takeLast(20)
                     val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
                     val text = msgs.joinToString("\n") { "${if (it.second) "我" else name}：${it.first}" }
@@ -102,28 +109,16 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                         val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
                             .sendMessage(emptyList(), text, "概括这段对话的核心内容和情绪，像日记一样写两句话。")
                         if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                    } catch (_: Exception) {} /* 非关键，API 失败不影响聊天 */
+                    } catch (_: Exception) {} /* 非关键 */
                 }
             }
         }
-        ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
-            .putString("last_active_chat", name).apply()
-        // 模型丢 IO 线程，不阻塞 UI
-        launch(Dispatchers.IO) {
-            if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                    .getBoolean("mood_enabled", false)) {
-                MoodModel.load(ctx)
-            }
-        }
-        val saved = ChatHistory.load(ctx, name)
-        bubbles.clear()
-        bubbles.addAll(saved.map { Bubble(it.first, it.second, it.third) })
-        history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first) })
     }
-    // 每次气泡变化时滚动到底部（替代 scrollToBottom）
+    // 每次气泡变化时滚动到底部
     LaunchedEffect(bubbles.size) {
         if (bubbles.isNotEmpty()) {
-            listState.animateScrollToItem(bubbles.size - 1)
+            if (bubbles.size <= 2) listState.scrollToItem(bubbles.size - 1)
+            else listState.animateScrollToItem(bubbles.size - 1)
         }
     }
 
