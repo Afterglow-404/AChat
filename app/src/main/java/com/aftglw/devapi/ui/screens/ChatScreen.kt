@@ -211,52 +211,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     
     val optimized = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_optimized_$name", "") ?: ""
-    val optimizedBlock = if (optimized.isNotBlank()) "\n\n【聊天偏好】$optimized" else ""
-    
     val traits = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_dialogue_traits_$name", "") ?: ""
-    val traitsBlock = if (traits.isNotBlank()) "\n\n【用户特点】$traits" else ""
-    val memoryBlock = if (memoryContext.isNotBlank()) "\n\n【关于对方的记忆】\n$memoryContext" else ""
-
-    
-    val now = System.currentTimeMillis()
-    val lastActive = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-        .getLong("last_active_$name", 0L)
-    val hoursSinceLast = if (lastActive > 0) (now - lastActive) / 3600000 else -1
-    val reunionHint = when {
-        hoursSinceLast < 0 -> ""
-        hoursSinceLast > 720 -> "\n（${hoursSinceLast / 24} 天没见了）"
-        hoursSinceLast > 48 -> "\n（隔了 ${hoursSinceLast / 24} 天）"
-        hoursSinceLast > 2 -> "\n（${hoursSinceLast} 小时没说话）"
-        else -> ""
-    }
-    val timeBlock = "\n\n【时间】${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.TimeService.getTimeOfDay(ctx)}）$reunionHint"
-
-    
-    val recentDiary = com.aftglw.devapi.MemoryStore.search(ctx, "最近", 1, "diary:$name")
-    val diaryMemoryBlock = recentDiary.firstOrNull()?.let {
-        val content = it.text.drop(11).take(80) // 去掉日期前缀，取正文
-        "\n\n昨天$content"
-    } ?: ""
-
-    val affinityBlock = run {
-        val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("affinity_enabled", false)) ""
-        else {
-            val affValue = if (AffinityManager.isAutoMode(prefs, name)) AffinityManager.getAffinity(prefs, name)
-                else AffinityManager.levels[AffinityManager.getLockedLevel(prefs, name)].min + 5f
-            val level = AffinityManager.getLevel(affValue)
-            val hint = AffinityManager.getLevelHint(level) ?: ""
-            "\n\n【当前关系】${level.name}\n$hint"
-        }
-    }
-
-    val baseInstruction = "\n\n回复要求：每句话不超过 15 个字，一次只说 1-2 句。禁止 AI 套话：\"有什么可以帮你的吗\"\"当然可以\"\"总的来说\"。禁止说\"不是……而是……\"。禁止说\"我理解你的感受\"。禁止分点、列表、总结。允许省略句。"
-    val enhancedPersona = if (persona.isNotBlank()) {
-        "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$baseInstruction$memoryBlock$timeBlock"
-    } else {
-        "你是一个聊天伙伴。请用口语短句回复，像朋友聊天一样自然。$baseInstruction$diaryMemoryBlock$traitsBlock$optimizedBlock$affinityBlock$memoryBlock$timeBlock"
-    }
+    val enhancedPersona = PromptBuilder.build(ctx, name, persona, memoryContext, optimized, traits)
 
     if (showInfo) {
         ChatInfoPage(
@@ -311,21 +268,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                     val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
                     val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
                     if (reply != null) {
-                        // Post-LLM：轻量记忆，让下次检索能接上上下文
-                        com.aftglw.devapi.MemoryStore.save(ctx, text, "turn:$name")
-                        // Post-LLM：对话反思——AI 分析自己的回复（异步，付费用户可关）
-                        if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                                .getBoolean("reflection_$name", false)) {
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                try {
-                                    val analyzePrompt = "分析这段对话的本质。用户说：${text.take(80)}。AI说：${reply.take(80)}。用一句话概括对话的核心（20字内，不要评价）："
-                                    val insight = com.aftglw.devapi.network.AiServiceFactory.getService()
-                                        .sendMessage(emptyList(), analyzePrompt, "你是对话分析师。只输出概括，不要多余内容。")
-                                    if (!insight.isNullOrBlank()) com.aftglw.devapi.MemoryStore.save(ctx, insight.trim(), "insight:$name")
-                                } catch (_: Exception) {} /* 非关键 */
-                            }
-                        }
-                        
+                        PostLLMProcessor.process(ctx, name, text, reply)
                         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
                         
                         withContext(Dispatchers.Main) {
