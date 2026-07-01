@@ -109,10 +109,15 @@ object ProactiveScheduler {
         val affinityBlock = if (prefs.getBoolean("affinity_enabled", false)) "\n【当前关系】${level.name}\n$hint" else ""
         val mems = MemoryStore.search(ctx, chatName, 1).joinToString("\n") { "- ${it.text}" }
         val memBlock = if (mems.isNotEmpty()) "\n【关于对方的记忆】\n$mems" else ""
+        val customRules = prefs.getString("proactive_custom_rules_$chatName", "") ?: ""
+        val nowTime = com.aftglw.devapi.TimeService.getFormattedTime(ctx)
+        val nowPeriod = com.aftglw.devapi.TimeService.getTimeOfDay(ctx)
         val baseInstruction = "\n回复要求：每句话不超过15个字，一次只说1-2句。禁止AI套话。"
         val systemPrompt = buildString {
             append(if (persona.isNotBlank()) "$persona\n\n" else "")
             append(baseInstruction)
+            append("\n当前时间：$nowTime（$nowPeriod）")
+            if (customRules.isNotBlank()) append("\n【自定义规则】\n$customRules")
             append(affinityBlock)
             append(optBlock)
             append(memBlock)
