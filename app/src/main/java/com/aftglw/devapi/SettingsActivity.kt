@@ -78,6 +78,10 @@ private fun SettingsRoot(onBack: () -> Unit) {
     val initialCustom = prefs.getBoolean("custom_font", false)
     val typography = remember { mutableStateOf(if (initialCustom) buildCustomTypography() else Typography()) }
     var currentPage by remember { mutableStateOf<SettingsPage>(SettingsPage.Main) }
+    // 拦截系统返回键：在子页面时调 goBack，主页时正常退出
+    if (currentPage !is SettingsPage.Main) {
+        androidx.activity.compose.BackHandler { currentPage = SettingsPage.Main }
+    }
 
     var sound by remember { mutableStateOf(prefs.getBoolean("notification_sound", true)) }
     var vibrate by remember { mutableStateOf(prefs.getBoolean("notification_vibrate", true)) }
