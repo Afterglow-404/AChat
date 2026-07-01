@@ -61,6 +61,12 @@ object MemoryStore {
         return if (na > 0 && nb > 0) dot / (sqrt(na) * sqrt(nb)) else 0f
     }
 
+    fun deleteByText(text: String, topic: String? = null) {
+        val where = if (topic != null) "text = ? AND topic LIKE ?" else "text = ?"
+        val args = if (topic != null) arrayOf(text, "%$topic%") else arrayOf(text)
+        db?.delete("memories", where, args)
+    }
+
     fun save(ctx: Context, text: String, topic: String = "") {
         val vec = embed(ctx, text) ?: return
         val buf = ByteBuffer.allocate(vec.size * 4)

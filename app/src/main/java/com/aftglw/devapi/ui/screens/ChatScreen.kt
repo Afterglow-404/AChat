@@ -499,6 +499,11 @@ private fun ChatInfoPage(
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
     val hasKey = prefs.getString("ai_api_key", "")?.isNotEmpty() == true
 
+    var showDiary by remember { mutableStateOf(false) }
+    if (showDiary) {
+        DiaryPage(name = name, onBack = { showDiary = false })
+        return
+    }
     Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
         CenterAlignedTopAppBar(
             title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
@@ -684,43 +689,11 @@ private fun ChatInfoPage(
             Spacer(Modifier.height(8.dp))
             androidx.compose.material3.Text("记忆", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
-                val diaries = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 10, "diary:$name")
+                val diaryCount = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 1, "diary:$name").size
                 val starred = com.aftglw.devapi.MemoryStore.search(ctx, "收藏", 10, "starred:$name")
-                Text("📖 日记 (${diaries.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
-                if (diaries.isEmpty()) {
-                    Text("暂无日记", fontSize = 12.sp, color = Color(0xFFBBBBBB))
-                    Spacer(Modifier.height(4.dp))
-                    Button(onClick = {
-                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                            val msgs = ChatHistory.load(ctx, name).takeLast(30)
-                            if (msgs.isEmpty()) return@launch
-                            val text = msgs.joinToString("\n") { "${if (it.second) "我" else name}：${it.first}" }
-                            try {
-                                val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
-                                    .sendMessage(emptyList(), text, "用两句话概括最近的聊天内容，像日记一样自然。")
-                                if (!summary.isNullOrBlank()) {
-                                    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-                                    MemoryStore.save(ctx, "$today $summary", "diary:$name")
-                                }
-                            } catch (_: Exception) {} /* 非关键 */
-                        }
-                    }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(36.dp)) {
-                        Text("生成今日日记", fontSize = 13.sp)
-                    }
-                } else diaries.forEach { d ->
-                    var expanded by remember { mutableStateOf(false) }
-                    val dateLabel = d.text.take(10)
-                    val content = d.text.drop(11)
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 4.dp)) {
-                        Text(dateLabel, fontSize = 11.sp, color = Color(0xFFAAAAAA), modifier = Modifier.width(72.dp))
-                        Text(if (expanded) content else content.take(40) + if (content.length > 40) "..." else "", fontSize = 12.sp, color = Color(0xFF555555), maxLines = if (expanded) 10 else 1)
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                if (diaries.isNotEmpty()) {
-                    TextButton(onClick = { /* 未来做日历视图 */ }, modifier = Modifier.fillMaxWidth()) {
-                        Text("查看更多", fontSize = 12.sp, color = Color(0xFF888888))
-                    }
+                Row(Modifier.fillMaxWidth().clickable { showDiary = true }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
                 }
                 Spacer(Modifier.height(6.dp))
                 Text("⭐ 收藏 (${starred.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
@@ -761,6 +734,47 @@ private fun ChatInfoPage(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiaryPage(name: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var diaries by remember { mutableStateOf(com.aftglw.devapi.MemoryStore.search(ctx, "日记", 50, "diary:$name")) }
+    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+        CenterAlignedTopAppBar(
+            title = { Text("📖 日记", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) } },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            modifier = Modifier.statusBarsPadding())
+        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        if (diaries.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无日记", fontSize = 14.sp, color = Color(0xFFBBBBBB))
+            }
+        } else LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(diaries, key = { i, _ -> i }) { _, d ->
+                val dateLabel = d.text.take(10)
+                val content = d.text.drop(11)
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(dateLabel, fontSize = 11.sp, color = Color(0xFFAAAAAA), modifier = Modifier.width(64.dp))
+                        Text(content, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 13.sp, color = Color(0xFF333333), maxLines = 3)
+                        IconButton(onClick = {
+                            com.aftglw.devapi.MemoryStore.deleteByText(d.text, "diary:$name")
+                            diaries = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 50, "diary:$name")
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                "删除", tint = Color(0xFFCCCCCC),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun InfoRow(label: String, value: String) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp),
