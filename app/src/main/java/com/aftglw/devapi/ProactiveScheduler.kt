@@ -54,6 +54,8 @@ object ProactiveScheduler {
                 val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault()).format(java.util.Date())
                 val todayCount = prefs.getInt("proactive_count_${chat}_$today", 0)
                 if (todayCount >= limit) continue
+                val triggerMode = prefs.getString("proactive_trigger_mode_${chat}", "custom") ?: "custom"
+                if (triggerMode == "ai") { /* AI 模式跳过触发条件 */ } else {
                 val idleHours = prefs.getInt("proactive_idle_hours_${chat}", 0)
                 val checkMode = prefs.getString("proactive_check_mode_${chat}", "random") ?: "random"
                 val triggers = prefs.getString("proactive_triggers_${chat}", "1,2,3,4,5,6") ?: "1,2,3,4,5,6"
@@ -76,6 +78,7 @@ object ProactiveScheduler {
                     }
                 }
                 if (!shouldTrigger) continue
+                }
                 val msg = generateMessage(context, chat)
                 if (msg.isBlank() || msg == "在干嘛呢？") continue  // 跳过
                 val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
