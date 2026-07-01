@@ -219,7 +219,18 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     val memoryBlock = if (memoryContext.isNotBlank()) "\n\n【关于对方的记忆】\n$memoryContext" else ""
 
     
-    val timeBlock = "\n\n【时间】${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.TimeService.getTimeOfDay(ctx)}）"
+    val now = System.currentTimeMillis()
+    val lastActive = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+        .getLong("last_active_$name", 0L)
+    val hoursSinceLast = if (lastActive > 0) (now - lastActive) / 3600000 else -1
+    val reunionHint = when {
+        hoursSinceLast < 0 -> ""
+        hoursSinceLast > 720 -> "\n（${hoursSinceLast / 24} 天没见了）"
+        hoursSinceLast > 48 -> "\n（隔了 ${hoursSinceLast / 24} 天）"
+        hoursSinceLast > 2 -> "\n（${hoursSinceLast} 小时没说话）"
+        else -> ""
+    }
+    val timeBlock = "\n\n【时间】${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.TimeService.getTimeOfDay(ctx)}）$reunionHint"
 
     
     val recentDiary = com.aftglw.devapi.MemoryStore.search(ctx, "最近", 1, "diary:$name")
@@ -300,6 +311,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                     val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
                     val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
                     if (reply != null) {
+                        // Post-LLM：轻量记忆，让下次检索能接上上下文
+                        com.aftglw.devapi.MemoryStore.save(ctx, text, "turn:$name")
                         
                         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
                         

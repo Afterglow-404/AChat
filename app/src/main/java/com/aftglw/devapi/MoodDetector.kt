@@ -30,9 +30,20 @@ object MoodDetector {
 
         val contextForModel = appCtx ?: return MoodInfo(null, null)
         val modelIdx = withContext(kotlinx.coroutines.Dispatchers.IO) { MoodModel.classify(inputText, contextForModel) }
-        if (modelIdx != null) {
-            val conf = MoodModel.lastConfidence
-            val label = MoodModel.labels.getOrNull(modelIdx) ?: "中性"
+        val label: String
+        val conf: Float
+        if (modelIdx != null && MoodModel.lastConfidence >= 0.6f) {
+            // ONNX 置信度足够，直接使用
+            label = MoodModel.labels.getOrNull(modelIdx) ?: "中性"
+            conf = MoodModel.lastConfidence
+        } else {
+            // ONNX 置信度不足或不可用，走 API 兜底
+            label = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                apiFallback(ctx, userMessage, history)
+            }
+            conf = 0.5f
+        }
+        if (label.isNotBlank()) {
             // 更新好感度
             val prefs = appCtx?.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
             if (prefs != null && AffinityManager.isAutoMode(prefs, currentChatName)) {
@@ -57,12 +68,32 @@ object MoodDetector {
                 else -> null
             }
             val result = MoodInfo(label, hint)
-            lastMood = result.mood; lastHint = result.hint; lastSource = "model"
+            lastMood = result.mood; lastHint = result.hint; lastSource = if (conf >= 0.6f) "model" else "api"
             appCtx?.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                 ?.edit()?.putString("last_mood_$currentChatName", label ?: "")?.apply()
             return result
         }
         lastMood = null; lastHint = null; lastSource = "model_unavailable"
         return MoodInfo(null, null)
+    }
+
+    private suspend fun apiFallback(ctx: android.content.Context?, userMessage: String, history: List<String>): String {
+        val c = ctx ?: return ""
+        val contextText = history.takeLast(4).joinToString("\n")
+        val inputText = if (contextText.isNotEmpty()) "[上文]$contextText\n[当前]$userMessage" else userMessage
+        val prompt = "分析这句话中说话者的情绪，只输出一个词：开心、悲伤、愤怒、害怕、惊讶、厌恶、中性"
+        return try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.aftglw.devapi.network.AiServiceFactory.getService()
+                    .sendMessage(emptyList(), inputText, prompt)
+            }?.trim()?.take(2)?.let { raw ->
+                when {
+                    raw.contains("开心") -> "开心"; raw.contains("悲伤") -> "悲伤"
+                    raw.contains("愤怒") -> "愤怒"; raw.contains("害怕") -> "害怕"
+                    raw.contains("惊讶") -> "惊讶"; raw.contains("厌恶") -> "厌恶"
+                    else -> "中性"
+                }
+            } ?: ""
+        } catch (_: Exception) { "" }
     }
 }
