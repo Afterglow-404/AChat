@@ -192,20 +192,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
     
     var memoryContext by remember { mutableStateOf("") }
     LaunchedEffect(bubbles.size / 5) {
-        withContext(Dispatchers.IO) {
-            val last = if (bubbles.isNotEmpty()) bubbles.last().text else ""
-            // 情绪驱动检索
-            val moodQuery = when (com.aftglw.devapi.MoodDetector.lastMood) {
-                "悲伤" -> "$last 需要安慰关心"
-                "害怕" -> "$last 安全感安抚"
-                "愤怒" -> "$last 冷静积极解决问题"
-                "开心" -> "$last 有趣好笑共同回忆"
-                "厌恶" -> null // 厌恶时不检索记忆
-                else -> last
-            }
-            if (moodQuery != null) MemoryStore.search(ctx, moodQuery, 1).joinToString("\n") { "- ${it.text}" }
-            else ""
-        }.also { memoryContext = it }
+        memoryContext = withContext(Dispatchers.IO) {
+            MemoryRetriever.retrieve(ctx, name, bubbles.lastOrNull()?.text ?: "")
+        }
     }
 
     
