@@ -589,6 +589,16 @@ private fun ChatInfoPage(
                             Switch(checked = longHistory, onCheckedChange = { v -> longHistory = v; prefs.edit().putBoolean("proactive_long_history_$name", v).apply() })
                         }
                     }
+                    var customRules by remember { mutableStateOf(prefs.getString("proactive_custom_rules_$name", "") ?: "") }
+                    Spacer(Modifier.height(4.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = customRules, onValueChange = { v -> customRules = v; prefs.edit().putString("proactive_custom_rules_$name", v).apply() },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 80.dp),
+                        placeholder = { Text("自定义规则，如：凌晨1点后可找我、周末别打扰", fontSize = 12.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                        maxLines = 2, singleLine = false,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+                    )
                     if (triggerMode == "custom") {
                     var checkMode by remember { mutableStateOf(prefs.getString("proactive_check_mode_$name", "random") ?: "random") }
                     Row(verticalAlignment = Alignment.CenterVertically) {

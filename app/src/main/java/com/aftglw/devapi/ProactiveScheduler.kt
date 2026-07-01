@@ -142,6 +142,7 @@ object ProactiveScheduler {
         val needCare = prefs.getBoolean("proactive_need_care_$chatName", false)
         if (needCare) prefs.edit().putBoolean("proactive_need_care_$chatName", false).apply()
         val memo = MemoryStore.search(ctx, chatName, 2).joinToString("\n") { "- ${it.text}" }
+        val customRules = prefs.getString("proactive_custom_rules_$chatName", "") ?: ""
 
         val prompt = buildString {
             appendLine("你在考虑要不要主动找对方聊天。请看以下信息：")
@@ -155,6 +156,8 @@ object ProactiveScheduler {
                 if (memo.isNotEmpty()) appendLine("记忆片段：$memo")
             }
             if (needCare) appendLine("\n（对方似乎需要关心）")
+            if (customRules.isNotBlank()) appendLine("\n【自定义规则】\n$customRules")
+            appendLine("\n当前时间：${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.TimeService.getTimeOfDay(ctx)}）")
             if (persona.isNotBlank()) appendLine("\n你的人物设定：$persona")
             appendLine("\n如果你觉得现在适合主动说话，按以下格式回复：")
             appendLine("决定：发")
