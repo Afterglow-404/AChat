@@ -426,8 +426,14 @@ fun ChatContent(
                                 DropdownMenuItem(
                                     text = { Text("收藏") },
                                     onClick = {
-                                        com.aftglw.devapi.MemoryStore.save(ctx, b.text, "starred:$name")
-                                        android.widget.Toast.makeText(ctx, "已收藏", Toast.LENGTH_SHORT).show()
+                                        val existing = com.aftglw.devapi.MemoryStore.search(ctx, b.text, 1, "starred:$name")
+                                        if (existing.any { it.text == b.text }) {
+                                            com.aftglw.devapi.MemoryStore.deleteByText(b.text, "starred:$name")
+                                            android.widget.Toast.makeText(ctx, "已取消收藏", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            com.aftglw.devapi.MemoryStore.save(ctx, b.text, "starred:$name")
+                                            android.widget.Toast.makeText(ctx, "已收藏", Toast.LENGTH_SHORT).show()
+                                        }
                                         menuExpanded = false
                                     }
                                 )
