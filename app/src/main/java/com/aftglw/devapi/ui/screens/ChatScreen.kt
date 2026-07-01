@@ -313,6 +313,18 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                     if (reply != null) {
                         // Post-LLM：轻量记忆，让下次检索能接上上下文
                         com.aftglw.devapi.MemoryStore.save(ctx, text, "turn:$name")
+                        // Post-LLM：对话反思——AI 分析自己的回复（异步，付费用户可关）
+                        if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+                                .getBoolean("reflection_$name", false)) {
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                try {
+                                    val analyzePrompt = "分析这段对话的本质。用户说：${text.take(80)}。AI说：${reply.take(80)}。用一句话概括对话的核心（20字内，不要评价）："
+                                    val insight = com.aftglw.devapi.network.AiServiceFactory.getService()
+                                        .sendMessage(emptyList(), analyzePrompt, "你是对话分析师。只输出概括，不要多余内容。")
+                                    if (!insight.isNullOrBlank()) com.aftglw.devapi.MemoryStore.save(ctx, insight.trim(), "insight:$name")
+                                } catch (_: Exception) {} /* 非关键 */
+                            }
+                        }
                         
                         ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
                         
@@ -699,6 +711,12 @@ private fun ChatInfoPage(
                     Text("对话优化", Modifier.weight(1f), fontSize = 14.sp)
                     Text("分析用户特点优化回复", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
                     Switch(checked = dialogueOpt, onCheckedChange = { v -> dialogueOpt = v; prefs.edit().putBoolean("dialogue_optimization_$name", v).apply() })
+                }
+                var reflection by remember { mutableStateOf(prefs.getBoolean("reflection_$name", false)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("对话反思", Modifier.weight(1f), fontSize = 14.sp)
+                    Text("AI 自行分析每次对话", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
+                    Switch(checked = reflection, onCheckedChange = { v -> reflection = v; prefs.edit().putBoolean("reflection_$name", v).apply() })
                 }
             }
 
