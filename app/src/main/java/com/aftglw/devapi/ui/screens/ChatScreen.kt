@@ -199,7 +199,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         .getString("persona_dialogue_traits_$name", "") ?: ""
     val enhancedPersona = PromptBuilder.build(ctx, name, persona, memoryContext, optimized, traits)
 
+    // 对话详情的系统返回
     if (showInfo) {
+        androidx.activity.compose.BackHandler { showInfo = false }
         ChatInfoPage(
             name = name, persona = persona, avatarUri = avatarUri,
             msgCount = bubbles.size, model = model,
