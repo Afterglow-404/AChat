@@ -577,6 +577,32 @@ private fun ChatInfoPage(
                     )
                 }
             }
+            // SillyTavern 角色卡导入
+            val cardPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                uri?.let {
+                    try {
+                        val input = ctx.contentResolver.openInputStream(it)
+                        val card = com.aftglw.devapi.CharacterCardParser.parsePng(input!!)
+                        input.close()
+                        if (card != null && card.name.isNotBlank()) {
+                            // 复制 PNG 到头像目录
+                            val avatarDir = java.io.File(ctx.filesDir, "avatars")
+                            avatarDir.mkdirs()
+                            val avatarFile = java.io.File(avatarDir, "${name}_card.png")
+                            ctx.contentResolver.openInputStream(it)?.use { src ->
+                                avatarFile.outputStream().use { dst -> src.copyTo(dst) }
+                            }
+                            com.aftglw.devapi.CharacterCardParser.importToChat(ctx, name, card, avatarFile.absolutePath)
+                            android.widget.Toast.makeText(ctx, "已导入角色：${card.name}", Toast.LENGTH_SHORT).show()
+                        } else {
+                            android.widget.Toast.makeText(ctx, "未找到有效角色卡", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show() }
+                }
+            }
+            TextButton(onClick = { cardPicker.launch("image/png") }, modifier = Modifier.fillMaxWidth()) {
+                Text("导入角色卡 (SillyTavern)", fontSize = 13.sp, color = Color(0xFF888888))
+            }
             InfoRow("AI 模型", model)
             InfoRow("API 地址", apiUrl)
             InfoRow("API 密钥", if (hasKey) "已配置 🔒" else "未配置")
