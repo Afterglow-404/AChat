@@ -26,8 +26,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         ProactiveScheduler.enqueue(this)
-        // 重置弹窗（之前自动跳过导致了此问题）
-        getSharedPreferences("wechat_settings", MODE_PRIVATE).edit().remove("skip_startup_dialog").apply()
         setContent {
             val prefs = remember { getSharedPreferences("wechat_settings", MODE_PRIVATE) }
             val skipDialog = remember { prefs.getBoolean("skip_startup_dialog", false) }
