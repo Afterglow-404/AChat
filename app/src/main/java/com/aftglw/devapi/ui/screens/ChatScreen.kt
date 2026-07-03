@@ -286,6 +286,7 @@ fun ChatContent(
     chatBgBitmap: ImageBitmap? = null,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
 ) {
+    val localInput = remember(input) { mutableStateOf(input) }
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
     val clipboard = LocalClipboardManager.current
@@ -472,7 +473,7 @@ fun ChatContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
-                    input, onInputChange, Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
+                    localInput.value, { localInput.value = it; onInputChange(it) }, Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
                     placeholder = { Text("说些什么吧...") },
                     shape = RoundedCornerShape(22.dp),
                     textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),

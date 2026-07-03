@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,7 +31,7 @@ class MainActivity : ComponentActivity() {
             val prefs = remember { getSharedPreferences("wechat_settings", MODE_PRIVATE) }
             val skipDialog = remember { prefs.getBoolean("skip_startup_dialog", false) }
             var agreed by remember { mutableStateOf(skipDialog) }
-            var neverShowAgain by remember { mutableStateOf(false) }
+            var neverShowAgain by rememberSaveable { mutableStateOf(false) }
             val onBoarded = remember { prefs.getBoolean("onboarding_done", false) }
             var onboardingDone by remember { mutableStateOf(onBoarded) }
 

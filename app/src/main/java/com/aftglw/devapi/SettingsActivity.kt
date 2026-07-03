@@ -550,7 +550,7 @@ private fun DebugPage(
                     sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                     sb.appendLine("Device: ${android.os.Build.MODEL} (API ${android.os.Build.VERSION.SDK_INT})")
                     sb.appendLine()
-                    val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+                    val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                     sb.appendLine("=== Settings ===")
                     sb.appendLine("API URL: ${prefs.getString("ai_api_url", "")?.take(60)}")
                     sb.appendLine("Model: ${prefs.getString("ai_model", "")}")
@@ -570,7 +570,7 @@ private fun DebugPage(
                     sb.appendLine("Protocol: ${com.aftglw.devapi.network.AiServiceFactory.getProtocolName()}")
                     sb.appendLine()
                     sb.appendLine("=== All Chats ===")
-                    val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
+                    val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
                     for (i in 0 until chats.length()) {
                         val o = chats.getJSONObject(i)
                         val chatName = o.getString("name")
@@ -622,7 +622,6 @@ private fun DebugPage(
                     ctx.startActivity(android.content.Intent.createChooser(shareIntent, "分享调试日志"))
                 } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
             }
-        }
         androidx.compose.material3.OutlinedButton(
             onClick = { shareLog() },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
