@@ -609,10 +609,15 @@ private fun DebugPage(
                     sb.appendLine("=== NTP Sync ===")
                     sb.appendLine("TimeService Active: true")
                     sb.appendLine("Formatted: ${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}")
-                    // 直接分享文本内容
+                    // 写入 log 目录后分享
+                    val logDir = java.io.File(ctx.cacheDir, "log")
+                    logDir.mkdirs()
+                    val logFile = java.io.File(logDir, "AChat_debug_log.txt")
+                    logFile.writeText(sb.toString())
                     val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                         type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_TEXT, sb.toString())
+                        putExtra(android.content.Intent.EXTRA_STREAM, androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", logFile))
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     ctx.startActivity(android.content.Intent.createChooser(shareIntent, "分享调试日志"))
                 } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
