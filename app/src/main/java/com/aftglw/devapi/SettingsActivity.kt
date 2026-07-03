@@ -573,7 +573,14 @@ private fun DebugPage(
                         val affMode = if (com.aftglw.devapi.AffinityManager.isAutoMode(prefs, chatName)) "auto" else "locked"
                         val lastMood = prefs.getString("last_mood_$chatName", "") ?: ""
                         val hasPersona = o.optString("persona", "").isNotBlank()
-                        sb.appendLine("  $chatName | msg=$msgCount | aff=$affVal($affMode) | mood=$lastMood | persona=${if (hasPersona) "yes" else "no"}")
+                        val pEnable = prefs.getBoolean("proactive_enabled_$chatName", false)
+                        val pMode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
+                        val pLong = prefs.getBoolean("proactive_long_history_$chatName", false)
+                        val archive = prefs.getBoolean("auto_archive_$chatName", true)
+                        val diagOpt = prefs.getBoolean("dialogue_optimization_$chatName", false)
+                        val refl = prefs.getBoolean("reflection_$chatName", false)
+                        val moodVis = prefs.getBoolean("mood_visualization", false)
+                        sb.appendLine("  $chatName | msg=$msgCount | aff=$affVal($affMode) | mood=$lastMood | persona=${if (hasPersona) "yes" else "no"} | arch=$archive | opt=$diagOpt | refl=$refl | pro=$pEnable($pMode) | longH=$pLong | vis=$moodVis")
                     }
                     sb.appendLine()
                     sb.appendLine("=== Emotion Detection ===")
