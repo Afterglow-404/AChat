@@ -542,8 +542,8 @@ private fun DebugPage(
         }
 
         Spacer(Modifier.height(8.dp))
-        val logExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-            uri?.let {
+        val logExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> } // 替换为分享
+        val shareLog: () -> Unit = {
                 try {
                     val sb = StringBuilder()
                     sb.appendLine("=== AChat Debug Log ===")
@@ -609,15 +609,17 @@ private fun DebugPage(
                     sb.appendLine("=== NTP Sync ===")
                     sb.appendLine("TimeService Active: true")
                     sb.appendLine("Formatted: ${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}")
-                    ctx.contentResolver.openOutputStream(it)?.use { out ->
-                        out.write(sb.toString().toByteArray())
+                    // 直接分享文本内容
+                    val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, sb.toString())
                     }
-                    android.widget.Toast.makeText(ctx, "日志已导出", Toast.LENGTH_SHORT).show()
+                    ctx.startActivity(android.content.Intent.createChooser(shareIntent, "分享调试日志"))
                 } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
             }
         }
         androidx.compose.material3.OutlinedButton(
-            onClick = { logExporter.launch("AChat_debug_log.txt") },
+            onClick = { shareLog() },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))
         ) { Text("导出调试日志", fontSize = 13.sp) }
