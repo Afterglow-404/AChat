@@ -561,6 +561,12 @@ private fun DebugPage(
                     sb.appendLine("Local Mode: ${prefs.getBoolean("local_mode", false)}")
                     sb.appendLine("Timezone: ${prefs.getString("timezone_id", java.util.TimeZone.getDefault().id)}")
                     sb.appendLine("Glass Effect: ${prefs.getBoolean("glass_transparent", false)}")
+                    sb.appendLine("Custom Font: ${prefs.getBoolean("custom_font", false)}")
+                    sb.appendLine("Notification Sound: ${prefs.getBoolean("notification_sound", true)}")
+                    sb.appendLine("Notification Vibrate: ${prefs.getBoolean("notification_vibrate", true)}")
+                    sb.appendLine("Show Timestamps: ${prefs.getBoolean("show_timestamps", true)}")
+                    sb.appendLine("Debug Overlay: ${prefs.getBoolean("debug_overlay", false)}")
+                    sb.appendLine("Physics Enabled: ${prefs.getBoolean("physics_enabled", true)}")
                     sb.appendLine("Protocol: ${com.aftglw.devapi.network.AiServiceFactory.getProtocolName()}")
                     sb.appendLine()
                     sb.appendLine("=== All Chats ===")
@@ -576,11 +582,15 @@ private fun DebugPage(
                         val pEnable = prefs.getBoolean("proactive_enabled_$chatName", false)
                         val pMode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
                         val pLong = prefs.getBoolean("proactive_long_history_$chatName", false)
+                        val pLimit = prefs.getInt("proactive_daily_limit_$chatName", 3)
+                        val pTriggers = prefs.getString("proactive_triggers_$chatName", "1,2,3,4,5,6") ?: "?"
+                        val pIdle = prefs.getInt("proactive_idle_hours_$chatName", 0)
+                        val pCheck = prefs.getString("proactive_check_mode_$chatName", "random") ?: "?"
                         val archive = prefs.getBoolean("auto_archive_$chatName", true)
                         val diagOpt = prefs.getBoolean("dialogue_optimization_$chatName", false)
                         val refl = prefs.getBoolean("reflection_$chatName", false)
                         val moodVis = prefs.getBoolean("mood_visualization", false)
-                        sb.appendLine("  $chatName | msg=$msgCount | aff=$affVal($affMode) | mood=$lastMood | persona=${if (hasPersona) "yes" else "no"} | arch=$archive | opt=$diagOpt | refl=$refl | pro=$pEnable($pMode) | longH=$pLong | vis=$moodVis")
+                        sb.appendLine("  $chatName | msg=$msgCount | aff=$affVal($affMode) | mood=$lastMood | persona=${if (hasPersona) "yes" else "no"} | arch=$archive | opt=$diagOpt | refl=$refl | pro=$pEnable($pMode) | longH=$pLong | vis=$moodVis | limit=$pLimit | idle=${pIdle}h | check=$pCheck | trigs=$pTriggers")
                     }
                     sb.appendLine()
                     sb.appendLine("=== Emotion Detection ===")
