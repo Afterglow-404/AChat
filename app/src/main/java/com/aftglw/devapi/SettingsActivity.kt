@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
+import com.aftglw.devapi.ui.utils.AnimationUtils
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import kotlinx.coroutines.launch
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -110,7 +112,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     LaunchedEffect(customFont) { typography.value = if (customFont) buildCustomTypography() else Typography() }
 
     var profileName by remember { mutableStateOf(prefs.getString("profile_name", "User") ?: "User") }
-    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "微信号: achat_miao") ?: "微信号: achat_miao") }
+    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "个人签名: Hello AChat") ?: "个人签名: Hello AChat") }
     var profileAvatarUri by remember { mutableStateOf(prefs.getString("profile_avatar_uri", "") ?: "") }
 
     var mainBgUri by remember { mutableStateOf(prefs.getString("main_bg_uri", "") ?: "") }
@@ -147,11 +149,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     AnimatedContent(
         targetState = currentPage,
         transitionSpec = {
-            if (targetState is SettingsPage.Main) {
-                (slideInHorizontally { -it }) togetherWith (slideOutHorizontally { it })
-            } else {
-                (slideInHorizontally { it }) togetherWith (slideOutHorizontally { -it })
-            }
+            AnimationUtils.slideHorizontal(forward = targetState !is SettingsPage.Main)
         },
         label = "settings"
     ) { page ->
@@ -246,6 +244,17 @@ private fun savePickedImage(ctx: android.content.Context, uri: Uri, fileName: St
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) {
+    val entries = listOf(
+        Triple("个人信息", "昵称、头像、个人签名", SettingsPage.Profile),
+        Triple("通知设置", "消息提示音 with 振动", SettingsPage.Notifications),
+        Triple("AI 接口", "API 地址、密钥、模型与离线状态随机回复", SettingsPage.AiApi),
+        Triple("管理角色", "添加对话角色与设定人设", SettingsPage.ManageRoles),
+        Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
+        Triple("界面设置", "通透效果、液态动效、字体", SettingsPage.Appearance),
+        Triple("调试", "开发用功能", SettingsPage.Debug),
+        Triple("关于", "AChat 信息", SettingsPage.About)
+    )
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -257,14 +266,13 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).background(Color(0xFFF5F5F5)).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
-            SettingsEntry("个人信息", "昵称、头像、微信号") { onNav(SettingsPage.Profile) }
-            SettingsEntry("通知设置", "消息提示音与振动") { onNav(SettingsPage.Notifications) }
-            SettingsEntry("AI 接口", "API 地址、密钥、模型与离线状态随机回复") { onNav(SettingsPage.AiApi) }
-            SettingsEntry("管理角色", "添加对话角色与设定人设") { onNav(SettingsPage.ManageRoles) }
-            SettingsEntry("背景设置", "主界面与聊天背景图片") { onNav(SettingsPage.Backgrounds) }
-            SettingsEntry("界面设置", "通透效果、液态动效、字体") { onNav(SettingsPage.Appearance) }
-            SettingsEntry("调试", "开发用功能") { onNav(SettingsPage.Debug) }
-            SettingsEntry("关于", "AChat 信息") { onNav(SettingsPage.About) }
+            entries.forEachIndexed { index, (title, subtitle, page) ->
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                StaggeredEntrance(index = index, visible = visible) {
+                    SettingsEntry(title, subtitle) { onNav(page) }
+                }
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -327,7 +335,7 @@ private fun ProfilePage(
         }
         HorizontalDivider(Modifier.padding(start = 16.dp), color = Color(0xFFF0F0F0))
         TextFieldRow("昵称", "User", profileName, onProfileNameChange)
-        TextFieldRow("微信号", "achat_miao", profileWechatId, onProfileWechatIdChange)
+        TextFieldRow("个人签名", "Hello AChat", profileWechatId, onProfileWechatIdChange)
     }
 }
 
@@ -710,13 +718,18 @@ private fun PasswordRow(label: String, placeholder: String, value: String, onCha
     }
 }
 
+private fun generateChatId(): String {
+    val chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return (1..8).map { chars.random() }.joinToString("")
+}
+
 private fun addChat(ctx: android.content.Context, name: String, persona: String = "", avatarUri: String = "") {
     val prefs = ctx.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
     val json = prefs.getString("chats", "[]") ?: "[]"
     val arr = JSONArray(json)
     val colors = listOf("#1A7DC0", "#E8512B", "#07C160", "#A020F0", "#FF9500", "#E91E63", "#607D8B", "#795548", "#009688", "#FF5722", "#3F51B5", "#00BCD4")
     val obj = JSONObject().apply {
-        put("id", System.currentTimeMillis().toString())
+        put("id", generateChatId())
         put("name", name)
         put("lastMessage", "")
         put("time", "")
@@ -727,6 +740,14 @@ private fun addChat(ctx: android.content.Context, name: String, persona: String 
         put("avatarUri", avatarUri)
     }
     arr.put(obj)
+    prefs.edit().putString("chats", arr.toString()).apply()
+    // 迁移已有对话：补齐 id
+    for (i in 0 until arr.length()) {
+        val o = arr.getJSONObject(i)
+        if (!o.has("id") || o.getString("id").isEmpty()) {
+            o.put("id", generateChatId())
+        }
+    }
     prefs.edit().putString("chats", arr.toString()).apply()
 }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -26,7 +27,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aftglw.devapi.model.ChatItem
+import com.aftglw.devapi.ui.utils.AnimationUtils
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import com.aftglw.devapi.viewmodel.ChatsViewModel
+import androidx.compose.animation.AnimatedContent
 
 val WeChatBgColor = Color(0xFFF7F7F7)
 val WeChatBottomBarColor = Color(0xFFF7F7F7)
@@ -103,14 +107,22 @@ fun WeChatScreenContent(
         containerColor = Color.White
     ) { paddingValues ->
         Box(Modifier.padding(paddingValues).fillMaxSize().background(WeChatBgColor)) {
-            when (currentTab) {
-                WeChatTab.Chats -> ChatListScreen(chatListData) { data ->
-                    val original = chats.find { it.id.hashCode() == data.id }
-                    original?.let { onItemClick(it) }
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = {
+                    AnimationUtils.slideHorizontal(forward = targetState.ordinal > initialState.ordinal)
+                },
+                label = "wechat_tabs"
+            ) { targetTab ->
+                when (targetTab) {
+                    WeChatTab.Chats -> ChatListScreen(chatListData) { data ->
+                        val original = chats.find { it.id.hashCode() == data.id }
+                        original?.let { onItemClick(it) }
+                    }
+                    WeChatTab.Contacts -> ContactsScreen()
+                    WeChatTab.Discover -> DiscoverScreen()
+                    WeChatTab.Me -> MeScreenMock()
                 }
-                WeChatTab.Contacts -> ContactsScreen()
-                WeChatTab.Discover -> DiscoverScreen()
-                WeChatTab.Me -> MeScreenMock()
             }
         }
     }
@@ -123,9 +135,15 @@ fun ChatListScreen(chatList: List<ChatItemData>, onItemClick: (ChatItemData) -> 
         EmptyStateView()
     } else {
         LazyColumn(Modifier.fillMaxSize()) {
-            items(items = chatList, key = { it.id }) { chatItem ->
-                ChatListItem(item = chatItem, onClick = { onItemClick(chatItem) })
-                HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+            itemsIndexed(items = chatList, key = { _, it -> it.id }) { index, chatItem ->
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                StaggeredEntrance(index = index, visible = visible) {
+                    Column {
+                        ChatListItem(item = chatItem, onClick = { onItemClick(chatItem) })
+                        HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+                    }
+                }
             }
         }
     }
@@ -141,33 +159,69 @@ fun ContactsScreen() {
         Triple("公众号", Icons.Default.ChatBubble, Color(0xFF2782D7))
     )
     LazyColumn(Modifier.fillMaxSize()) {
-        items(menuItems) { (text, icon, color) ->
-            ContactMenuItem(text, icon, color)
-            HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+        itemsIndexed(menuItems) { index, (text, icon, color) ->
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            StaggeredEntrance(index = index, visible = visible) {
+                Column {
+                    ContactMenuItem(text, icon, color)
+                    HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+                }
+            }
         }
         item { SectionHeader("A") }
-        item { ContactItem("ab123", Color(0xFFE8512B)) }
+        item {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            StaggeredEntrance(index = 5, visible = visible) {
+                ContactItem("ab123", Color(0xFFE8512B))
+            }
+        }
         item { SectionHeader("C") }
-        item { ContactItem("程序员", Color(0xFF1A7DC0)) }
+        item {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            StaggeredEntrance(index = 6, visible = visible) {
+                ContactItem("程序员", Color(0xFF1A7DC0))
+            }
+        }
         item { SectionHeader("F") }
-        item { ContactItem("文件传输助手", Color(0xFF07C160)) }
+        item {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            StaggeredEntrance(index = 7, visible = visible) {
+                ContactItem("文件传输助手", Color(0xFF07C160))
+            }
+        }
     }
 }
 
 @Composable
 fun DiscoverScreen() {
+    val items = listOf(
+        Triple("朋友圈", Icons.Default.Camera, Color(0xFFFA5151)),
+        Triple("视频号", Icons.Default.VideoCameraFront, Color(0xFFFA9D3B)),
+        Triple("直播", Icons.Default.LiveTv, Color(0xFFFA5151)),
+        Triple("扫一扫", Icons.Default.QrCodeScanner, Color(0xFF2782D7)),
+        Triple("听一听", Icons.Default.MusicNote, Color(0xFF2782D7)),
+        Triple("看一看", Icons.Default.RemoveRedEye, Color(0xFFFA9D3B)),
+        Triple("搜一搜", Icons.Default.Search, Color(0xFFFA5151))
+    )
+
     LazyColumn(Modifier.fillMaxSize()) {
         item { Spacer(Modifier.height(8.dp)) }
-        item { DiscoverMenuItem("朋友圈", Icons.Default.Camera, Color(0xFFFA5151)) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { DiscoverMenuItem("视频号", Icons.Default.VideoCameraFront, Color(0xFFFA9D3B)) }
-        item { DiscoverMenuItem("直播", Icons.Default.LiveTv, Color(0xFFFA5151)) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { DiscoverMenuItem("扫一扫", Icons.Default.QrCodeScanner, Color(0xFF2782D7)) }
-        item { DiscoverMenuItem("听一听", Icons.Default.MusicNote, Color(0xFF2782D7)) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { DiscoverMenuItem("看一看", Icons.Default.RemoveRedEye, Color(0xFFFA9D3B)) }
-        item { DiscoverMenuItem("搜一搜", Icons.Default.Search, Color(0xFFFA5151)) }
+        itemsIndexed(items) { index, (text, icon, color) ->
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            StaggeredEntrance(index = index, visible = visible) {
+                Column {
+                    if (index == 1 || index == 3 || index == 5) {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    DiscoverMenuItem(text, icon, color)
+                }
+            }
+        }
     }
 }
 
@@ -183,7 +237,7 @@ fun MeScreenMock() {
             Column(Modifier.weight(1f)) {
                 Text("User Name", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                Text("微信号: wechat_id", fontSize = 14.sp, color = TextSecondary)
+                Text("个人签名: Hello AChat", fontSize = 14.sp, color = TextSecondary)
                 Spacer(Modifier.height(8.dp))
                 Row {
                     Surface(shape = RoundedCornerShape(12.dp), color = WeChatBgColor) {

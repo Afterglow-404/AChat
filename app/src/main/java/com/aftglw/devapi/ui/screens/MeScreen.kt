@@ -37,6 +37,7 @@ import com.aftglw.devapi.model.MeItem
 import com.aftglw.devapi.viewmodel.MeViewModel
 import androidx.core.graphics.toColorInt
 import androidx.compose.ui.graphics.graphicsLayer
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 
 @Composable
 fun MeScreen(vm: MeViewModel = viewModel<MeViewModel>()) {
@@ -77,16 +78,7 @@ fun MeScreenContent(
         itemsIndexed(items) { index, item ->
             var visible by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { visible = true }
-            val animProgress by animateFloatAsState(
-                targetValue = if (visible) 1f else 0f,
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
-                label = "me_entry"
-            )
-
-            Box(Modifier.graphicsLayer {
-                alpha = animProgress
-                translationY = (1f - animProgress) * 30f
-            }) {
+            StaggeredEntrance(index = index, visible = visible) {
                 when (item) {
                     is String -> {
                         val p = item.split("|")
@@ -180,7 +172,7 @@ fun MeScreenContent(
 @Composable
 fun MeScreenPreview() {
     val sampleItems = listOf(
-        "Android Dev|微信号: wx_id_123456|#07C160",
+        "Android Dev|个人签名: Hello AChat|#07C160",
         Unit,
         MeItem("pay", "支付", R.drawable.ic_wallet),
         Unit,

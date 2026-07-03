@@ -7,6 +7,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -40,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.tooling.preview.Preview
+import com.aftglw.devapi.ui.utils.AnimationUtils
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import com.aftglw.devapi.AffinityManager
 import com.aftglw.devapi.ChatHistory
 import com.aftglw.devapi.MoodDetector
@@ -61,17 +66,27 @@ private fun now() = timeFormat.format(java.util.Date())
 
 data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null)
 
+private sealed class ChatSubPage {
+    data object Chat : ChatSubPage()
+    data object Info : ChatSubPage()
+    data object Diary : ChatSubPage()
+    data object Memory : ChatSubPage()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showTimestamps: Boolean = true, onBack: () -> Unit) {
+fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: String = "", showTimestamps: Boolean = true, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val chatKey = id.ifEmpty { name }
     val bubbles = remember { mutableStateListOf<Bubble>() }
     val history = remember { mutableStateListOf<ChatMessage>() }
     var input by remember { mutableStateOf("") }
     var waiting by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var showInfo by remember { mutableStateOf(false) }
+    
+    var currentSubPage by remember { mutableStateOf<ChatSubPage>(ChatSubPage.Chat) }
+    
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
     val model = remember { prefs.getString("ai_model", "deepsleep-cat") ?: "deepsleep-cat" }
 
@@ -88,12 +103,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
         // 一次性加载历史 + 触发归档检查（异步）
-        val saved = ChatHistory.load(ctx, name)
+        val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
         bubbles.addAll(saved.map { Bubble(it.first, it.second, it.third) })
         history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first) })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
-            .putString("last_active_chat", name).apply()
+            .putString("last_active_chat", chatKey).apply()
         // 异步：模型加载 + 归档检查
         launch(Dispatchers.IO) {
             if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
@@ -114,11 +129,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
             }
         }
     }
-    // 每次气泡变化时滚动到底部
+    // 每次气泡变化时直接跳到底部，无感
     LaunchedEffect(bubbles.size) {
         if (bubbles.isNotEmpty()) {
-            if (bubbles.size <= 2) listState.scrollToItem(bubbles.size - 1)
-            else listState.animateScrollToItem(bubbles.size - 1)
+            listState.scrollToItem(bubbles.size - 1)
         }
     }
 
@@ -139,7 +153,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                 } catch (_: Exception) {} /* 非关键 */
             }
         }
-        ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) })
+        ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) })
     }
 
         // 长时记忆 + 人设浓缩：每 10 轮提取
@@ -154,7 +168,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
                         val parts = full.split("---SUMMARY---")
                         val facts = parts.getOrElse(0) { "" }.replace("---FACTS---", "").trim()
                         val summary = parts.getOrElse(1) { "" }.trim()
-                        facts.lines().filter { it.isNotBlank() }.forEach { MemoryStore.save(ctx, it.trim(), "chat:$name") }
+                        facts.lines().filter { it.isNotBlank() }.forEach { MemoryStore.save(ctx, it.trim(), "chat:$chatKey") }
                         if (summary.isNotBlank()) {
                             ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
                                 .putString("persona_optimized_$name", summary).apply()
@@ -199,74 +213,103 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", showT
         .getString("persona_dialogue_traits_$name", "") ?: ""
     val enhancedPersona = PromptBuilder.build(ctx, name, persona, memoryContext, optimized, traits)
 
-    // 对话详情的系统返回
-    if (showInfo) {
-        androidx.activity.compose.BackHandler { showInfo = false }
-        ChatInfoPage(
-            name = name, persona = persona, avatarUri = avatarUri,
-            msgCount = bubbles.size, model = model,
-            onBack = { showInfo = false }
-        )
-    } else {
-        ChatContent(
-            name = name, bubbles = bubbles, input = input, waiting = waiting,
-            showTimestamps = showTimestamps,
-            onInfoClick = { showInfo = true },
-            onInputChange = { input = it },
-            onSend = {
-                val text = input.trim()
-                if (text.isEmpty() || waiting) return@ChatContent
-                input = ""
-                waiting = true
-                bubbles.add(Bubble(text, true))
-                history.add(ChatMessage("user", text))
-                save()
-                
-                ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
-                    .putLong("last_active_$name", System.currentTimeMillis()).apply()
-                // 撤回机制
-                val proPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                val lastProactive = proPrefs.getLong("proactive_last_$name", 0L)
-                if (lastProactive > 0 && System.currentTimeMillis() - lastProactive < 3600000) {
-                    val rejectWords = listOf("别发了","别烦我","别吵","别说了","不要发","别打扰","你好烦","好烦啊","能不能别","够了别说了")
-                    val rejected = rejectWords.any { text.contains(it) }
-                    if (rejected) {
+    BackHandler(enabled = currentSubPage != ChatSubPage.Chat) {
+        currentSubPage = when (currentSubPage) {
+            ChatSubPage.Diary, ChatSubPage.Memory -> ChatSubPage.Info
+            else -> ChatSubPage.Chat
+        }
+    }
+
+    AnimatedContent(
+        targetState = currentSubPage,
+        transitionSpec = {
+            val isForward = when {
+                initialState == ChatSubPage.Chat && targetState == ChatSubPage.Info -> true
+                initialState == ChatSubPage.Info && (targetState == ChatSubPage.Diary || targetState == ChatSubPage.Memory) -> true
+                else -> false
+            }
+            AnimationUtils.slideHorizontal(forward = isForward)
+        },
+        label = "chat_subpage"
+    ) { subPage ->
+        when (subPage) {
+            ChatSubPage.Chat -> {
+                ChatContent(
+                    name = name, bubbles = bubbles, input = input, waiting = waiting, chatKey = chatKey,
+                    showTimestamps = showTimestamps,
+                    onInfoClick = { currentSubPage = ChatSubPage.Info },
+                    onInputChange = { input = it },
+                    onSend = {
+                        val text = input.trim()
+                        if (text.isEmpty() || waiting) return@ChatContent
+                        input = ""
+                        waiting = true
+                        bubbles.add(Bubble(text, true))
+                        history.add(ChatMessage("user", text))
+                        save()
                         
-                        val curLimit = proPrefs.getInt("proactive_daily_limit_$name", 3)
-                        proPrefs.edit()
-                            .putInt("proactive_daily_limit_$name", maxOf(1, curLimit - 1))
-                            .putLong("proactive_silence_$name", System.currentTimeMillis() + 86400000)
-                            .apply()
-                    }
-                    val moodKeywords = listOf("今天","被骂","加班","好累","心情不好","不开心","难受","烦")
-                    val needCare = moodKeywords.any { text.contains(it) } && !rejected
-                    if (needCare) {
-                        // 心情不好但没拒绝 → 不降频，反而标记下次优先关心
-                        proPrefs.edit().putBoolean("proactive_need_care_$name", true).apply()
-                    }
-                }
-                
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
-                    val moodEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                        .getBoolean("mood_enabled", false)
-                    val historyText = bubbles.takeLast(8).joinToString("\n") { "${if (it.isMe) "我" else "AI"}：${it.text}" }
-                    val mood = if (moodEnabled) { MoodDetector.feed(text, listOf(historyText)) } else MoodInfo(null, null)
-                    val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
-                    val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
-                    if (reply != null) {
-                        PostLLMProcessor.process(ctx, name, text, reply)
-                        ChatHistory.save(ctx, name, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
-                        
-                        withContext(Dispatchers.Main) {
-                            bubbles.add(Bubble(reply, false))
-                            history.add(ChatMessage("assistant", reply))
-                            waiting = false
+                        ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
+                            .putLong("last_active_$name", System.currentTimeMillis()).apply()
+                        // 撤回机制
+                        val proPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+                        val lastProactive = proPrefs.getLong("proactive_last_$name", 0L)
+                        if (lastProactive > 0 && System.currentTimeMillis() - lastProactive < 3600000) {
+                            val rejectWords = listOf("别发了","别烦我","别吵","别说了","不要发","别打扰","你好烦","好烦啊","能不能别","够了别说了")
+                            val rejected = rejectWords.any { text.contains(it) }
+                            if (rejected) {
+                                
+                                val curLimit = proPrefs.getInt("proactive_daily_limit_$name", 3)
+                                proPrefs.edit()
+                                    .putInt("proactive_daily_limit_$name", maxOf(1, curLimit - 1))
+                                    .putLong("proactive_silence_$name", System.currentTimeMillis() + 86400000)
+                                    .apply()
+                            }
+                            val moodKeywords = listOf("今天","被骂","加班","好累","心情不好","不开心","难受","烦")
+                            val needCare = moodKeywords.any { text.contains(it) } && !rejected
+                            if (needCare) {
+                                // 心情不好但没拒绝 → 不降频，反而标记下次优先关心
+                                proPrefs.edit().putBoolean("proactive_need_care_$name", true).apply()
+                            }
                         }
-                    }
-                }
-            },
-            onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
-        )
+                        
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
+                            val moodEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+                                .getBoolean("mood_enabled", false)
+                            val historyText = bubbles.takeLast(8).joinToString("\n") { "${if (it.isMe) "我" else "AI"}：${it.text}" }
+                            val mood = if (moodEnabled) { MoodDetector.feed(text, listOf(historyText)) } else MoodInfo(null, null)
+                            val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
+                            val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
+                            if (reply != null) {
+                                PostLLMProcessor.process(ctx, name, text, reply)
+                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
+                                
+                                withContext(Dispatchers.Main) {
+                                    bubbles.add(Bubble(reply, false))
+                                    history.add(ChatMessage("assistant", reply))
+                                    waiting = false
+                                }
+                            }
+                        }
+                    },
+                    onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
+                )
+            }
+            ChatSubPage.Info -> {
+                ChatInfoPage(
+                    name = name, persona = persona, avatarUri = avatarUri, chatKey = chatKey,
+                    msgCount = bubbles.size, model = model,
+                    onBack = { currentSubPage = ChatSubPage.Chat },
+                    onNavigateToDiary = { currentSubPage = ChatSubPage.Diary },
+                    onNavigateToMemory = { currentSubPage = ChatSubPage.Memory }
+                )
+            }
+            ChatSubPage.Diary -> {
+                DiaryPage(name = chatKey, onBack = { currentSubPage = ChatSubPage.Info })
+            }
+            ChatSubPage.Memory -> {
+                MemoryPage(name = chatKey, onBack = { currentSubPage = ChatSubPage.Info })
+            }
+        }
     }
 }
 
@@ -283,6 +326,7 @@ fun ChatContent(
     onSend: () -> Unit,
     onBack: () -> Unit,
     avatarUri: String = "",
+    chatKey: String = "",
     chatBgBitmap: ImageBitmap? = null,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
 ) {
@@ -344,24 +388,12 @@ fun ChatContent(
             ) {
                 itemsIndexed(bubbles, key = { i, _ -> i }) { idx, b ->
                     var menuExpanded by remember { mutableStateOf(false) }
-                    val isRecent = bubbles.size - idx <= 3
-                    var visible by remember { mutableStateOf(!isRecent) }
-                    if (isRecent) { LaunchedEffect(Unit) { visible = true } }
-                    val animProgress by animateFloatAsState(
-                        targetValue = if (visible) 1f else 0f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
-                        label = "bubble_entry"
-                    )
-
-                    Row(
-                        Modifier.fillMaxWidth().graphicsLayer {
-                            alpha = animProgress
-                            translationY = if (isRecent) (1f - animProgress) * 30f else 0f
-                            scaleX = if (isRecent) 0.95f + (animProgress * 0.05f) else 1f
-                            scaleY = if (isRecent) 0.95f + (animProgress * 0.05f) else 1f
-                        },
-                        horizontalArrangement = if (b.isMe) Arrangement.End else Arrangement.Start
-                    ) {
+                    val isNew = bubbles.size - idx <= 1
+                    StaggeredEntrance(index = idx, visible = true) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (b.isMe) Arrangement.End else Arrangement.Start
+                        ) {
                         if (!b.isMe) {
                             Box(
                                 Modifier.size(32.dp).clip(CircleShape).background(Color(0xFF07C160)),
@@ -467,6 +499,7 @@ fun ChatContent(
                     }
                 }
             }
+        }
 
             Row(
                 Modifier.fillMaxWidth().background(Color.White)
@@ -501,24 +534,16 @@ fun ChatContent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatInfoPage(
-    name: String, persona: String, avatarUri: String,
-    msgCount: Int, model: String, onBack: () -> Unit
+    name: String, persona: String, avatarUri: String, chatKey: String = "",
+    msgCount: Int, model: String, onBack: () -> Unit,
+    onNavigateToDiary: () -> Unit,
+    onNavigateToMemory: () -> Unit
 ) {
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
     val hasKey = prefs.getString("ai_api_key", "")?.isNotEmpty() == true
 
-    var showDiary by remember { mutableStateOf(false) }
-    var showMemory by remember { mutableStateOf(false) }
-    if (showDiary) {
-        DiaryPage(name = name, onBack = { showDiary = false })
-        return
-    }
-    if (showMemory) {
-        MemoryPage(name = name, onBack = { showMemory = false })
-        return
-    }
     Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
         CenterAlignedTopAppBar(
             title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
@@ -566,7 +591,8 @@ private fun ChatInfoPage(
                             TextButton(onClick = {
                                 val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
                                 for (i in 0 until chats.length()) {
-                                    if (chats.getJSONObject(i).getString("name") == name) {
+                                    val cId = chats.getJSONObject(i).optString("id", "")
+                                    if (chatKey.isNotEmpty() && cId == chatKey || chats.getJSONObject(i).getString("name") == name) {
                                         chats.getJSONObject(i).put("persona", editP)
                                         break
                                     }
@@ -717,7 +743,7 @@ private fun ChatInfoPage(
             ) { uri ->
                 uri?.let {
                     try {
-                        val history = ChatHistory.load(ctx, name)
+                        val history = ChatHistory.load(ctx, chatKey)
                         val arr = org.json.JSONArray()
                         for ((text, isMe, time) in history) {
                             arr.put(org.json.JSONObject().apply { put("text", text); put("isMe", isMe); put("time", time) })
@@ -811,11 +837,11 @@ private fun ChatInfoPage(
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
                 val diaryCount = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 1, "diary:$name").size
                 val starred = com.aftglw.devapi.MemoryStore.search(ctx, "收藏", 10, "starred:$name")
-                Row(Modifier.fillMaxWidth().clickable { showDiary = true }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { onNavigateToDiary() }, verticalAlignment = Alignment.CenterVertically) {
                     Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
                 }
-                Row(Modifier.fillMaxWidth().clickable { showMemory = true }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { onNavigateToMemory() }, verticalAlignment = Alignment.CenterVertically) {
                     Text("🧠 全部记忆", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
                 }

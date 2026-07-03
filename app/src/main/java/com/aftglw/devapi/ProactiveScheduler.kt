@@ -47,7 +47,8 @@ object ProactiveScheduler {
         try {
             val arr = org.json.JSONArray(context.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
             for (i in 0 until arr.length()) {
-                val chat = arr.getJSONObject(i).getString("name")
+                val chatDisplay = arr.getJSONObject(i).getString("name")
+                val chat = arr.getJSONObject(i).optString("id", "").takeIf { it.isNotEmpty() } ?: chatDisplay
                 if (!prefs.getBoolean("proactive_enabled_${chat}", false)) continue
                 if (System.currentTimeMillis() < prefs.getLong("proactive_silence_${chat}", 0L)) continue
                 val limit = prefs.getInt("proactive_daily_limit_${chat}", 10)
@@ -83,7 +84,7 @@ object ProactiveScheduler {
                 if (msg.isBlank() || msg == "在干嘛呢？") continue  // 跳过
                 val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
                 ChatHistory.save(context, chat, ChatHistory.load(context, chat) + Triple(msg, false, now))
-                sendNotif(context, chat, msg)
+                sendNotif(context, chatDisplay, msg)
                 prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
             }
         } catch (_: Exception) {}
@@ -182,7 +183,7 @@ object ProactiveScheduler {
 
     private fun loadPersona(ctx: Context, chatName: String): String {
         val arr = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
-        for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); if (o.getString("name") == chatName) return o.optString("persona", "") }
+        for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); if (o.optString("id", "") == chatName || o.getString("name") == chatName) return o.optString("persona", "") }
         return ""
     }
 

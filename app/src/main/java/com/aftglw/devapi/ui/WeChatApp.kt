@@ -29,6 +29,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.aftglw.devapi.ui.utils.AnimationUtils
 
 private val WeChatTheme = lightColorScheme(
     primary = Color(0xFF07C160),
@@ -42,7 +43,7 @@ private val tabTitles = listOf("对话", "发现(TBD)", "我的")
 
 private sealed class AppPage {
     data object Tabs : AppPage()
-    data class Chat(val name: String, val persona: String, val avatarUri: String) : AppPage()
+    data class Chat(val name: String, val persona: String, val avatarUri: String, val id: String = "") : AppPage()
 }
 
 @Composable
@@ -107,8 +108,8 @@ fun WeChatApp() {
         onTabSelected = { selectedTab = it },
         backdrop = backdrop,
         chatsScreen = {
-            ChatsScreen(onChatClick = { name, persona, avatarUri ->
-                currentPage = AppPage.Chat(name, persona, avatarUri)
+            ChatsScreen(onChatClick = { name, persona, avatarUri, id ->
+                currentPage = AppPage.Chat(name, persona, avatarUri, id)
             })
         },
         discoverScreen = { DiscoverScreen(onSubPageChange = { hideNavBar = it }) },
@@ -118,6 +119,7 @@ fun WeChatApp() {
                 name = page.name,
                 persona = page.persona,
                 avatarUri = page.avatarUri,
+                id = page.id,
                 showTimestamps = showTimestamps,
                 onBack = { currentPage = AppPage.Tabs })
         }
@@ -151,11 +153,7 @@ private fun WeChatAppContent(
                 AnimatedContent(
                     targetState = currentPage,
                     transitionSpec = {
-                        if (targetState is AppPage.Tabs) {
-                            (slideInHorizontally { -it }) togetherWith (slideOutHorizontally { it })
-                        } else {
-                            (slideInHorizontally { it }) togetherWith (slideOutHorizontally { -it })
-                        }
+                        AnimationUtils.slideHorizontal(forward = targetState !is AppPage.Tabs)
                     },
                     label = "page"
                 ) { page ->
@@ -177,7 +175,7 @@ private fun WeChatAppContent(
                                         AnimatedContent(
                                             targetState = tabTitles[selectedTab],
                                             transitionSpec = {
-                                                (fadeIn() + scaleIn(initialScale = 0.9f)) togetherWith fadeOut()
+                                                AnimationUtils.titleTransition()
                                             },
                                             label = "title"
                                         ) { title ->
@@ -195,13 +193,7 @@ private fun WeChatAppContent(
                                     AnimatedContent(
                                         targetState = selectedTab,
                                         transitionSpec = {
-                                            if (targetState > initialState) {
-                                                (slideInHorizontally { it / 2 } + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow))) togetherWith
-                                                (slideOutHorizontally { -it / 2 } + fadeOut())
-                                            } else {
-                                                (slideInHorizontally { -it / 2 } + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow))) togetherWith
-                                                (slideOutHorizontally { it / 2 } + fadeOut())
-                                            }
+                                            AnimationUtils.slideHorizontal(forward = targetState > initialState)
                                         },
                                         label = "tabs"
                                     ) { targetTab ->

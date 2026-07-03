@@ -37,11 +37,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aftglw.devapi.model.ChatItem
 import com.aftglw.devapi.viewmodel.ChatsViewModel
 import androidx.compose.ui.tooling.preview.Preview
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String) -> Unit = { _, _, _ -> }, vm: ChatsViewModel = viewModel<ChatsViewModel>()) {
+fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit = { _, _, _, _ -> }, vm: ChatsViewModel = viewModel<ChatsViewModel>()) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -67,7 +68,7 @@ fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String) 
 fun ChatsScreenContent(
     chats: List<ChatItem>,
     onSearchQueryChange: (String) -> Unit,
-    onChatClick: (name: String, persona: String, avatarUri: String) -> Unit,
+    onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit,
     onTogglePin: (String) -> Unit,
     onDeleteChat: (String) -> Unit
 ) {
@@ -84,71 +85,56 @@ fun ChatsScreenContent(
                 var menuExpanded by remember { mutableStateOf(false) }
 
                 var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    visible = true
-                }
+                LaunchedEffect(Unit) { visible = true }
 
-                val animProgress by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    ),
-                    label = "entry"
-                )
-
-                Box(
-                    Modifier.padding(vertical = 4.dp)
-                        .graphicsLayer {
-                            alpha = animProgress
-                            translationY = (1f - animProgress) * 50f
-                            scaleX = 0.95f + (animProgress * 0.05f)
-                            scaleY = 0.95f + (animProgress * 0.05f)
-                        }
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().height(72.dp)
-                            .combinedClickable(
-                                onClick = { onChatClick(c.name, c.persona, c.avatarUri) },
-                                onLongClick = { menuExpanded = true }
-                            )
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                StaggeredEntrance(index = index, visible = visible) {
+                    Box(
+                        Modifier.padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
                     ) {
-                        ChatAvatar(avatarUri = c.avatarUri, avatarColor = c.avatarColor, name = c.name)
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (c.pinned) {
-                                    Icon(Icons.Filled.PushPin, "置顶", Modifier.size(14.dp), tint = Color(0xFF07C160))
-                                    Spacer(Modifier.width(2.dp))
+                        Row(
+                            Modifier.fillMaxWidth().height(72.dp)
+                                .combinedClickable(
+                                    onClick = { onChatClick(c.name, c.persona, c.avatarUri, c.id) },
+                                    onLongClick = { menuExpanded = true }
+                                )
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ChatAvatar(avatarUri = c.avatarUri, avatarColor = c.avatarColor, name = c.name)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (c.pinned) {
+                                        Icon(Icons.Filled.PushPin, "置顶", Modifier.size(14.dp), tint = Color(0xFF07C160))
+                                        Spacer(Modifier.width(2.dp))
+                                    }
+                                    Text(c.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                                    Text(c.time, fontSize = 11.sp, color = Color.Gray)
                                 }
-                                Text(c.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                                Text(c.time, fontSize = 11.sp, color = Color.Gray)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(c.lastMessage, fontSize = 13.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                if (c.unreadCount > 0) Box(Modifier.size(20.dp, 18.dp).clip(CircleShape).background(Color(0xFFFA5151)), contentAlignment = Alignment.Center) { Text(if (c.unreadCount > 99) "99+" else c.unreadCount.toString(), color = Color.White, fontSize = 10.sp, textAlign = TextAlign.Center) }
+                                Spacer(Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(c.lastMessage, fontSize = 13.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    if (c.unreadCount > 0) Box(Modifier.size(20.dp, 18.dp).clip(CircleShape).background(Color(0xFFFA5151)), contentAlignment = Alignment.Center) { Text(if (c.unreadCount > 99) "99+" else c.unreadCount.toString(), color = Color.White, fontSize = 10.sp, textAlign = TextAlign.Center) }
+                                }
                             }
                         }
-                    }
 
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                        offset = DpOffset(64.dp, 0.dp)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (c.pinned) "取消置顶" else "置顶") },
-                            onClick = { onTogglePin(c.id); menuExpanded = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("删除对话", color = Color(0xFFFA5151)) },
-                            onClick = { onDeleteChat(c.id); menuExpanded = false }
-                        )
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            offset = DpOffset(64.dp, 0.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (c.pinned) "取消置顶" else "置顶") },
+                                onClick = { onTogglePin(c.id); menuExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("删除对话", color = Color(0xFFFA5151)) },
+                                onClick = { onDeleteChat(c.id); menuExpanded = false }
+                            )
+                        }
                     }
                 }
             }
@@ -188,7 +174,7 @@ fun ChatsScreenPreview() {
         ChatsScreenContent(
             chats = sampleChats,
             onSearchQueryChange = {},
-            onChatClick = { _, _, _ -> },
+            onChatClick = { _, _, _, _ -> },
             onTogglePin = {},
             onDeleteChat = {}
         )

@@ -74,6 +74,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.graphics.graphicsLayer
+import com.aftglw.devapi.ui.utils.AnimationUtils
+import com.aftglw.devapi.ui.utils.StaggeredEntrance
 
 @Composable
 fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {
@@ -173,14 +175,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     var catLoading by remember { mutableStateOf(false) }
     val fortunes = arrayOf("大吉 🐱", "中吉 😺", "小吉 😸", "末吉 😿", "凶 😾", "大凶 🙀")
     var fortuneText by remember { mutableStateOf("") }
-
-    val buttonTexts = arrayOf(
-        "再来一卦 🐱",
-        "再求一签 🐾",
-        "喵神再临 ✨",
-        "还要摸猫 🐈",
-        "再摇一次 🎋"
-    )
+    var alreadyDrawn by remember { mutableStateOf(false) }
     var buttonLabel by remember { mutableStateOf("求签摸猫 🐱") }
 
     fun fetchCat() {
@@ -193,13 +188,13 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
 
                 if (today != lastDate) {
                     prefs.edit().putString("cat_fortune_date", today).apply()
-                    withContext(Dispatchers.Main) { buttonLabel = "求签摸猫 🐱" }
+                    withContext(Dispatchers.Main) { alreadyDrawn = false; buttonLabel = "求签摸猫 🐱" }
                 }
 
-                val fi = kotlin.math.abs(System.currentTimeMillis() % fortunes.size).toInt()
-                withContext(Dispatchers.Main) {
-                    buttonLabel = buttonTexts[kotlin.math.abs(System.currentTimeMillis() % buttonTexts.size).toInt()]
-                }
+                // 每日固定签文：用日期哈希做种子
+                val seed = today.hashCode() and Int.MAX_VALUE
+                val fi = seed % fortunes.size
+                withContext(Dispatchers.Main) { alreadyDrawn = true; buttonLabel = "今日已抽 🐱" }
 
                 var huangliText = ""
                 try {
@@ -289,11 +284,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     AnimatedContent(
         targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else 0,
         transitionSpec = {
-            if (targetState != 0) {
-                (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it / 2 } + fadeOut())
-            } else {
-                (slideInHorizontally { -it / 2 } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
-            }
+            AnimationUtils.slideHorizontal(forward = targetState > initialState)
         },
         label = "subpages"
     ) { state ->
@@ -345,62 +336,58 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             item {
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
-                val entryProgress by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                    label = "hitokoto_entry"
-                )
+                StaggeredEntrance(index = 0, visible = visible) {
+                    val alpha = 1f - collapseFraction
+                    val scale = 1f - (0.1f * collapseFraction)
+                    val translateY = -collapseFraction * 50f
+                    val paddingV = lerp(16f, 4f, collapseFraction).dp
 
-                val alpha = entryProgress * (1f - collapseFraction)
-                val scale = 0.95f + (0.05f * entryProgress) - (0.1f * collapseFraction)
-                val translateY = (1f - entryProgress) * 40f - (collapseFraction * 50f)
-                val paddingV = lerp(16f, 4f, collapseFraction).dp
-
-                Box(
-                    Modifier.fillMaxWidth()
-                        .graphicsLayer {
-                            this.alpha = alpha
-                            this.scaleX = scale
-                            this.scaleY = scale
-                            this.translationY = translateY
-                        }
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(lerp(20f, 12f, collapseFraction).dp))
-                        .background(Color.White)
-                        .padding(horizontal = 16.dp, vertical = paddingV)
-                ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            if (loading) {
-                                Text("正在加载喵...", fontSize = 15.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
-                            } else {
-                                Text(
-                                    buildMixedText("「$hitokoto」", cnFont, enFont),
-                                    fontSize = lerp(17f, 14f, collapseFraction).sp,
-                                    color = Color(0xFF1A1A1A),
-                                    fontWeight = FontWeight.Medium,
-                                    lineHeight = lerp(26f, 20f, collapseFraction).sp,
-                                    maxLines = if (collapseFraction > 0.5f) 1 else Int.MAX_VALUE,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (from.isNotEmpty() && collapseFraction < 0.6f) {
-                                    Spacer(Modifier.height(lerp(8f, 0f, collapseFraction * 2).dp))
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .graphicsLayer {
+                                this.alpha = alpha
+                                this.scaleX = scale
+                                this.scaleY = scale
+                                this.translationY = translateY
+                            }
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(lerp(20f, 12f, collapseFraction).dp))
+                            .background(Color.White)
+                            .padding(horizontal = 16.dp, vertical = paddingV)
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                if (loading) {
+                                    Text("正在加载喵...", fontSize = 15.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
+                                } else {
                                     Text(
-                                        buildMixedText("—— $from", cnFont, enFont),
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF888888).copy(alpha = (1f - collapseFraction * 2.5f).coerceIn(0f, 1f)),
-                                        fontStyle = FontStyle.Italic
+                                        buildMixedText("「$hitokoto」", cnFont, enFont),
+                                        fontSize = lerp(17f, 14f, collapseFraction).sp,
+                                        color = Color(0xFF1A1A1A),
+                                        fontWeight = FontWeight.Medium,
+                                        lineHeight = lerp(26f, 20f, collapseFraction).sp,
+                                        maxLines = if (collapseFraction > 0.5f) 1 else Int.MAX_VALUE,
+                                        overflow = TextOverflow.Ellipsis
                                     )
+                                    if (from.isNotEmpty() && collapseFraction < 0.6f) {
+                                        Spacer(Modifier.height(lerp(8f, 0f, collapseFraction * 2).dp))
+                                        Text(
+                                            buildMixedText("—— $from", cnFont, enFont),
+                                            fontSize = 13.sp,
+                                            color = Color(0xFF888888).copy(alpha = (1f - collapseFraction * 2.5f).coerceIn(0f, 1f)),
+                                            fontStyle = FontStyle.Italic
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        if (!loading && hitokoto.isNotEmpty() && collapseFraction < 0.8f) {
-                            Spacer(Modifier.width(8.dp))
-                            Box(
-                                Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(enabled = !loading) { onRefresh() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("↻", fontSize = 22.sp, color = Color(0xFF07C160).copy(alpha = (1f - collapseFraction * 5f).coerceIn(0f, 1f)), fontFamily = enFont, fontWeight = FontWeight.Bold)
+                            if (!loading && hitokoto.isNotEmpty() && collapseFraction < 0.8f) {
+                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(enabled = !loading) { onRefresh() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("↻", fontSize = 22.sp, color = Color(0xFF07C160).copy(alpha = (1f - collapseFraction * 5f).coerceIn(0f, 1f)), fontFamily = enFont, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -410,37 +397,28 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             item {
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
-                val animProgress by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                    label = "announcement_entry"
-                )
-
-                Surface(
-                    Modifier.fillMaxWidth()
-                        .graphicsLayer {
-                            alpha = animProgress
-                            translationY = (1f - animProgress) * 40f
-                        }
-                        .padding(vertical = 4.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                StaggeredEntrance(index = 1, visible = visible) {
+                    Surface(
+                        Modifier.fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White
                     ) {
-                        Box(
-                            Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFF7E6)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("📢", fontSize = 18.sp)
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
-                            Spacer(Modifier.height(2.dp))
-                            val announcement = """
+                            Box(
+                                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFF7E6)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📢", fontSize = 18.sp)
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+                                Spacer(Modifier.height(2.dp))
+                                val announcement = """
                                 **v0.0.1** 内容：
                                   AChatの第一个版本
                                 - 有一些不是很华丽的动效
@@ -450,12 +428,13 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                 - 加入微调情绪分析模型，能指导模型回复方向，但判断准确度奇差，所以暂时真没啥用
                                 AChat做到了比微信大！
                             """.trimIndent()
-                            Text(
-                                text = parseMarkdown(announcement),
-                                fontSize = 13.sp,
-                                color = Color(0xFF666666),
-                                lineHeight = 18.sp
-                            )
+                                Text(
+                                    text = parseMarkdown(announcement),
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF666666),
+                                    lineHeight = 18.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -464,34 +443,26 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
-                val animProgress by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                    label = "menu"
-                )
-
-                Row(
-                    Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp)
-                        .graphicsLayer {
-                            alpha = animProgress
-                            translationY = (1f - animProgress) * 30f
-                        }
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White)
-                        .clickable {
-                            when (item.id) {
-                                "2" -> onCatClick()
-                                "3" -> onChallengeClick()
-                            "4" -> onTodoClick()
-                            "8" -> onPromptBuilderClick()
-                            }
-                        }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(painterResource(item.iconResId), null, Modifier.size(24.dp), tint = Color(0xFF07C160))
-                    Spacer(Modifier.width(16.dp)); Text(item.title, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFBBBBBB), modifier = Modifier.size(20.dp))
+                StaggeredEntrance(index = index + 2, visible = visible) {
+                    Row(
+                        Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp)
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
+                            .clickable {
+                                when (item.id) {
+                                    "2" -> onCatClick()
+                                    "3" -> onChallengeClick()
+                                    "4" -> onTodoClick()
+                                    "8" -> onPromptBuilderClick()
+                                }
+                            }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(painterResource(item.iconResId), null, Modifier.size(24.dp), tint = Color(0xFF07C160))
+                        Spacer(Modifier.width(16.dp)); Text(item.title, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFBBBBBB), modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }

@@ -86,7 +86,7 @@ class DebugOverlayService : Service() {
         tvEmoResult = addValue().also { addLabel("Emo Result") }
         tvAffinity = addValue().also { addLabel("Affinity") }
         tvProactive = addValue().also { addLabel("Proactive") }
-        tvChatId = addValue().also { addLabel("Chat") }
+        tvChatId = addValue().also { addLabel("Chat Key") }
         tvTime = addValue().also { addLabel("Time") }
 
         overlay = layout
