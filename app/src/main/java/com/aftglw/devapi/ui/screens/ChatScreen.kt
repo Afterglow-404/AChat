@@ -342,10 +342,11 @@ fun ChatContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                itemsIndexed(bubbles, key = { i, _ -> i }) { _, b ->
+                itemsIndexed(bubbles, key = { i, _ -> i }) { idx, b ->
                     var menuExpanded by remember { mutableStateOf(false) }
-                    var visible by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) { visible = true }
+                    val isRecent = bubbles.size - idx <= 3
+                    var visible by remember { mutableStateOf(!isRecent) }
+                    if (isRecent) { val _ = LaunchedEffect(Unit) { visible = true } }
                     val animProgress by animateFloatAsState(
                         targetValue = if (visible) 1f else 0f,
                         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
@@ -355,9 +356,9 @@ fun ChatContent(
                     Row(
                         Modifier.fillMaxWidth().graphicsLayer {
                             alpha = animProgress
-                            translationY = (1f - animProgress) * 30f
-                            scaleX = 0.95f + (animProgress * 0.05f)
-                            scaleY = 0.95f + (animProgress * 0.05f)
+                            translationY = if (isRecent) (1f - animProgress) * 30f else 0f
+                            scaleX = if (isRecent) 0.95f + (animProgress * 0.05f) else 1f
+                            scaleY = if (isRecent) 0.95f + (animProgress * 0.05f) else 1f
                         },
                         horizontalArrangement = if (b.isMe) Arrangement.End else Arrangement.Start
                     ) {
