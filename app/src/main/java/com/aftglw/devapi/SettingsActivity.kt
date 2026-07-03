@@ -542,6 +542,51 @@ private fun DebugPage(
         }
 
         Spacer(Modifier.height(8.dp))
+        val logExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+            uri?.let {
+                try {
+                    val sb = StringBuilder()
+                    sb.appendLine("=== AChat Debug Log ===")
+                    sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
+                    sb.appendLine()
+                    val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+                    sb.appendLine("=== Settings ===")
+                    sb.appendLine("API URL: ${prefs.getString("ai_api_url", "")?.take(60)}")
+                    sb.appendLine("Model: ${prefs.getString("ai_model", "")}")
+                    sb.appendLine("Long Context: ${prefs.getBoolean("long_context_mode", false)}")
+                    sb.appendLine("Mood Detection: ${prefs.getBoolean("mood_enabled", false)}")
+                    sb.appendLine("Affinity: ${prefs.getBoolean("affinity_enabled", false)}")
+                    sb.appendLine("Local Mode: ${prefs.getBoolean("local_mode", false)}")
+                    sb.appendLine("Timezone: ${prefs.getString("timezone_id", java.util.TimeZone.getDefault().id)}")
+                    sb.appendLine("Protocol: ${com.aftglw.devapi.network.AiServiceFactory.getProtocolName()}")
+                    sb.appendLine()
+                    sb.appendLine("=== Chats ===")
+                    val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
+                    for (i in 0 until chats.length()) {
+                        val o = chats.getJSONObject(i)
+                        sb.appendLine("  ${o.getString("name")} (msg: ${com.aftglw.devapi.ChatHistory.load(ctx, o.getString("name")).size})")
+                    }
+                    sb.appendLine()
+                    sb.appendLine("=== Memory Stats ===")
+                    sb.appendLine("Last Mood: ${com.aftglw.devapi.MoodDetector.lastMood}")
+                    sb.appendLine("Last Source: ${com.aftglw.devapi.MoodDetector.lastSource}")
+                    sb.appendLine("Feed Count: ${com.aftglw.devapi.MoodDetector.feedCount}")
+                    sb.appendLine("Model Error: ${com.aftglw.devapi.MoodDetector.lastModelError}")
+                    sb.appendLine("Last Tokens In: ${prefs.getInt("last_tokens_in", 0)}")
+                    sb.appendLine("Last Tokens Out: ${prefs.getInt("last_tokens_out", 0)}")
+                    ctx.contentResolver.openOutputStream(it)?.use { out ->
+                        out.write(sb.toString().toByteArray())
+                    }
+                    android.widget.Toast.makeText(ctx, "日志已导出", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
+            }
+        }
+        androidx.compose.material3.OutlinedButton(
+            onClick = { logExporter.launch("AChat_debug_log.txt") },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))
+        ) { Text("导出调试日志", fontSize = 13.sp) }
+        Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("时区", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.weight(0.3f))
             Spacer(Modifier.width(8.dp))
