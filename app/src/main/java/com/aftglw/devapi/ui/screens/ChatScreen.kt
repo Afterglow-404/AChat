@@ -346,7 +346,7 @@ fun ChatContent(
                     var menuExpanded by remember { mutableStateOf(false) }
                     val isRecent = bubbles.size - idx <= 3
                     var visible by remember { mutableStateOf(!isRecent) }
-                    if (isRecent) { val _ = LaunchedEffect(Unit) { visible = true } }
+                    if (isRecent) { LaunchedEffect(Unit) { visible = true } }
                     val animProgress by animateFloatAsState(
                         targetValue = if (visible) 1f else 0f,
                         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
