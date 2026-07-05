@@ -92,7 +92,7 @@ object MemoryStore {
             val buf = ByteBuffer.wrap(blob)
             val mVec = FloatArray(buf.capacity() / 4) { buf.getFloat() }
             val sim = cosine(qVec, mVec)
-            
+            // 时间衰减：越旧的记忆权重越低
             val ageHours = (now - cursor.getLong(3)) / 3600000f
             val timeWeight = when {
                 ageHours < 24 -> 1.0f       // 今天 → 全重

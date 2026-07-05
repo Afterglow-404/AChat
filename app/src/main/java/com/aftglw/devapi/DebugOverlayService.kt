@@ -26,7 +26,6 @@ class DebugOverlayService : Service() {
     private lateinit var tvStatus: TextView
     private lateinit var tvGlass: TextView
     private lateinit var tvTime: TextView
-    private lateinit var tvCtx: TextView
     private lateinit var tvEmo: TextView
     private lateinit var tvOnnx: TextView
     private lateinit var tvEmoResult: TextView
@@ -89,7 +88,6 @@ class DebugOverlayService : Service() {
         tvProactive = addValue().also { addLabel("Proactive") }
         tvChatId = addValue().also { addLabel("Chat Key") }
         tvTime = addValue().also { addLabel("Time") }
-        tvCtx = addValue().also { addLabel("Ctx") }
 
         overlay = layout
         updateInfo()
@@ -228,8 +226,6 @@ class DebugOverlayService : Service() {
         val proLastCheck = if (chatName.isNotEmpty()) prefs.getLong("proactive_last_$chatName", 0L) else 0L
         tvProactive.text = "Worker:$workerAgo│守卫:$guards│$countdown${if(proLastCheck>0)"│已送达" else ""}${if(needCare)"│需关怀" else ""}"
         tvTime.text = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        val ctxVal = prefs.getInt("context_window", 0)
-        tvCtx.text = if (ctxVal > 0) "${ctxVal}条" else "自动"
     }
 
     private fun runOnUiThread(action: () -> Unit) {

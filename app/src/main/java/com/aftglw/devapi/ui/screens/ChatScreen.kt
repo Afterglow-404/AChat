@@ -58,7 +58,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -103,18 +102,18 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     LaunchedEffect(Unit) {
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
-        
+        // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
         bubbles.addAll(saved.map { Bubble(it.first, it.second, it.third) })
         history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first) })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", chatKey).apply()
-        
+        // 异步：模型加载 + 归档检查
         launch(Dispatchers.IO) {
             if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                     .getBoolean("mood_enabled", false)) MoodModel.load(ctx)
-            
+            // 归档检查：用已加载的 saved，不再重复 load
             if (saved.size >= 5) {
                 val chunkKey = "chunk:$name:${saved.size}"
                 if (MemoryStore.search(ctx, chunkKey, 1, "diary:$name").isEmpty()) {
@@ -268,7 +267,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val moodKeywords = listOf("今天","被骂","加班","好累","心情不好","不开心","难受","烦")
                             val needCare = moodKeywords.any { text.contains(it) } && !rejected
                             if (needCare) {
-                                
+                                // 心情不好但没拒绝 → 不降频，反而标记下次优先关心
                                 proPrefs.edit().putBoolean("proactive_need_care_$name", true).apply()
                             }
                         }
@@ -281,26 +280,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
                             val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
                             if (reply != null) {
-                                
-                                val cleanReply = reply.replace("【顿】", "").replace("【顿】", "").trim()
-                                val parts = reply.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
-                                PostLLMProcessor.process(ctx, name, text, cleanReply)
-                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(cleanReply, false, now()))
+                                PostLLMProcessor.process(ctx, name, text, reply)
+                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
                                 
                                 withContext(Dispatchers.Main) {
-                                    history.add(ChatMessage("assistant", cleanReply))
-                                    if (parts.size > 1) {
-                                        // 拆句：分段显示
-                                        bubbles.add(Bubble(parts[0], false))
-                                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
-                                            for (i in 1 until parts.size) {
-                                                delay(500)
-                                                bubbles.add(Bubble(parts[i], false))
-                                            }
-                                        }
-                                    } else {
-                                        bubbles.add(Bubble(reply, false))
-                                    }
+                                    bubbles.add(Bubble(reply, false))
+                                    history.add(ChatMessage("assistant", reply))
                                     waiting = false
                                 }
                             }
@@ -443,7 +428,7 @@ fun ChatContent(
                                 Column {
                                     Text(b.text, fontSize = 15.sp)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        
+                                        // 情绪可视化
                                         val moodVis = prefs.getBoolean("mood_visualization", false) && prefs.getBoolean("mood_enabled", false)
                                         if (b.isMe && b == bubbles.lastOrNull() && moodVis) {
                                             val moodEmoji = when (com.aftglw.devapi.MoodDetector.lastMood) {
@@ -775,7 +760,7 @@ private fun ChatInfoPage(
                 modifier = Modifier.fillMaxWidth().height(44.dp)
             ) { Text("导出聊天记录", fontSize = 14.sp) }
 
-            
+            // 记忆管理 + 对话优化
             Spacer(Modifier.height(8.dp))
             androidx.compose.material3.Text("优化", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
@@ -798,7 +783,7 @@ private fun ChatInfoPage(
                     Switch(checked = reflection, onCheckedChange = { v -> reflection = v; prefs.edit().putBoolean("reflection_$name", v).apply() })
                 }
             }
-            
+            // 聊天偏好（人设浓缩）可编辑
             Spacer(Modifier.height(4.dp))
             var optimizedText by remember { mutableStateOf(prefs.getString("persona_optimized_$name", "") ?: "") }
             var showEditOpt by remember { mutableStateOf(false) }
@@ -832,7 +817,7 @@ private fun ChatInfoPage(
                 )
             }
 
-            
+            // 情绪可视化
             if (prefs.getBoolean("mood_enabled", false)) {
                 Spacer(Modifier.height(8.dp))
                 androidx.compose.material3.Text("情绪", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
@@ -846,7 +831,7 @@ private fun ChatInfoPage(
                 }
             }
 
-            
+            // 日记与收藏
             Spacer(Modifier.height(8.dp))
             androidx.compose.material3.Text("记忆", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
