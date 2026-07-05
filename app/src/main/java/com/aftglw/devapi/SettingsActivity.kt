@@ -41,9 +41,7 @@ import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -552,55 +550,45 @@ private fun DebugPage(
         androidx.compose.material3.OutlinedButton(onClick = { showScriptPlayer = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))) {
             Text("脚本播放器", fontSize = 13.sp)
         }
-        var showScriptPage by remember { mutableStateOf(false) }
-        var scriptEvents by remember { mutableStateOf<List<com.aftglw.devapi.ScriptEvent>>(emptyList()) }
-        if (showScriptPage && scriptEvents.isNotEmpty()) {
-            com.aftglw.devapi.ui.screens.ScriptPage(scriptEvents = scriptEvents, onBack = { showScriptPage = false })
-        } else if (showScriptPlayer) {
+        if (showScriptPlayer) {
+            var results by remember { mutableStateOf<List<com.aftglw.devapi.ScriptResult>>(emptyList()) }
+            var running by remember { mutableStateOf(false) }
             var selectedScript by remember { mutableStateOf<Pair<String, String>?>(null) }
-            var yamlContent by remember { mutableStateOf("") }
-            val yamlSample = remember { com.aftglw.devapi.ScriptPlayer.generateYamlSample() }
             val scripts = remember { com.aftglw.devapi.ScriptPlayer.generateDemoScripts() }
-            val yamlPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-                uri?.let { try { yamlContent = ctx.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: "" } catch (_: Exception) {} }
-            }
             AlertDialog(
                 onDismissRequest = { showScriptPlayer = false },
-                title = { Text("脚本管理器", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = { Text("脚本播放器", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(Modifier.fillMaxWidth()) {
-                        Text("内置脚本：", fontSize = 13.sp, color = Color.Gray)
+                        Text("选择脚本：", fontSize = 13.sp, color = Color.Gray)
                         scripts.forEach { (name, json) ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { selectedScript = name to json }.padding(vertical = 4.dp)) {
                                 androidx.compose.material3.RadioButton(selected = selectedScript?.first == name, onClick = { selectedScript = name to json })
                                 Text(name, fontSize = 13.sp)
                             }
                         }
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { yamlContent = yamlSample }.padding(vertical = 4.dp)) {
-                            Text("📄 示例：日常片段 (YAML)", fontSize = 13.sp, color = Color(0xFF888888))
-                        }
-                        androidx.compose.material3.OutlinedButton(onClick = { yamlPicker.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
-                            Text("导入 LingChat 剧本 (YAML)", fontSize = 11.sp, color = Color(0xFF888888))
-                        }
-                        if (yamlContent.isNotBlank()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("已导入剧本", fontSize = 12.sp, color = Color(0xFF07C160))
+                        Spacer(Modifier.height(8.dp))
+                        if (results.isNotEmpty()) {
+                            Text("结果 (${results.size}/${selectedScript?.let { s -> com.aftglw.devapi.ScriptPlayer.parse(s.second)?.steps?.size ?: 0 } ?: 0})", fontSize = 12.sp, color = Color.Gray)
+                            results.takeLast(5).forEach { r ->
+                                val icon = when { r.passed == true -> "✅"; r.passed == false -> "❌"; else -> "💬" }
+                                Text("$icon 第${r.step}步: ${r.sent.take(20)} → ${r.reply.take(40)}", fontSize = 11.sp, color = Color(0xFF555555), maxLines = 1)
                             }
                         }
                     }
                 },
                 confirmButton = {
-                    TextButton(enabled = selectedScript != null || yamlContent.isNotBlank(), onClick = {
-                        val events = if (yamlContent.isNotBlank()) {
-                            com.aftglw.devapi.ScriptEngine.parseYaml(yamlContent)?.events ?: emptyList()
-                        } else {
-                            (selectedScript?.let { com.aftglw.devapi.ScriptPlayer.parse(it.second) })?.steps?.map {
-                                com.aftglw.devapi.ScriptEvent(type = "dialogue", text = it.send, character = "你")
-                            } ?: emptyList()
+                    TextButton(enabled = selectedScript != null && !running, onClick = {
+                        val pair = selectedScript ?: return@TextButton
+                        val script = com.aftglw.devapi.ScriptPlayer.parse(pair.second) ?: return@TextButton
+                        running = true; results = emptyList()
+                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                            com.aftglw.devapi.ScriptPlayer.run(ctx, script) { result ->
+                                withContext(Dispatchers.Main) { results = results + result }
+                            }
+                            withContext(Dispatchers.Main) { running = false }
                         }
-                        scriptEvents = events; showScriptPage = true; showScriptPlayer = false
-                    }) { Text("播放", fontSize = 13.sp) }
+                    }) { Text(if (running) "运行中..." else "运行", fontSize = 13.sp) }
                 },
                 dismissButton = { TextButton(onClick = { showScriptPlayer = false }) { Text("关闭", fontSize = 13.sp) } }
             )
