@@ -76,17 +76,13 @@ private sealed class ChatSubPage {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: String = "", showTimestamps: Boolean = true, scriptEvents: List<com.aftglw.devapi.ScriptEvent>? = null, onBack: () -> Unit) {
+fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: String = "", showTimestamps: Boolean = true, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val chatKey = id.ifEmpty { name }
     val bubbles = remember { mutableStateListOf<Bubble>() }
     val history = remember { mutableStateListOf<ChatMessage>() }
     var input by remember { mutableStateOf("") }
     var waiting by remember { mutableStateOf(false) }
-    val isScriptMode = scriptEvents != null && scriptEvents.isNotEmpty()
-    var scriptIndex by remember { mutableIntStateOf(0) }
-    var scriptPaused by remember { mutableStateOf(true) }
-    var scriptChoices by remember { mutableStateOf<List<com.aftglw.devapi.ScriptChoice>>(emptyList()) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     
@@ -138,26 +134,6 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     LaunchedEffect(bubbles.size) {
         if (bubbles.isNotEmpty()) {
             listState.scrollToItem(bubbles.size - 1)
-        }
-    }
-
-    // 脚本模式：自动推进
-    if (isScriptMode && !scriptPaused && scriptChoices.isEmpty()) {
-        LaunchedEffect(scriptIndex) {
-            if (scriptIndex < scriptEvents!!.size) {
-                val event = scriptEvents!![scriptIndex]
-                scriptIndex++
-                when (event.type) {
-                    "narration" -> bubbles.add(Bubble(event.text, false))
-                    "dialogue" -> {
-                        val isUser = event.character == "你" || event.character == "用户"
-                        if (isUser) bubbles.add(Bubble(event.text, true))
-                        else bubbles.add(Bubble(event.text, false))
-                    }
-                    "choices" -> scriptChoices = event.options
-                    else -> {}
-                }
-            }
         }
     }
 
@@ -259,42 +235,6 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     ) { subPage ->
         when (subPage) {
             ChatSubPage.Chat -> {
-                if (isScriptMode) {
-                    // 脚本模式：底部控制栏
-                    Box(Modifier.fillMaxSize()) {
-                        ChatContent(
-                            name = name, bubbles = bubbles, input = input, waiting = waiting, chatKey = chatKey,
-                            showTimestamps = showTimestamps,
-                            hideInput = true,
-                            onInfoClick = { currentSubPage = ChatSubPage.Info },
-                            onInputChange = { input = it },
-                            onSend = { },
-                            onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
-                        )
-                        // 覆盖底部控件
-                        Column(Modifier.align(Alignment.BottomCenter)) {
-                            if (scriptChoices.isNotEmpty()) {
-                                scriptChoices.forEach { c ->
-                                    Button(onClick = { c.actions.forEach { a -> com.aftglw.devapi.ScriptEngine.applyAction(a) }; scriptChoices = emptyList() },
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {
-                                        Text(c.text, color = Color(0xFF07C160))
-                                    }
-                                }
-                            }
-                            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.Center) {
-                                if (scriptPaused && scriptIndex < (scriptEvents?.size ?: 0)) {
-                                    Button(onClick = { scriptPaused = false }) { Text("▶ 播放", color = Color.White) }
-                                }
-                                if (!scriptPaused) {
-                                    Button(onClick = { scriptPaused = true }) { Text("⏸ 暂停", color = Color.White) }
-                                }
-                                if (scriptIndex >= (scriptEvents?.size ?: 0)) {
-                                    Text("— 剧终 —", color = Color.Gray, fontSize = 14.sp)
-                                }
-                            }
-                        }
-                    }
-                } else {
                 ChatContent(
                     name = name, bubbles = bubbles, input = input, waiting = waiting, chatKey = chatKey,
                     showTimestamps = showTimestamps,
@@ -365,7 +305,6 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                 }
                             }
                         }
-                }
                     },
                     onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
                 )
@@ -403,7 +342,6 @@ fun ChatContent(
     onBack: () -> Unit,
     avatarUri: String = "",
     chatKey: String = "",
-    hideInput: Boolean = false,
     chatBgBitmap: ImageBitmap? = null,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState()
 ) {
@@ -578,7 +516,6 @@ fun ChatContent(
             }
         }
 
-            if (!hideInput) {
             Row(
                 Modifier.fillMaxWidth().background(Color.White)
                     .navigationBarsPadding().padding(8.dp),
@@ -604,7 +541,6 @@ fun ChatContent(
                 ) {
                     Text(if (waiting) "..." else "发送")
                 }
-            }
             }
         }
     }

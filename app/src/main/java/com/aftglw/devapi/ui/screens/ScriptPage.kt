@@ -46,7 +46,7 @@ fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
     var waiting by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
     var choices by remember { mutableStateOf<List<ScriptChoice>>(emptyList()) }
-    var aiMode by remember { mutableStateOf(false) }
+    var aiMode by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
     fun isUserChar(char: String) = char == "你" || char == "用户" || char == "我"
@@ -59,6 +59,7 @@ fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
         when (event.type) {
             "narration" -> {
                 bubbles.add(DisplayBubble(text = event.text, isNarration = true))
+                if (!aiMode) nextEvent()
             }
             "dialogue" -> {
                 val isUser = isUserChar(event.character)
@@ -88,7 +89,6 @@ fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
                         label = if (isUser) "" else event.character,
                         isUser = isUser
                     ))
-                    // 纯脚本模式不自动推进，等用户点"继续"
                     if (aiMode && isUser) {
                         // 用户发言 → AI 回复
                         waiting = true
