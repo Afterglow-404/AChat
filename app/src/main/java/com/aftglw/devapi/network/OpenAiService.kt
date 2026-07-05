@@ -27,7 +27,15 @@ class OpenAiService(private val context: Context) : AiService {
                     })
                 }
                 val longContext = prefs.getBoolean("long_context_mode", true)
-                val recent = history.takeLast(if (longContext) 20 else 10)
+                val userCw = prefs.getInt("context_window", 0)
+                val contextLimit = if (userCw > 0) userCw else when {
+                    !longContext -> 10
+                    baseUrl.contains("deepseek", ignoreCase = true) -> 80
+                    baseUrl.contains("openai", ignoreCase = true) -> 50
+                    baseUrl.contains("claude", ignoreCase = true) || baseUrl.contains("anthropic", ignoreCase = true) -> 50
+                    else -> 30
+                }
+                val recent = history.takeLast(contextLimit)
                 for ((i, msg) in recent.withIndex()) {
                     // 短上下文模式: 每 10 条重新注入人设提醒
                     if (!longContext && i > 0 && i % 10 == 0 && systemPrompt.isNotBlank()) {

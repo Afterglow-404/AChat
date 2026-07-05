@@ -544,9 +544,80 @@ private fun DebugPage(
         }
 
         Spacer(Modifier.height(8.dp))
+        // 脚本播放器
+        Spacer(Modifier.height(8.dp))
+        var showScriptPlayer by remember { mutableStateOf(false) }
+        androidx.compose.material3.OutlinedButton(onClick = { showScriptPlayer = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))) {
+            Text("脚本播放器", fontSize = 13.sp)
+        }
+        if (showScriptPlayer) {
+            var results by remember { mutableStateOf<List<com.aftglw.devapi.ScriptResult>>(emptyList()) }
+            var running by remember { mutableStateOf(false) }
+            var selectedScript by remember { mutableStateOf<Pair<String, String>?>(null) }
+            val scripts = remember { com.aftglw.devapi.ScriptPlayer.generateDemoScripts() }
+            AlertDialog(
+                onDismissRequest = { showScriptPlayer = false },
+                title = { Text("脚本播放器", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("选择脚本：", fontSize = 13.sp, color = Color.Gray)
+                        scripts.forEach { (name, json) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { selectedScript = name to json }.padding(vertical = 4.dp)) {
+                                androidx.compose.material3.RadioButton(selected = selectedScript?.first == name, onClick = { selectedScript = name to json })
+                                Text(name, fontSize = 13.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (results.isNotEmpty()) {
+                            Text("结果 (${results.size}/${selectedScript?.let { s -> com.aftglw.devapi.ScriptPlayer.parse(s.second)?.steps?.size ?: 0 } ?: 0})", fontSize = 12.sp, color = Color.Gray)
+                            results.takeLast(5).forEach { r ->
+                                val icon = when { r.passed == true -> "✅"; r.passed == false -> "❌"; else -> "💬" }
+                                Text("$icon 第${r.step}步: ${r.sent.take(20)} → ${r.reply.take(40)}", fontSize = 11.sp, color = Color(0xFF555555), maxLines = 1)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = selectedScript != null && !running, onClick = {
+                        val pair = selectedScript ?: return@TextButton
+                        val script = com.aftglw.devapi.ScriptPlayer.parse(pair.second) ?: return@TextButton
+                        running = true; results = emptyList()
+                        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                            com.aftglw.devapi.ScriptPlayer.run(ctx, script) { result ->
+                                withContext(Dispatchers.Main) { results = results + result }
+                            }
+                            withContext(Dispatchers.Main) { running = false }
+                        }
+                    }) { Text(if (running) "运行中..." else "运行", fontSize = 13.sp) }
+                },
+                dismissButton = { TextButton(onClick = { showScriptPlayer = false }) { Text("关闭", fontSize = 13.sp) } }
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
         ToggleRow("本地模式", "用本地 Qwen 模型处理对话（需提前放置模型文件）", localMode, onLocalModeChange)
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("关闭后恢复使用云端 API", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            val dbPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+            Text("历史消息数", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.width(80.dp))
+            val ctxw = dbPrefs.getInt("context_window", 0)
+            val cwOptions = listOf(0 to "自动", 10 to "10条", 20 to "20条", 30 to "30条", 50 to "50条", 80 to "80条", 100 to "100条")
+            val cwExpanded = remember { mutableStateOf(false) }
+            Box { val cwLabel = cwOptions.find { it.first == ctxw }?.second ?: "自动"
+                Text(cwLabel, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { cwExpanded.value = true })
+                DropdownMenu(expanded = cwExpanded.value, onDismissRequest = { cwExpanded.value = false }) {
+                    cwOptions.forEach { (v, label) ->
+                        DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = {
+                            dbPrefs.edit().putInt("context_window", v).apply()
+                            cwExpanded.value = false
+                        })
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -569,6 +640,7 @@ private fun DebugPage(
                     sb.appendLine("Local Mode: ${prefs.getBoolean("local_mode", false)}")
                     sb.appendLine("Timezone: ${prefs.getString("timezone_id", java.util.TimeZone.getDefault().id)}")
                     sb.appendLine("Glass Effect: ${prefs.getBoolean("glass_transparent", false)}")
+                    sb.appendLine("Context Window: ${prefs.getInt("context_window", 0)} (0=auto)")
                     sb.appendLine("Custom Font: ${prefs.getBoolean("custom_font", false)}")
                     sb.appendLine("Notification Sound: ${prefs.getBoolean("notification_sound", true)}")
                     sb.appendLine("Notification Vibrate: ${prefs.getBoolean("notification_vibrate", true)}")

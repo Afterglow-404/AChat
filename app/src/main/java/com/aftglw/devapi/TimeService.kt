@@ -19,7 +19,7 @@ object TimeService {
 
     fun getCurrentTime(ctx: Context): Long {
         syncIfNeeded(ctx)
-        // 如果 NTP 同步成功，用 NTP 时间；否则回退到系统时间
+        
         return if (timeOffset != 0L) System.currentTimeMillis() + timeOffset else System.currentTimeMillis()
     }
 
@@ -51,7 +51,7 @@ object TimeService {
 
     private fun syncIfNeeded(ctx: Context) {
         val now = System.currentTimeMillis()
-        if (now - lastSync < 3600000) return // 1 小时内不重复同步
+        if (now - lastSync < 3600000) return 
         lastSync = now
         Thread {
             try {
