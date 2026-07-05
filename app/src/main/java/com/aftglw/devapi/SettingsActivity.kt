@@ -41,7 +41,9 @@ import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -544,9 +546,118 @@ private fun DebugPage(
         }
 
         Spacer(Modifier.height(8.dp))
+        // 脚本播放器
+        Spacer(Modifier.height(8.dp))
+        var showScriptPlayer by remember { mutableStateOf(false) }
+        androidx.compose.material3.OutlinedButton(onClick = { showScriptPlayer = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))) {
+            Text("脚本播放器", fontSize = 13.sp)
+        }
+        var showScriptPage by remember { mutableStateOf(false) }
+        var scriptEvents by remember { mutableStateOf<List<com.aftglw.devapi.ScriptEvent>>(emptyList()) }
+        if (showScriptPage && scriptEvents.isNotEmpty()) {
+            com.aftglw.devapi.ui.screens.ScriptPage(scriptEvents = scriptEvents, onBack = { showScriptPage = false })
+        } else if (showScriptPlayer) {
+            var selectedScript by remember { mutableStateOf<Pair<String, String>?>(null) }
+            var yamlContent by remember { mutableStateOf("") }
+            val yamlSample = remember { com.aftglw.devapi.ScriptPlayer.generateYamlSample() }
+            val scripts = remember { com.aftglw.devapi.ScriptPlayer.generateDemoScripts() }
+            val yamlPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                uri?.let { try { yamlContent = ctx.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: "" } catch (_: Exception) {} }
+            }
+            AlertDialog(
+                onDismissRequest = { showScriptPlayer = false },
+                title = { Text("脚本管理器", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("内置脚本：", fontSize = 13.sp, color = Color.Gray)
+                        scripts.forEach { (name, json) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { selectedScript = name to json }.padding(vertical = 4.dp)) {
+                                androidx.compose.material3.RadioButton(selected = selectedScript?.first == name, onClick = { selectedScript = name to json })
+                                Text(name, fontSize = 13.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { yamlContent = yamlSample }.padding(vertical = 4.dp)) {
+                            Text("📄 示例：日常片段 (YAML)", fontSize = 13.sp, color = Color(0xFF888888))
+                        }
+                        androidx.compose.material3.OutlinedButton(onClick = { yamlPicker.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
+                            Text("导入 LingChat 剧本 (YAML)", fontSize = 11.sp, color = Color(0xFF888888))
+                        }
+                        if (yamlContent.isNotBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("已导入剧本", fontSize = 12.sp, color = Color(0xFF07C160))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = selectedScript != null || yamlContent.isNotBlank(), onClick = {
+                        val events = if (yamlContent.isNotBlank()) {
+                            com.aftglw.devapi.ScriptEngine.parseYaml(yamlContent)?.events ?: emptyList()
+                        } else {
+                            (selectedScript?.let { com.aftglw.devapi.ScriptPlayer.parse(it.second) })?.steps?.map {
+                                com.aftglw.devapi.ScriptEvent(type = "dialogue", text = it.send, character = "你")
+                            } ?: emptyList()
+                        }
+                        if (events.isNotEmpty()) {
+                            // 把脚本事件注入到新对话的 ChatHistory 里
+                            val scriptName = selectedScript?.first ?: "脚本剧场"
+                            addChat(ctx, scriptName, "", "")
+                            val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
+                            var chatId = ""
+                            for (i in 0 until chats.length()) {
+                                if (chats.getJSONObject(i).getString("name") == scriptName) {
+                                    chatId = chats.getJSONObject(i).getString("id")
+                                    break
+                                }
+                            }
+                            if (chatId.isNotEmpty()) {
+                                val bubbles = events.mapNotNull { e ->
+                                    when (e.type) {
+                                        "narration" -> Triple("【旁白】${e.text}", false, "")
+                                        "dialogue" -> {
+                                            val isUser = e.character == "你" || e.character == "用户"
+                                            val label = if (isUser) "" else "【${e.character}】"
+                                            Triple("${label}${e.text}", isUser, java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()))
+                                        }
+                                        else -> null
+                                    }
+                                }
+                                com.aftglw.devapi.ChatHistory.save(ctx, chatId, triples)
+                            }
+                            showScriptPlayer = false
+                            (ctx as android.app.Activity).finish()
+                        }
+                    }) { Text("播放", fontSize = 13.sp) }
+                },
+                dismissButton = { TextButton(onClick = { showScriptPlayer = false }) { Text("关闭", fontSize = 13.sp) } }
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
         ToggleRow("本地模式", "用本地 Qwen 模型处理对话（需提前放置模型文件）", localMode, onLocalModeChange)
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("关闭后恢复使用云端 API", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            val dbPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+            Text("历史消息数", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.width(80.dp))
+            val ctxw = dbPrefs.getInt("context_window", 0)
+            val cwOptions = listOf(0 to "自动", 10 to "10条", 20 to "20条", 30 to "30条", 50 to "50条", 80 to "80条", 100 to "100条")
+            val cwExpanded = remember { mutableStateOf(false) }
+            Box { val cwLabel = cwOptions.find { it.first == ctxw }?.second ?: "自动"
+                Text(cwLabel, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { cwExpanded.value = true })
+                DropdownMenu(expanded = cwExpanded.value, onDismissRequest = { cwExpanded.value = false }) {
+                    cwOptions.forEach { (v, label) ->
+                        DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = {
+                            dbPrefs.edit().putInt("context_window", v).apply()
+                            cwExpanded.value = false
+                        })
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -569,6 +680,7 @@ private fun DebugPage(
                     sb.appendLine("Local Mode: ${prefs.getBoolean("local_mode", false)}")
                     sb.appendLine("Timezone: ${prefs.getString("timezone_id", java.util.TimeZone.getDefault().id)}")
                     sb.appendLine("Glass Effect: ${prefs.getBoolean("glass_transparent", false)}")
+                    sb.appendLine("Context Window: ${prefs.getInt("context_window", 0)} (0=auto)")
                     sb.appendLine("Custom Font: ${prefs.getBoolean("custom_font", false)}")
                     sb.appendLine("Notification Sound: ${prefs.getBoolean("notification_sound", true)}")
                     sb.appendLine("Notification Vibrate: ${prefs.getBoolean("notification_vibrate", true)}")

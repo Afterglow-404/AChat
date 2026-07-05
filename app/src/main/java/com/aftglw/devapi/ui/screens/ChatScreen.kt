@@ -64,7 +64,7 @@ import kotlinx.coroutines.withContext
 private val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 private fun now() = timeFormat.format(java.util.Date())
 
-data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null)
+data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "")
 
 private sealed class ChatSubPage {
     data object Chat : ChatSubPage()
@@ -294,6 +294,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                     onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
                 )
             }
+            }
             ChatSubPage.Info -> {
                 ChatInfoPage(
                     name = name, persona = persona, avatarUri = avatarUri, chatKey = chatKey,
@@ -426,6 +427,10 @@ fun ChatContent(
                                 ).padding(12.dp).widthIn(max = 240.dp)
                             ) {
                                 Column {
+                                    if (b.label.isNotEmpty() && !b.isMe) {
+                                        Text(b.label, fontSize = 11.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.height(2.dp))
+                                    }
                                     Text(b.text, fontSize = 15.sp)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         // 情绪可视化
