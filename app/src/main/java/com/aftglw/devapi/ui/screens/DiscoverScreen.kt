@@ -419,14 +419,13 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                 Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
                                 Spacer(Modifier.height(2.dp))
                                 val announcement = """
-                                **v0.0.1** 内容：
-                                  AChatの第一个版本
-                                - 有一些不是很华丽的动效
-                                - 有基础的聊天软件有的功能，但是少了很多功能
+                                **v0.1.2** 内容：
+                                  AChatの第三个版本
+                                - 修正部分内容
                                 - 暂时不像微信
-                                - 可能有用的记忆库系统
-                                - 加入微调情绪分析模型，能指导模型回复方向，但判断准确度奇差，所以暂时真没啥用
-                                AChat做到了比微信大！
+                                - 根据《人工智能拟人化互动服务管理暂行办法》做出修改
+                                - 加入Herobrine
+                                给AChat点点Star谢谢喵！
                             """.trimIndent()
                                 Text(
                                     text = parseMarkdown(announcement),

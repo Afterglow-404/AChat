@@ -136,6 +136,18 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         }
     }
 
+    // 系统消息
+    val sysPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+    val sysEnter = sysPrefs.getBoolean("sysmsg_enter", true)
+    val sysTimer = sysPrefs.getBoolean("sysmsg_timer", true)
+    LaunchedEffect(Unit) {
+        if (sysEnter) bubbles.add(0, Bubble("—— 您正在与 AI 对话 ——", false, "", label = "system"))
+        if (sysTimer) {
+            delay(7200000L)
+            bubbles.add(Bubble("—— 您已连续使用 2 小时，休息一下吧 ——", false, "", label = "system"))
+        }
+    }
+
     fun save() {
         // 超过 60 条时归档最旧 20 条
         val isArchiveEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
@@ -153,7 +165,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 } catch (_: Exception) {} /* 非关键 */
             }
         }
-        ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) })
+        ChatHistory.save(ctx, chatKey, bubbles.filter { it.label != "system" }.map { Triple(it.text, it.isMe, it.time) })
     }
 
         // 长时记忆 + 人设浓缩：每 10 轮提取
@@ -286,6 +298,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                 withContext(Dispatchers.Main) {
                                     bubbles.add(Bubble(reply, false))
                                     history.add(ChatMessage("assistant", reply))
+                                    val hotline = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getBoolean("sysmsg_hotline", true)
+                                    if (hotline && com.aftglw.devapi.MoodDetector.lastMood in listOf("悲伤", "愤怒", "害怕", "厌恶")) {
+                                        bubbles.add(Bubble("—— 如果您需要帮助，可拨打心理援助热线：12355 ——", false, "", label = "system"))
+                                    }
                                     waiting = false
                                 }
                             }
@@ -293,7 +309,6 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                     },
                     onBack = onBack, avatarUri = avatarUri, chatBgBitmap = chatBgBitmap, listState = listState
                 )
-            }
             }
             ChatSubPage.Info -> {
                 ChatInfoPage(
@@ -416,6 +431,12 @@ fun ChatContent(
                             }
                             Spacer(Modifier.width(8.dp))
                         }
+                        if (b.label == "system") {
+                            // 系统消息：居中灰字
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(b.text, fontSize = 11.sp, color = Color(0xFFAAAAAA), lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+                        } else {
                         Box {
                             Box(
                                 Modifier.combinedClickable(
@@ -504,6 +525,7 @@ fun ChatContent(
                     }
                 }
             }
+                        }
         }
 
             Row(
