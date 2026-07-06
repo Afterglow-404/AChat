@@ -155,6 +155,8 @@ class DebugOverlayService : Service() {
         val src = MoodDetector.lastSource
         val modelErr = MoodDetector.lastModelError
         val conf = MoodModel.lastConfidence
+        val activeChat = prefs.getString("last_active_chat", "") ?: ""
+        val aiEmo = if (activeChat.isNotEmpty()) com.aftglw.devapi.MemoryStore.search(this, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: "" else ""
         tvEmoResult.text = when {
             !emoEnabled -> "off"
             src == "model_unavailable" -> "no model${if (modelErr.isNotEmpty()) "|$modelErr" else ""}"
@@ -164,7 +166,7 @@ class DebugOverlayService : Service() {
             last == null -> "waiting..."
             hint != null -> "$last(${hint.take(20)})"
             else -> last
-        }
+        } + if (aiEmo.isNotEmpty()) " | AI:$aiEmo" else ""
         val affPrefs = getSharedPreferences("wechat_settings", MODE_PRIVATE)
         val chatName = affPrefs.getString("last_active_chat", "") ?: ""
         tvChatId.text = if (chatName.isNotEmpty()) chatName else "(none)"

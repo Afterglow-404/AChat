@@ -689,6 +689,7 @@ private fun DebugPage(
                     sb.appendLine("Feed Count: ${com.aftglw.devapi.MoodDetector.feedCount}")
                     sb.appendLine("Model Error: ${com.aftglw.devapi.MoodDetector.lastModelError}")
                     sb.appendLine("Last ONNX Confidence: ${(com.aftglw.devapi.MoodModel.lastConfidence * 100).toInt()}%")
+                    sb.appendLine("AI Emotion Memory: active (via reflection)")
                     sb.appendLine()
                     sb.appendLine("=== Usage ===")
                     sb.appendLine("Last Tokens In: ${prefs.getInt("last_tokens_in", 0)}")
