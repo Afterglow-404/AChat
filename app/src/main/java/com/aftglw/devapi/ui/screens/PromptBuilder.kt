@@ -17,6 +17,9 @@ object PromptBuilder {
         val optimizedBlock = if (optimized.isNotBlank()) "\n\n【聊天偏好】$optimized" else ""
         val traitsBlock = if (traits.isNotBlank()) "\n\n【用户特点】$traits" else ""
         val memoryBlock = if (memoryContext.isNotBlank()) "\n\n【关于对方的记忆】\n$memoryContext" else ""
+        val aiEmoBlock = MemoryStore.search(ctx, "情绪", 1, "ai_emo:$name").firstOrNull()?.let {
+            "\n\n【你的记忆】\n$it.text"
+        } ?: ""
 
         val now = System.currentTimeMillis()
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
@@ -51,9 +54,9 @@ object PromptBuilder {
         val baseInstruction = "\n\n回复要求：每句话不超过 15 个字，一次只说 1-2 句。禁止 AI 套话：\"有什么可以帮你的吗\"\"当然可以\"\"总的来说\"。禁止说\"不是……而是……\"。禁止说\"我理解你的感受\"。禁止分点、列表、总结。允许省略句。"
 
         return if (persona.isNotBlank()) {
-            "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$baseInstruction$memoryBlock$timeBlock"
+            "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$aiEmoBlock$baseInstruction$memoryBlock$timeBlock"
         } else {
-            "你是一个聊天伙伴。请用口语短句回复，像朋友聊天一样自然。$baseInstruction$diaryMemoryBlock$traitsBlock$optimizedBlock$affinityBlock$memoryBlock$timeBlock"
+            "你是一个聊天伙伴。请用口语短句回复，像朋友聊天一样自然。$baseInstruction$diaryMemoryBlock$traitsBlock$optimizedBlock$affinityBlock$aiEmoBlock$memoryBlock$timeBlock"
         }
     }
 }

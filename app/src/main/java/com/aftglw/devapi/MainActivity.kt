@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,25 +41,26 @@ class MainActivity : ComponentActivity() {
             }
 
             if (!agreed) {
+                var countdown by remember { mutableIntStateOf(5) }
+                LaunchedEffect(Unit) { while (countdown > 0) { delay(1000); countdown-- } }
                 AlertDialog(
                     onDismissRequest = {},
-                    title = { Text("// 注意 //", fontWeight = FontWeight.Bold) },
+                    title = { Text("⚠️ 注意", fontWeight = FontWeight.Bold) },
                     text = {
                         Column {
                             Text(
                                 buildAnnotatedString {
-                                    append("此版本 AChat 为 ")
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Pre-Alpha (Dev)") }
-                                    append(" 应用\n\n")
-                                    append("• AI 输出内容可能不准确\n")
-                                    append("• 功能可能随时变动\n")
+                                    append("此版本 AChat 处于 ")
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Dev") }
+                                    append(" 阶段\n\n")
+                                    append("• 功能特性随时变动\n")
                                     append("• 你很有可能会看到 Bug\n")
-                                    append("• “发现”页正在完善中...\n")
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("• 请勿依赖本应用处理重要事务\n") }
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("• 请勿随意分享本应用\n") }
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("• 请勿轻信本应用 AI 提供内容\n") }
-                                    append("• 目前无聊天记录加密功能，如果分享了应用喵...数据可能会以奇怪的方式泄漏喵...\n\n")
-                                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("请...好好的使用 AChat...") }
+                                    append("• 未完待续...\n")
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• 请勿依赖 AI 聊天\n") }
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• 请勿随意分享您的 API Key\n") }
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• AI 无法真正理解人类的情绪，AI 只是在当下语境选择了最可能出现的词汇并输出\n") }
+                                    append("• AChat 不保存任何您的聊天数据，也不共享\n\n")
+                                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("请...理性地使用 AChat 喵...") }
                                 },
                                 fontSize = 14.sp, lineHeight = 20.sp
                             )
@@ -71,11 +73,14 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     confirmButton = {
-                        TextButton({
-                            if (neverShowAgain) prefs.edit().putBoolean("skip_startup_dialog", true).apply()
-                            agreed = true
-                        }) {
-                            Text("哦好的", color = Color(0xFF07C160))
+                        TextButton(
+                            enabled = countdown == 0,
+                            onClick = {
+                                if (neverShowAgain) prefs.edit().putBoolean("skip_startup_dialog", true).apply()
+                                agreed = true
+                            }
+                        ) {
+                            Text(if (countdown > 0) "请阅读 (${countdown}s)" else "哦好的", color = if (countdown == 0) Color(0xFF07C160) else Color.Gray)
                         }
                     },
                     dismissButton = {
@@ -91,13 +96,13 @@ class MainActivity : ComponentActivity() {
                     text = {
                         Column {
                             Text(
-                                "AChat 是一个模仿微信风格的 AI 聊天应用。\n\n" +
-                                "你可以：\n" +
+                                "AChat 是一个 AI 聊天应用。\n\n" +
+                                "您可以：\n" +
                                 "• 配置 API 后和 AI 自由对话\n" +
                                 "• 在「发现」页面看看趣味功能\n" +
                                 "• 用人设工坊打造专属角色\n" +
                                 "• 未完待续...\n\n" +
-                                "你想从哪里开始？",
+                                "您想从哪里开始？",
                                 fontSize = 14.sp, lineHeight = 20.sp
                             )
                         }

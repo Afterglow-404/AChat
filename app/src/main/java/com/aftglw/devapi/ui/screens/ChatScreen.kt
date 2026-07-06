@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.tooling.preview.Preview
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
+import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.AffinityManager
 import com.aftglw.devapi.ChatHistory
 import com.aftglw.devapi.MoodDetector
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
@@ -354,12 +356,16 @@ fun ChatContent(
         if (chatBgBitmap != null) {
             Image(chatBgBitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Column(
-            Modifier.fillMaxSize().imePadding().background(
-                if (chatBgBitmap != null) Color.White.copy(alpha = 0.75f)
-                else Color(0xFFF5F5F5)
-            )
-        ) {
+        val chatContentBgModifier = if (chatBgBitmap != null) {
+            Modifier.background(Color.White.copy(alpha = 0.75f))
+        } else {
+            when (AchatTheme.colors.themeId) {
+                "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+                "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+                else -> Modifier.background(AchatTheme.colors.background)
+            }
+        }
+        Column(Modifier.fillMaxSize().imePadding().then(chatContentBgModifier)) {
             CenterAlignedTopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -375,26 +381,29 @@ fun ChatContent(
                         }
                         Text(
                             if (waiting && bubbles.isNotEmpty()) "对方正在输入..." else name,
-                            color = Color(0xFF1A1A1A),
+                            color = AchatTheme.colors.onSurface,
                             style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = AchatTheme.typography.title
                         )
                     }
                 },
                 navigationIcon = {
                     IconButton(onBack, Modifier.size(40.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface)
                     }
                 },
                 actions = {
                     IconButton(onClick = onInfoClick) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "详情", tint = Color(0xFF888888))
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "详情", tint = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
+                    .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier)
+                    .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier)
             )
-            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+            HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
             LazyColumn(
                 Modifier.weight(1f).fillMaxWidth(),
@@ -405,14 +414,15 @@ fun ChatContent(
                 itemsIndexed(bubbles, key = { i, _ -> i }) { idx, b ->
                     var menuExpanded by remember { mutableStateOf(false) }
                     val isNew = bubbles.size - idx <= 1
+                    
                     StaggeredEntrance(index = idx, visible = true) {
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = if (b.isMe) Arrangement.End else Arrangement.Start
                         ) {
-                        if (!b.isMe) {
+                        if (!b.isMe && b.label != "system") {
                             Box(
-                                Modifier.size(32.dp).clip(CircleShape).background(Color(0xFF07C160)),
+                                Modifier.size(32.dp).clip(CircleShape).background(AchatTheme.colors.primary),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (avatarUri.isNotEmpty()) {
@@ -434,7 +444,7 @@ fun ChatContent(
                         if (b.label == "system") {
                             // 系统消息：居中灰字
                             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                                Text(b.text, fontSize = 11.sp, color = Color(0xFFAAAAAA), lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text(b.text, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                         } else {
                         Box {
@@ -443,16 +453,20 @@ fun ChatContent(
                                     onClick = {},
                                     onLongClick = { menuExpanded = true }
                                 ).background(
-                                    if (b.isMe) Color(0xFF8CE09C) else Color.White,
-                                    RoundedCornerShape(if (b.isMe) 20.dp else 8.dp, 8.dp, 20.dp, 20.dp)
+                                    if (b.isMe) AchatTheme.colors.chatBubbleMe else AchatTheme.colors.chatBubbleAi,
+                                    if (b.isMe) AchatTheme.shapes.bubbleMe else AchatTheme.shapes.bubbleAi
+                                ).then(
+                                    if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(all = true) else Modifier
+                                ).then(
+                                    if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, idx) else Modifier
                                 ).padding(12.dp).widthIn(max = 240.dp)
                             ) {
                                 Column {
                                     if (b.label.isNotEmpty() && !b.isMe) {
-                                        Text(b.label, fontSize = 11.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                                        Text(b.label, fontSize = 11.sp, color = AchatTheme.colors.primary, fontWeight = FontWeight.Bold, fontFamily = AchatTheme.typography.title)
                                         Spacer(Modifier.height(2.dp))
                                     }
-                                    Text(b.text, fontSize = 15.sp)
+                                    Text(b.text, fontSize = 15.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         // 情绪可视化
                                         val moodVis = prefs.getBoolean("mood_visualization", false) && prefs.getBoolean("mood_enabled", false)
@@ -467,7 +481,7 @@ fun ChatContent(
                                             }
                                         }
                                         if (showTimestamps && b.time.isNotEmpty()) {
-                                            Text(b.time, fontSize = 10.sp, color = Color(0xFF888888))
+                                            Text(b.time, fontSize = 10.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.mono)
                                         }
                                     }
                                 }
@@ -502,7 +516,7 @@ fun ChatContent(
                         if (b.isMe) {
                             Spacer(Modifier.width(8.dp))
                             Box(
-                                Modifier.size(32.dp).clip(CircleShape).background(Color(0xFF07C160)),
+                                Modifier.size(32.dp).clip(CircleShape).background(AchatTheme.colors.primary),
                                 contentAlignment = Alignment.Center
                             ) {
                                 val myAvatar = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
@@ -529,7 +543,7 @@ fun ChatContent(
         }
 
             Row(
-                Modifier.fillMaxWidth().background(Color.White)
+                Modifier.fillMaxWidth().background(AchatTheme.colors.surface)
                     .navigationBarsPadding().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -540,15 +554,15 @@ fun ChatContent(
                     textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = Color(0xFFE8E8E8).copy(alpha = 0.8f),
-                        unfocusedContainerColor = Color(0xFFE8E8E8).copy(alpha = 0.5f)
+                        focusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.5f),
+                        unfocusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.3f)
                     ),
                     enabled = !waiting
                 )
                 Spacer(Modifier.width(8.dp))
                 TextButton(
                     onClick = onSend,
-                    Modifier.background(Color(0xFF07C160), RoundedCornerShape(18.dp)),
+                    Modifier.background(AchatTheme.colors.primary, RoundedCornerShape(18.dp)),
                     colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
                 ) {
                     Text(if (waiting) "..." else "发送")
@@ -571,36 +585,36 @@ private fun ChatInfoPage(
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
     val hasKey = prefs.getString("ai_api_key", "")?.isNotEmpty() == true
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+    Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
-            title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) } },
+            title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(80.dp).clip(CircleShape).background(Color(0xFFE0E0E0)), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(80.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
                     if (avatarUri.isNotEmpty()) {
                         val bmp = remember(avatarUri) {
                             try { BitmapFactory.decodeFile(avatarUri)?.asImageBitmap() }
                             catch (_: Exception) { null }
                         }
                         if (bmp != null) Image(bmp, null, Modifier.size(80.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                        else Text(name.take(1), fontSize = 28.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                    } else Text(name.take(1), fontSize = 28.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        else Text(name.take(1), fontSize = 28.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                    } else Text(name.take(1), fontSize = 28.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                 }
             }
 
             InfoRow("对话名称", name)
             if (persona.isNotEmpty()) {
                 var showEditPersona by remember { mutableStateOf(false) }
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp).clickable { showEditPersona = true }, verticalAlignment = Alignment.CenterVertically) {
-                    Text("角色人设", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.weight(0.3f))
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 14.dp).clickable { showEditPersona = true }, verticalAlignment = Alignment.CenterVertically) {
+                    Text("角色人设", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), modifier = Modifier.weight(0.3f))
                     Spacer(Modifier.width(8.dp))
-                    Text(persona, fontSize = 14.sp, color = Color(0xFF1A1A1A), maxLines = 2, modifier = Modifier.weight(0.6f))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = Color(0xFFCCCCCC), modifier = Modifier.size(18.dp))
+                    Text(persona, fontSize = 14.sp, color = AchatTheme.colors.onSurface, maxLines = 2, modifier = Modifier.weight(0.6f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
                 }
                 if (showEditPersona) {
                     var editP by remember { mutableStateOf(persona) }
@@ -668,11 +682,11 @@ private fun ChatInfoPage(
 
             // 主动关怀设置
             Spacer(Modifier.height(8.dp))
-            androidx.compose.material3.Text("主动关怀", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
+            androidx.compose.material3.Text("主动关怀", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                 var proactiveEnabled by remember { mutableStateOf(prefs.getBoolean("proactive_enabled_$name", false)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("主动关怀", Modifier.weight(1f), fontSize = 14.sp)
+                    Text("主动关怀", Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface)
                     Switch(checked = proactiveEnabled, onCheckedChange = { v ->
                         proactiveEnabled = v; prefs.edit().putBoolean("proactive_enabled_$name", v).apply()
                     })
@@ -681,11 +695,11 @@ private fun ChatInfoPage(
                     Spacer(Modifier.height(4.dp))
                     var dailyLimit by remember { mutableIntStateOf(prefs.getInt("proactive_daily_limit_$name", 3)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("每日上限", Modifier.weight(1f), fontSize = 13.sp, color = Color.Gray)
+                        Text("每日上限", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
                         androidx.compose.material3.Slider(value = dailyLimit.toFloat(), onValueChange = { v ->
                             dailyLimit = v.toInt(); prefs.edit().putInt("proactive_daily_limit_$name", v.toInt()).apply()
-                        }, valueRange = 1f..20f, steps = 3, modifier = Modifier.width(120.dp))
-                        Text("${dailyLimit}条", fontSize = 13.sp)
+                        }, valueRange = 1f..20f, steps = 3, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text("${dailyLimit}条", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
                     }
                     var idleHours by remember { mutableIntStateOf(prefs.getInt("proactive_idle_hours_$name", 8)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -782,19 +796,19 @@ private fun ChatInfoPage(
             }
             Button(
                 onClick = { exportLauncher.launch("${name}_chat.json") },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
-                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
+                shape = AchatTheme.shapes.card,
                 modifier = Modifier.fillMaxWidth().height(44.dp)
             ) { Text("导出聊天记录", fontSize = 14.sp) }
 
             // 记忆管理 + 对话优化
             Spacer(Modifier.height(8.dp))
-            androidx.compose.material3.Text("优化", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
+            androidx.compose.material3.Text("优化", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                 var autoArchive by remember { mutableStateOf(prefs.getBoolean("auto_archive_$name", true)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("自动归档", Modifier.weight(1f), fontSize = 14.sp)
-                    Text("超过 60 条时压缩旧对话", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
+                    Text("自动归档", Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface)
+                    Text("超过 60 条时压缩旧对话", fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(end = 8.dp))
                     Switch(checked = autoArchive, onCheckedChange = { v -> autoArchive = v; prefs.edit().putBoolean("auto_archive_$name", v).apply() })
                 }
                 var dialogueOpt by remember { mutableStateOf(prefs.getBoolean("dialogue_optimization_$name", false)) }
@@ -814,10 +828,10 @@ private fun ChatInfoPage(
             Spacer(Modifier.height(4.dp))
             var optimizedText by remember { mutableStateOf(prefs.getString("persona_optimized_$name", "") ?: "") }
             var showEditOpt by remember { mutableStateOf(false) }
-            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp).clickable { showEditOpt = true }, verticalAlignment = Alignment.CenterVertically) {
-                Text("聊天偏好", fontSize = 12.sp, color = Color(0xFF888888), modifier = Modifier.width(64.dp))
-                Text(if (optimizedText.isNotBlank()) optimizedText else "AI 每 10 轮自动生成", fontSize = 12.sp, color = if (optimizedText.isNotBlank()) Color(0xFF333333) else Color(0xFFBBBBBB), modifier = Modifier.weight(1f), maxLines = 2)
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = Color(0xFFCCCCCC), modifier = Modifier.size(18.dp))
+            Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 8.dp).clickable { showEditOpt = true }, verticalAlignment = Alignment.CenterVertically) {
+                Text("聊天偏好", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.width(64.dp))
+                Text(if (optimizedText.isNotBlank()) optimizedText else "AI 每 10 轮自动生成", fontSize = 12.sp, color = if (optimizedText.isNotBlank()) AchatTheme.colors.onSurface else AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.weight(1f), maxLines = 2)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
             }
             if (showEditOpt) {
                 var editText by remember { mutableStateOf(optimizedText) }
@@ -847,12 +861,12 @@ private fun ChatInfoPage(
             // 情绪可视化
             if (prefs.getBoolean("mood_enabled", false)) {
                 Spacer(Modifier.height(8.dp))
-                androidx.compose.material3.Text("情绪", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
+                androidx.compose.material3.Text("情绪", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                     var moodVis by remember { mutableStateOf(prefs.getBoolean("mood_visualization", false)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("情绪可视化", Modifier.weight(1f), fontSize = 14.sp)
-                        Text("在消息旁显示情绪表情", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(end = 8.dp))
+                        Text("情绪可视化", Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface)
+                        Text("在消息旁显示情绪表情", fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(end = 8.dp))
                         Switch(checked = moodVis, onCheckedChange = { v -> moodVis = v; prefs.edit().putBoolean("mood_visualization", v).apply() })
                     }
                 }
@@ -860,22 +874,22 @@ private fun ChatInfoPage(
 
             // 日记与收藏
             Spacer(Modifier.height(8.dp))
-            androidx.compose.material3.Text("记忆", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp)) {
+            androidx.compose.material3.Text("记忆", Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                 val diaryCount = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 1, "diary:$name").size
                 val starred = com.aftglw.devapi.MemoryStore.search(ctx, "收藏", 10, "starred:$name")
                 Row(Modifier.fillMaxWidth().clickable { onNavigateToDiary() }, verticalAlignment = Alignment.CenterVertically) {
-                    Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
+                    Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
                 }
                 Row(Modifier.fillMaxWidth().clickable { onNavigateToMemory() }, verticalAlignment = Alignment.CenterVertically) {
-                    Text("🧠 全部记忆", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = Color(0xFFAAAAAA))
+                    Text("🧠 全部记忆", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("⭐ 收藏 (${starred.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF888888))
-                if (starred.isEmpty()) Text("暂无收藏", fontSize = 12.sp, color = Color(0xFFBBBBBB))
-                else starred.forEach { Text("• ${it.text.take(60)}", fontSize = 12.sp, color = Color(0xFF555555), modifier = Modifier.padding(vertical = 2.dp)) }
+                Text("⭐ 收藏 (${starred.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
+                if (starred.isEmpty()) Text("暂无收藏", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
+                else starred.forEach { Text("• ${it.text.take(60)}", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.8f), modifier = Modifier.padding(vertical = 2.dp)) }
             }
 
             // 好感度设置
@@ -915,32 +929,32 @@ private fun ChatInfoPage(
 private fun DiaryPage(name: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
     var diaries by remember { mutableStateOf(com.aftglw.devapi.MemoryStore.search(ctx, "日记", 50, "diary:$name")) }
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+    Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
-            title = { Text("📖 日记", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) } },
+            title = { Text("📖 日记", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         if (diaries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无日记", fontSize = 14.sp, color = Color(0xFFBBBBBB))
+                Text("暂无日记", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
             }
         } else LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(diaries, key = { i, _ -> i }) { _, d ->
                 val dateLabel = d.text.take(10)
                 val content = d.text.drop(11)
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = AchatTheme.colors.surface), shape = AchatTheme.shapes.card) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(dateLabel, fontSize = 11.sp, color = Color(0xFFAAAAAA), modifier = Modifier.width(64.dp))
-                        Text(content, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 13.sp, color = Color(0xFF333333), maxLines = 3)
+                        Text(dateLabel, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), modifier = Modifier.width(64.dp))
+                        Text(content, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 13.sp, color = AchatTheme.colors.onSurface, maxLines = 3)
                         IconButton(onClick = {
                             com.aftglw.devapi.MemoryStore.deleteByText(d.text, "diary:$name")
                             diaries = com.aftglw.devapi.MemoryStore.search(ctx, "日记", 50, "diary:$name")
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                "删除", tint = Color(0xFFCCCCCC),
+                                "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -957,37 +971,37 @@ private fun MemoryPage(name: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
     var query by remember { mutableStateOf("") }
     var items by remember { mutableStateOf(com.aftglw.devapi.MemoryStore.search(ctx, "", 100, "$name")) }
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+    Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
-            title = { Text("🧠 全部记忆", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) } },
+            title = { Text("🧠 全部记忆", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         OutlinedTextField(
             value = query, onValueChange = { q -> query = q; items = com.aftglw.devapi.MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name") },
             modifier = Modifier.fillMaxWidth().padding(12.dp), placeholder = { Text("搜索记忆...", fontSize = 14.sp) },
             singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface)
         )
         if (items.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无记忆", fontSize = 14.sp, color = Color(0xFFBBBBBB))
+                Text("暂无记忆", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
             }
         } else LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             itemsIndexed(items, key = { i, _ -> i }) { _, m ->
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = AchatTheme.colors.surface), shape = AchatTheme.shapes.card) {
                     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         val topicTag = m.topic.take(12)
                         Column(Modifier.weight(1f)) {
-                            Text(topicTag, fontSize = 10.sp, color = Color(0xFFAAAAAA))
-                            Text(m.text, fontSize = 13.sp, color = Color(0xFF333333), maxLines = 3)
+                            Text(topicTag, fontSize = 10.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f))
+                            Text(m.text, fontSize = 13.sp, color = AchatTheme.colors.onSurface, maxLines = 3)
                         }
                         IconButton(onClick = {
                             com.aftglw.devapi.MemoryStore.deleteByText(m.text, "$name")
                             items = com.aftglw.devapi.MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
                         }, modifier = Modifier.size(32.dp)) {
-                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = Color(0xFFCCCCCC), modifier = Modifier.size(16.dp))
+                            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
                         }
                     }
                 }

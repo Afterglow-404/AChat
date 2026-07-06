@@ -41,6 +41,7 @@ import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
+import com.aftglw.devapi.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -105,6 +106,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var physicsEnabled by remember { mutableStateOf(prefs.getBoolean("physics_enabled", true)) }
     var customFont by remember { mutableStateOf(initialCustom) }
     var longContextMode by remember { mutableStateOf(prefs.getBoolean("long_context_mode", true)) }
+    var currentThemeId by remember { mutableStateOf(prefs.getString("current_theme", "default") ?: "default") }
     
     var showTimestamps by remember { mutableStateOf(prefs.getBoolean("show_timestamps", true)) }
     var hitokotoType by remember { mutableStateOf(prefs.getString("hitokoto_type", "") ?: "") }
@@ -147,90 +149,99 @@ private fun SettingsRoot(onBack: () -> Unit) {
     val goBack: () -> Unit = { currentPage = SettingsPage.Main }
     val nav: (SettingsPage) -> Unit = { currentPage = it }
 
-    MaterialTheme(typography = typography.value) {
-    AnimatedContent(
-        targetState = currentPage,
-        transitionSpec = {
-            AnimationUtils.slideHorizontal(forward = targetState !is SettingsPage.Main)
-        },
-        label = "settings"
-    ) { page ->
-    when (page) {
-        is SettingsPage.Main -> SettingsMainPage(onBack = onBack, onNav = nav)
-        is SettingsPage.Profile -> ProfilePage(
-            onBack = goBack,
-            profileName, { profileName = it; prefs.edit().putString("profile_name", it).apply() },
-            profileWechatId, { profileWechatId = it; prefs.edit().putString("profile_wechat_id", it).apply() },
-            profileAvatarUri,
-            { profileAvatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            { profileAvatarUri = ""; prefs.edit().remove("profile_avatar_uri").apply() }
-        )
-        is SettingsPage.Notifications -> NotificationsPage(
-            onBack = goBack,
-            sound, { sound = it; prefs.edit().putBoolean("notification_sound", it).apply() },
-            vibrate, { vibrate = it; prefs.edit().putBoolean("notification_vibrate", it).apply() }
-        )
-        is SettingsPage.AiApi -> AiApiPage(
-            onBack = goBack,
-            apiUrl, { apiUrl = it; prefs.edit().putString("ai_api_url", it).apply() },
-            apiKey, { apiKey = it; prefs.edit().putString("ai_api_key", it).apply() },
-            model, { model = it; prefs.edit().putString("ai_model", it).apply() },
-            mockReplies, { mockReplies = it; prefs.edit().putString("mock_replies", it).apply() },
-            mockDelay, { mockDelay = it; prefs.edit().putString("mock_delay_ms", it).apply() },
-            longContextMode, { longContextMode = it; prefs.edit().putBoolean("long_context_mode", it).apply() }
-        )
-        is SettingsPage.ManageRoles -> ManageRolesPage(
-            onBack = goBack,
-            newChatName, { newChatName = it },
-            newChatPersona, { newChatPersona = it },
-            newChatAvatarUri,
-            onPickAvatar = { roleAvatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            onClearAvatar = { newChatAvatarUri = "" },
-            onCreateChat = {
-                val name = newChatName.trim()
-                if (name.isNotBlank()) {
-                    addChat(ctx, name, newChatPersona.trim(), newChatAvatarUri)
-                    newChatName = ""; newChatPersona = ""; newChatAvatarUri = ""
-                    Toast.makeText(ctx, "已添加喵~", Toast.LENGTH_SHORT).show()
+    val themeColors = if (currentThemeId == "newspaper") NewspaperAchatColors else DefaultAchatColors
+    val themeShapes = if (currentThemeId == "newspaper") NewspaperAchatShapes else DefaultAchatShapes
+
+    CompositionLocalProvider(
+        LocalAchatColors provides themeColors,
+        LocalAchatShapes provides themeShapes
+    ) {
+        MaterialTheme(typography = typography.value, colorScheme = if (themeColors.isDark) darkColorScheme(primary = themeColors.primary, background = themeColors.background, surface = themeColors.surface) else lightColorScheme(primary = themeColors.primary, background = themeColors.background, surface = themeColors.surface)) {
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = {
+                    AnimationUtils.slideHorizontal(forward = targetState !is SettingsPage.Main)
+                },
+                label = "settings"
+            ) { page ->
+                when (page) {
+                    is SettingsPage.Main -> SettingsMainPage(onBack = onBack, onNav = nav)
+                    is SettingsPage.Profile -> ProfilePage(
+                        onBack = goBack,
+                        profileName, { profileName = it; prefs.edit().putString("profile_name", it).apply() },
+                        profileWechatId, { profileWechatId = it; prefs.edit().putString("profile_wechat_id", it).apply() },
+                        profileAvatarUri,
+                        { profileAvatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        { profileAvatarUri = ""; prefs.edit().remove("profile_avatar_uri").apply() }
+                    )
+                    is SettingsPage.Notifications -> NotificationsPage(
+                        onBack = goBack,
+                        sound, { sound = it; prefs.edit().putBoolean("notification_sound", it).apply() },
+                        vibrate, { vibrate = it; prefs.edit().putBoolean("notification_vibrate", it).apply() }
+                    )
+                    is SettingsPage.AiApi -> AiApiPage(
+                        onBack = goBack,
+                        apiUrl, { apiUrl = it; prefs.edit().putString("ai_api_url", it).apply() },
+                        apiKey, { apiKey = it; prefs.edit().putString("ai_api_key", it).apply() },
+                        model, { model = it; prefs.edit().putString("ai_model", it).apply() },
+                        mockReplies, { mockReplies = it; prefs.edit().putString("mock_replies", it).apply() },
+                        mockDelay, { mockDelay = it; prefs.edit().putString("mock_delay_ms", it).apply() },
+                        longContextMode, { longContextMode = it; prefs.edit().putBoolean("long_context_mode", it).apply() }
+                    )
+                    is SettingsPage.ManageRoles -> ManageRolesPage(
+                        onBack = goBack,
+                        newChatName, { newChatName = it },
+                        newChatPersona, { newChatPersona = it },
+                        newChatAvatarUri,
+                        onPickAvatar = { roleAvatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        onClearAvatar = { newChatAvatarUri = "" },
+                        onCreateChat = {
+                            val name = newChatName.trim()
+                            if (name.isNotBlank()) {
+                                addChat(ctx, name, newChatPersona.trim(), newChatAvatarUri)
+                                newChatName = ""; newChatPersona = ""; newChatAvatarUri = ""
+                                Toast.makeText(ctx, "已添加喵~", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                    is SettingsPage.Backgrounds -> BackgroundsPage(
+                        onBack = goBack,
+                        mainBgUri, { mainBgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        { mainBgUri = ""; prefs.edit().remove("main_bg_uri").apply(); Toast.makeText(ctx, "已重置", Toast.LENGTH_SHORT).show() },
+                        chatBgUri, { chatBgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        { chatBgUri = ""; prefs.edit().remove("chat_bg_uri").apply(); Toast.makeText(ctx, "已重置", Toast.LENGTH_SHORT).show() }
+                    )
+                    is SettingsPage.Appearance -> AppearancePage(
+                        onBack = goBack,
+                        glassTransparent, { glassTransparent = it; prefs.edit().putBoolean("glass_transparent", it).apply() },
+                        physicsEnabled, { physicsEnabled = it; prefs.edit().putBoolean("physics_enabled", it).apply() },
+                        customFont, { customFont = it; prefs.edit().putBoolean("custom_font", it).apply() },
+                        showTimestamps, { showTimestamps = it; prefs.edit().putBoolean("show_timestamps", it).apply() },
+                        hitokotoType, { hitokotoType = it; prefs.edit().putString("hitokoto_type", it).apply() },
+                        currentThemeId, { currentThemeId = it; prefs.edit().putString("current_theme", it).apply() },
+                        onNavToWC = { nav(SettingsPage.WCPreview) }
+                    )
+                    is SettingsPage.Debug -> DebugPage(
+                        onBack = goBack,
+                        debug, { v ->
+                            debug = v; prefs.edit().putBoolean("debug_overlay", v).apply()
+                            if (v) {
+                                if (Settings.canDrawOverlays(ctx)) ctx.startService(Intent(ctx, DebugOverlayService::class.java))
+                                else {
+                                    Toast.makeText(ctx, "请先授予悬浮窗权限喵~", Toast.LENGTH_LONG).show()
+                                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+                                }
+                            } else ctx.stopService(Intent(ctx, DebugOverlayService::class.java))
+                        },
+                        moodEnabled, { moodEnabled = it; prefs.edit().putBoolean("mood_enabled", it).apply() },
+                        affinityEnabled, { affinityEnabled = it; prefs.edit().putBoolean("affinity_enabled", it).apply() },
+                        localMode, { localMode = it; prefs.edit().putBoolean("local_mode", it).apply(); if (!it) com.aftglw.devapi.network.AiServiceFactory.unloadLocal() }
+                    )
+                    is SettingsPage.About -> AboutPage(onBack = goBack)
+                    is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
                 }
             }
-        )
-        is SettingsPage.Backgrounds -> BackgroundsPage(
-            onBack = goBack,
-            mainBgUri, { mainBgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            { mainBgUri = ""; prefs.edit().remove("main_bg_uri").apply(); Toast.makeText(ctx, "已重置", Toast.LENGTH_SHORT).show() },
-            chatBgUri, { chatBgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            { chatBgUri = ""; prefs.edit().remove("chat_bg_uri").apply(); Toast.makeText(ctx, "已重置", Toast.LENGTH_SHORT).show() }
-        )
-        is SettingsPage.Appearance -> AppearancePage(
-            onBack = goBack,
-            glassTransparent, { glassTransparent = it; prefs.edit().putBoolean("glass_transparent", it).apply() },
-            physicsEnabled, { physicsEnabled = it; prefs.edit().putBoolean("physics_enabled", it).apply() },
-            customFont, { customFont = it; prefs.edit().putBoolean("custom_font", it).apply() },
-            showTimestamps, { showTimestamps = it; prefs.edit().putBoolean("show_timestamps", it).apply() },
-            hitokotoType, { hitokotoType = it; prefs.edit().putString("hitokoto_type", it).apply() },
-            onNavToWC = { nav(SettingsPage.WCPreview) }
-        )
-        is SettingsPage.Debug -> DebugPage(
-            onBack = goBack,
-            debug, { v ->
-                debug = v; prefs.edit().putBoolean("debug_overlay", v).apply()
-                if (v) {
-                    if (Settings.canDrawOverlays(ctx)) ctx.startService(Intent(ctx, DebugOverlayService::class.java))
-                    else {
-                        Toast.makeText(ctx, "请先授予悬浮窗权限喵~", Toast.LENGTH_LONG).show()
-                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-                    }
-                } else ctx.stopService(Intent(ctx, DebugOverlayService::class.java))
-            },
-            moodEnabled, { moodEnabled = it; prefs.edit().putBoolean("mood_enabled", it).apply() },
-            affinityEnabled, { affinityEnabled = it; prefs.edit().putBoolean("affinity_enabled", it).apply() },
-            localMode, { localMode = it; prefs.edit().putBoolean("local_mode", it).apply(); if (!it) com.aftglw.devapi.network.AiServiceFactory.unloadLocal() }
-        )
-        is SettingsPage.About -> AboutPage(onBack = goBack)
-        is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
-    }
-    }
+        }
     }
 }
 
@@ -252,7 +263,7 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
         Triple("AI 接口", "API 地址、密钥、模型与离线状态随机回复", SettingsPage.AiApi),
         Triple("管理角色", "添加对话角色与设定人设", SettingsPage.ManageRoles),
         Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
-        Triple("界面设置", "通透效果、液态动效、字体", SettingsPage.Appearance),
+        Triple("界面设置", "通透效果、液态动效、字体、主题", SettingsPage.Appearance),
         Triple("调试", "开发用功能", SettingsPage.Debug),
         Triple("关于", "AChat 信息", SettingsPage.About)
     )
@@ -260,13 +271,14 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("设置", color = Color(0xFF1A1A1A)) },
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color(0xFF1A1A1A)) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                title = { Text("设置", color = AchatTheme.colors.onSurface) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AchatTheme.colors.surface)
             )
-        }
+        },
+        containerColor = AchatTheme.colors.background
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).background(Color(0xFFF5F5F5)).verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().padding(pad).background(AchatTheme.colors.background).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
             entries.forEachIndexed { index, (title, subtitle, page) ->
                 var visible by remember { mutableStateOf(false) }
@@ -283,16 +295,16 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
 @Composable
 private fun SettingsEntry(title: String, subtitle: String, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().background(Color.White).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp)
-            Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+            Text(title, fontSize = 16.sp, color = AchatTheme.colors.onSurface)
+            Text(subtitle, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFCCCCCC))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
     }
-    HorizontalDivider(Modifier.padding(start = 16.dp), color = Color(0xFFF0F0F0))
+    HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -301,13 +313,14 @@ private fun SubPageScaffold(title: String, onBack: () -> Unit, content: @Composa
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(title, color = Color(0xFF1A1A1A)) },
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color(0xFF1A1A1A)) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                title = { Text(title, color = AchatTheme.colors.onSurface) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AchatTheme.colors.surface)
             )
-        }
+        },
+        containerColor = AchatTheme.colors.background
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).background(Color(0xFFF5F5F5)).verticalScroll(rememberScrollState()), content = content)
+        Column(Modifier.fillMaxSize().padding(pad).background(AchatTheme.colors.background).verticalScroll(rememberScrollState()), content = content)
     }
 }
 
@@ -321,21 +334,21 @@ private fun ProfilePage(
     SubPageScaffold("个人信息", onBack) {
         Spacer(Modifier.height(8.dp))
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(Modifier.size(56.dp).clip(CircleShape).background(Color(0xFFF0F0F0)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(56.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
                 if (profileAvatarUri.isNotEmpty()) {
                     val bmp = remember(profileAvatarUri) { try { BitmapFactory.decodeFile(profileAvatarUri)?.asImageBitmap() } catch (_: Exception) { null } }
                     if (bmp != null) Image(bmp, null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                    else Text(profileName.take(1), fontSize = 20.sp, color = Color.Gray)
-                } else Text(profileName.take(1), fontSize = 20.sp, color = Color.Gray)
+                    else Text(profileName.take(1), fontSize = 20.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                } else Text(profileName.take(1), fontSize = 20.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
             }
             Spacer(Modifier.width(12.dp))
-            TextButton(onClick = onPickProfileAvatar) { Text(if (profileAvatarUri.isNotEmpty()) "更换头像" else "选择头像", color = Color(0xFF07C160)) }
-            if (profileAvatarUri.isNotEmpty()) TextButton(onClick = onClearProfileAvatar) { Text("清除", color = Color.Gray) }
+            TextButton(onClick = onPickProfileAvatar) { Text(if (profileAvatarUri.isNotEmpty()) "更换头像" else "选择头像", color = AchatTheme.colors.primary) }
+            if (profileAvatarUri.isNotEmpty()) TextButton(onClick = onClearProfileAvatar) { Text("清除", color = AchatTheme.colors.onSurface.copy(alpha = 0.4f)) }
         }
-        HorizontalDivider(Modifier.padding(start = 16.dp), color = Color(0xFFF0F0F0))
+        HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
         TextFieldRow("昵称", "User", profileName, onProfileNameChange)
         TextFieldRow("个人签名", "Hello AChat", profileWechatId, onProfileWechatIdChange)
     }
@@ -475,10 +488,35 @@ private fun AppearancePage(
     customFont: Boolean, onCustomFontChange: (Boolean) -> Unit,
     showTimestamps: Boolean, onShowTimestampsChange: (Boolean) -> Unit,
     hitokotoType: String, onHitokotoTypeChange: (String) -> Unit,
+    currentThemeId: String, onThemeChange: (String) -> Unit,
     onNavToWC: () -> Unit
 ) {
     SubPageScaffold("界面设置", onBack) {
         Spacer(Modifier.height(8.dp))
+        SettingsMainHeader("主题")
+        Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("当前主题", Modifier.weight(1f), fontSize = 16.sp, color = AchatTheme.colors.onSurface)
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { expanded = true }) {
+                    val label = when(currentThemeId) {
+                        "newspaper" -> "报纸复古拼贴"
+                        "washi" -> "和风纸绘"
+                        else -> "默认主题"
+                    }
+                    Text(label, color = AchatTheme.colors.primary)
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenuItem(text = { Text("默认主题") }, onClick = { onThemeChange("default"); expanded = false })
+                    DropdownMenuItem(text = { Text("报纸复古拼贴") }, onClick = { onThemeChange("newspaper"); expanded = false })
+                    DropdownMenuItem(text = { Text("和风纸绘") }, onClick = { onThemeChange("washi"); expanded = false })
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
+        
+        Spacer(Modifier.height(8.dp))
+        SettingsMainHeader("视觉效果")
         ToggleRow("底栏通透效果", "更通透的底栏效果，性能有略微影响", glassTransparent, onGlassTransparentChange)
         ToggleRow("液态动效", "拖拽弹性、按压缩放、高光反馈，性能影响较大", physicsEnabled, onPhysicsEnabledChange)
         ToggleRow("一套新字体", "Noto Sans SC（中）+ Space Mono（英）", customFont, onCustomFontChange)
@@ -729,35 +767,35 @@ private fun SettingsMainHeader(title: String) {
 
 @Composable
 private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp)
-            Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+            Text(title, fontSize = 16.sp, color = AchatTheme.colors.onSurface)
+            Text(subtitle, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
         }
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF07C160)))
+        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AchatTheme.colors.primary))
     }
 }
 
 @Composable
 private fun TextFieldRow(label: String, placeholder: String, value: String, onChange: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, fontSize = 13.sp, color = Color.Gray)
+    Column(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(label, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), placeholder = { Text(placeholder, fontSize = 14.sp) },
             singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0)))
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
     }
 }
 
 @Composable
 private fun PasswordRow(label: String, placeholder: String, value: String, onChange: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, fontSize = 13.sp, color = Color.Gray)
+    Column(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(label, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), placeholder = { Text(placeholder, fontSize = 14.sp) },
             singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
             visualTransformation = PasswordVisualTransformation(),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0)))
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
     }
 }
 

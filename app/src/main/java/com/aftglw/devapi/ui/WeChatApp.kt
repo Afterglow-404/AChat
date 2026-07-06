@@ -30,6 +30,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.aftglw.devapi.ui.utils.AnimationUtils
+import com.aftglw.devapi.ui.theme.*
 
 private val WeChatTheme = lightColorScheme(
     primary = Color(0xFF07C160),
@@ -39,7 +40,7 @@ private val WeChatTheme = lightColorScheme(
     onSurface = Color(0xFF1A1A1A)
 )
 
-private val tabTitles = listOf("对话", "发现(TBD)", "我的")
+private val tabTitles = listOf("对话", "发现", "我的")
 
 private sealed class AppPage {
     data object Tabs : AppPage()
@@ -65,6 +66,7 @@ fun WeChatApp() {
     var physicsEnabled by remember { mutableStateOf(prefs.getBoolean("physics_enabled", true)) }
     var showTimestamps by remember { mutableStateOf(prefs.getBoolean("show_timestamps", true)) }
     var hideNavBar by remember { mutableStateOf(false) }
+    var currentThemeId by remember { mutableStateOf(prefs.getString("current_theme", "default") ?: "default") }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -74,6 +76,7 @@ fun WeChatApp() {
                 physicsEnabled = prefs.getBoolean("physics_enabled", true)
                 customFont = prefs.getBoolean("custom_font", false)
                 showTimestamps = prefs.getBoolean("show_timestamps", true)
+                currentThemeId = prefs.getString("current_theme", "default") ?: "default"
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -97,33 +100,55 @@ fun WeChatApp() {
         }
     }
 
-    WeChatAppContent(
-        customFont = customFont,
-        glassTransparent = glassTransparent,
-        physicsEnabled = physicsEnabled,
-        hideNavBar = hideNavBar,
-        bgBitmap = bgBitmap,
-        currentPage = currentPage,
-        selectedTab = selectedTab,
-        onTabSelected = { selectedTab = it },
-        backdrop = backdrop,
-        chatsScreen = {
-            ChatsScreen(onChatClick = { name, persona, avatarUri, id ->
-                currentPage = AppPage.Chat(name, persona, avatarUri, id)
-            })
-        },
-        discoverScreen = { DiscoverScreen(onSubPageChange = { hideNavBar = it }) },
-        meScreen = { MeScreen() },
-        chatScreen = { page ->
-            ChatScreen(
-                name = page.name,
-                persona = page.persona,
-                avatarUri = page.avatarUri,
-                id = page.id,
-                showTimestamps = showTimestamps,
-                onBack = { currentPage = AppPage.Tabs })
-        }
-    )
+    val themeColors = when(currentThemeId) {
+        "newspaper" -> NewspaperAchatColors
+        "washi" -> WashiAchatColors
+        else -> DefaultAchatColors
+    }
+    val themeShapes = when(currentThemeId) {
+        "newspaper" -> NewspaperAchatShapes
+        "washi" -> WashiAchatShapes
+        else -> DefaultAchatShapes
+    }
+    val themeTypography = when(currentThemeId) {
+        "newspaper" -> NewspaperAchatTypography
+        "washi" -> WashiAchatTypography
+        else -> DefaultAchatTypography
+    }
+
+    CompositionLocalProvider(
+        LocalAchatColors provides themeColors,
+        LocalAchatShapes provides themeShapes,
+        LocalAchatTypography provides themeTypography
+    ) {
+        WeChatAppContent(
+            customFont = customFont,
+            glassTransparent = glassTransparent,
+            physicsEnabled = physicsEnabled,
+            hideNavBar = hideNavBar,
+            bgBitmap = bgBitmap,
+            currentPage = currentPage,
+            selectedTab = selectedTab,
+            onTabSelected = { selectedTab = it },
+            backdrop = backdrop,
+            chatsScreen = {
+                ChatsScreen(onChatClick = { name, persona, avatarUri, id ->
+                    currentPage = AppPage.Chat(name, persona, avatarUri, id)
+                })
+            },
+            discoverScreen = { DiscoverScreen(onSubPageChange = { hideNavBar = it }) },
+            meScreen = { MeScreen() },
+            chatScreen = { page ->
+                ChatScreen(
+                    name = page.name,
+                    persona = page.persona,
+                    avatarUri = page.avatarUri,
+                    id = page.id,
+                    showTimestamps = showTimestamps,
+                    onBack = { currentPage = AppPage.Tabs })
+            }
+        )
+    }
 }
 
 @Composable
@@ -142,7 +167,14 @@ private fun WeChatAppContent(
     meScreen: @Composable () -> Unit,
     chatScreen: @Composable (AppPage.Chat) -> Unit
 ) {
-    MaterialTheme(colorScheme = WeChatTheme, typography = if (customFont) buildCustomTypography() else Typography()) {
+    val themeTypography = Typography(
+        headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontFamily = AchatTheme.typography.title),
+        headlineSmall = MaterialTheme.typography.headlineSmall.copy(fontFamily = AchatTheme.typography.title),
+        bodyLarge = MaterialTheme.typography.bodyLarge.copy(fontFamily = AchatTheme.typography.body),
+        bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontFamily = AchatTheme.typography.body),
+        labelSmall = MaterialTheme.typography.labelSmall.copy(fontFamily = AchatTheme.typography.mono),
+    )
+    MaterialTheme(colorScheme = if (AchatTheme.colors.isDark) darkColorScheme(primary = AchatTheme.colors.primary, background = AchatTheme.colors.background, surface = AchatTheme.colors.surface) else lightColorScheme(primary = AchatTheme.colors.primary, background = AchatTheme.colors.background, surface = AchatTheme.colors.surface), typography = if (customFont) buildCustomTypography() else themeTypography) {
         Box(Modifier.fillMaxSize()) {
             if (bgBitmap != null) {
                 Image(bgBitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -159,16 +191,29 @@ private fun WeChatAppContent(
                 ) { page ->
                     when (page) {
                         is AppPage.Tabs -> {
-                            Column(
-                                Modifier.fillMaxSize().then(
-                                    if (bgBitmap != null) Modifier.background(Color.White.copy(alpha = 0.75f))
-                                    else Modifier.background(Brush.verticalGradient(listOf(Color(0xFFE8F5E9), Color(0xFFF5F5F5))))
-                                )
-                            ) {
+                            val tabsBgModifier = if (bgBitmap != null) {
+                                Modifier.background(AchatTheme.colors.surface.copy(alpha = 0.75f))
+                            } else {
+                                if (AchatTheme.colors.themeId == "newspaper") {
+                                    Modifier.newspaperBackground(AchatTheme.colors.background)
+                                } else {
+                                    Modifier.background(Brush.verticalGradient(listOf(Color(0xFFE8F5E9), AchatTheme.colors.background)))
+                                }
+                            }
+                            Column(Modifier.fillMaxSize().then(tabsBgModifier)) {
                                 Column {
+                                    val topBarBgModifier = if (bgBitmap != null) {
+                                        Modifier.background(Color.Transparent)
+                                    } else {
+                                        if (AchatTheme.colors.themeId == "newspaper") {
+                                            Modifier.newspaperBackground(AchatTheme.colors.surface.copy(alpha = 0.95f))
+                                        } else {
+                                            Modifier.background(AchatTheme.colors.surface.copy(alpha = 0.95f))
+                                        }
+                                    }
                                     Box(
                                         Modifier.fillMaxWidth().statusBarsPadding().height(64.dp)
-                                            .background(if (bgBitmap != null) Color.Transparent else Color.White.copy(alpha = 0.95f))
+                                            .then(topBarBgModifier)
                                             .padding(horizontal = 16.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -181,13 +226,13 @@ private fun WeChatAppContent(
                                         ) { title ->
                                             Text(
                                                 title,
-                                                color = Color(0xFF1A1A1A),
+                                                color = AchatTheme.colors.onSurface,
                                                 style = MaterialTheme.typography.headlineMedium
                                                     .copy(fontWeight = FontWeight.Bold)
                                             )
                                         }
                                     }
-                                    HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+                                    HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
                                 }
                                 Box(Modifier.weight(1f).fillMaxWidth()) {
                                     AnimatedContent(
@@ -223,7 +268,8 @@ private fun WeChatAppContent(
                     backdrop = backdrop,
                     selectedIndex = selectedTab,
                     onTabSelected = onTabSelected,
-                    physicsEnabled = physicsEnabled
+                    physicsEnabled = physicsEnabled,
+                    selectedColor = AchatTheme.colors.primary
                 )
             }
         }

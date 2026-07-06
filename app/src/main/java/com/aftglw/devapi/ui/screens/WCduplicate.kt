@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aftglw.devapi.model.ChatItem
+import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import com.aftglw.devapi.viewmodel.ChatsViewModel
@@ -104,9 +106,9 @@ fun WeChatScreenContent(
                 onTabSelect = { currentTab = it }
             )
         },
-        containerColor = Color.White
+        containerColor = AchatTheme.colors.background
     ) { paddingValues ->
-        Box(Modifier.padding(paddingValues).fillMaxSize().background(WeChatBgColor)) {
+        Box(Modifier.padding(paddingValues).fillMaxSize().background(AchatTheme.colors.background)) {
             AnimatedContent(
                 targetState = currentTab,
                 transitionSpec = {
@@ -114,14 +116,21 @@ fun WeChatScreenContent(
                 },
                 label = "wechat_tabs"
             ) { targetTab ->
-                when (targetTab) {
-                    WeChatTab.Chats -> ChatListScreen(chatListData) { data ->
-                        val original = chats.find { it.id.hashCode() == data.id }
-                        original?.let { onItemClick(it) }
+                val tabBgModifier = when(AchatTheme.colors.themeId) {
+                    "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+                    "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+                    else -> Modifier.background(AchatTheme.colors.background)
+                }
+                Box(Modifier.fillMaxSize().then(tabBgModifier)) {
+                    when (targetTab) {
+                        WeChatTab.Chats -> ChatListScreen(chatListData) { data ->
+                            val original = chats.find { it.id.hashCode() == data.id }
+                            original?.let { onItemClick(it) }
+                        }
+                        WeChatTab.Contacts -> ContactsScreen()
+                        WeChatTab.Discover -> DiscoverScreen()
+                        WeChatTab.Me -> MeScreenMock()
                     }
-                    WeChatTab.Contacts -> ContactsScreen()
-                    WeChatTab.Discover -> DiscoverScreen()
-                    WeChatTab.Me -> MeScreenMock()
                 }
             }
         }
@@ -138,10 +147,15 @@ fun ChatListScreen(chatList: List<ChatItemData>, onItemClick: (ChatItemData) -> 
             itemsIndexed(items = chatList, key = { _, it -> it.id }) { index, chatItem ->
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
+                
                 StaggeredEntrance(index = index, visible = visible) {
-                    Column {
+                    Column(
+                        Modifier.then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                            .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, index) else Modifier)
+                            .background(AchatTheme.colors.surface)
+                    ) {
                         ChatListItem(item = chatItem, onClick = { onItemClick(chatItem) })
-                        HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+                        HorizontalDivider(color = AchatTheme.colors.divider, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
                     }
                 }
             }
@@ -162,10 +176,14 @@ fun ContactsScreen() {
         itemsIndexed(menuItems) { index, (text, icon, color) ->
             var visible by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { visible = true }
+            
             StaggeredEntrance(index = index, visible = visible) {
-                Column {
+                Column(
+                    Modifier.then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                        .background(AchatTheme.colors.surface)
+                ) {
                     ContactMenuItem(text, icon, color)
-                    HorizontalDivider(color = DividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
+                    HorizontalDivider(color = AchatTheme.colors.divider, thickness = 0.5.dp, modifier = Modifier.padding(start = 72.dp))
                 }
             }
         }
@@ -213,8 +231,12 @@ fun DiscoverScreen() {
         itemsIndexed(items) { index, (text, icon, color) ->
             var visible by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { visible = true }
+            
             StaggeredEntrance(index = index, visible = visible) {
-                Column {
+                Column(
+                    Modifier.then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                        .background(AchatTheme.colors.surface)
+                ) {
                     if (index == 1 || index == 3 || index == 5) {
                         Spacer(Modifier.height(8.dp))
                     }
@@ -227,36 +249,64 @@ fun DiscoverScreen() {
 
 @Composable
 fun MeScreenMock() {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(24.dp, 40.dp, 24.dp, 24.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE0E0E0)))
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.weight(1f)) {
-                Text("User Name", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text("个人签名: Hello AChat", fontSize = 14.sp, color = TextSecondary)
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    Surface(shape = RoundedCornerShape(12.dp), color = WeChatBgColor) {
-                        Text("+ 状态", Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 12.sp)
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Box(
+                Modifier.fillMaxWidth()
+                    .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                    .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier)
+                    .background(AchatTheme.colors.surface)
+                    .padding(24.dp, 40.dp, 24.dp, 24.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(AchatTheme.colors.primary))
+                    Spacer(Modifier.width(20.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("User Name", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
+                        Spacer(Modifier.height(4.dp))
+                        Text("个人签名: Hello AChat", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
+                        Spacer(Modifier.height(8.dp))
+                        Row {
+                            Surface(shape = RoundedCornerShape(12.dp), color = AchatTheme.colors.background) {
+                                Text("+ 状态", Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 12.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
+                            }
+                        }
+                    }
+                    Icon(Icons.Default.QrCode, null, Modifier.size(18.dp), tint = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
+                }
+            }
+        }
+        item { Spacer(Modifier.height(8.dp)) }
+        
+        val menuItems = listOf(
+            Triple("服务", Icons.Default.Payment, Color(0xFF07C160)),
+            Triple("收藏", Icons.Default.FavoriteBorder, Color(0xFFFA9D3B)),
+            Triple("朋友圈", Icons.Default.PhotoLibrary, Color(0xFF2782D7)),
+            Triple("卡包", Icons.Default.Wallet, Color(0xFF2782D7)),
+            Triple("表情", Icons.Default.EmojiEmotions, Color(0xFFFA9D3B)),
+            Triple("设置", Icons.Default.Settings, Color(0xFF2782D7))
+        )
+        
+        itemsIndexed(menuItems) { index, (text, icon, color) ->
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+
+            StaggeredEntrance(index = index, visible = visible) {
+                Column(
+                    Modifier.then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                        .background(AchatTheme.colors.surface)
+                ) {
+                    if (text == "服务" || text == "收藏" || text == "设置") {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    MeMenuItem(text, icon, color)
+                    if (text != "设置" && text != "服务" && text != "表情") {
+                        HorizontalDivider(color = AchatTheme.colors.divider, thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
                     }
                 }
             }
-            Icon(Icons.Default.QrCode, null, Modifier.size(18.dp), tint = TextSecondary)
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFCCCCCC))
         }
-        Spacer(Modifier.height(8.dp))
-        MeMenuItem("服务", Icons.Default.Payment, Color(0xFF07C160))
-        Spacer(Modifier.height(8.dp))
-        MeMenuItem("收藏", Icons.Default.FavoriteBorder, Color(0xFFFA9D3B))
-        MeMenuItem("朋友圈", Icons.Default.PhotoLibrary, Color(0xFF2782D7))
-        MeMenuItem("卡包", Icons.Default.Wallet, Color(0xFF2782D7))
-        MeMenuItem("表情", Icons.Default.EmojiEmotions, Color(0xFFFA9D3B))
-        Spacer(Modifier.height(8.dp))
-        MeMenuItem("设置", Icons.Default.Settings, Color(0xFF2782D7))
     }
 }
 
@@ -264,17 +314,17 @@ fun MeScreenMock() {
 @Composable
 fun WeChatTopBar(title: String, onBack: () -> Unit) {
     Box(
-        modifier = Modifier.fillMaxWidth().height(56.dp).background(HeaderGrey).padding(horizontal = 8.dp),
+        modifier = Modifier.fillMaxWidth().height(56.dp).background(AchatTheme.colors.surface).padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = TextPrimary)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface)
         }
-        Text(text = title, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+        Text(text = title, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
         Row(modifier = Modifier.align(Alignment.CenterEnd)) {
-            Icon(Icons.Default.Search, null, Modifier.size(24.dp), tint = TextPrimary)
+            Icon(Icons.Default.Search, null, Modifier.size(24.dp), tint = AchatTheme.colors.onSurface)
             Spacer(Modifier.width(16.dp))
-            Icon(Icons.Default.Add, null, Modifier.size(26.dp), tint = TextPrimary)
+            Icon(Icons.Default.Add, null, Modifier.size(26.dp), tint = AchatTheme.colors.onSurface)
             Spacer(Modifier.width(8.dp))
         }
     }
@@ -284,14 +334,14 @@ fun WeChatTopBar(title: String, onBack: () -> Unit) {
 @Composable
 fun ChatListItem(item: ChatItemData, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(Color.White).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().background(AchatTheme.colors.surface).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BadgedBox(
             badge = {
                 if (item.unreadCount > 0) {
                     Badge(containerColor = BadgeRed, modifier = Modifier.offset(x = (-4).dp, y = 4.dp)) {
-                        Text(item.unreadCount.toString(), color = Color.White, fontSize = 10.sp)
+                        Text(item.unreadCount.toString(), color = Color.White, fontSize = 10.sp, fontFamily = AchatTheme.typography.mono)
                     }
                 }
             }
@@ -300,37 +350,37 @@ fun ChatListItem(item: ChatItemData, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.title, fontSize = 16.sp, color = TextPrimary, maxLines = 1)
+            Text(item.title, fontSize = 16.sp, color = AchatTheme.colors.onSurface, maxLines = 1, fontFamily = AchatTheme.typography.title)
             Spacer(Modifier.height(4.dp))
-            Text(item.message, fontSize = 14.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.message, fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = AchatTheme.typography.body)
         }
-        Text(item.time, fontSize = 11.sp, color = Color(0xFFB0B0B0), modifier = Modifier.align(Alignment.Top))
+        Text(item.time, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), modifier = Modifier.align(Alignment.Top), fontFamily = AchatTheme.typography.mono)
     }
 }
 
 @Composable
 fun ContactMenuItem(text: String, icon: ImageVector, color: Color) {
     Row(
-        Modifier.fillMaxWidth().background(Color.White).padding(16.dp, 10.dp),
+        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(16.dp, 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)).background(color), contentAlignment = Alignment.Center) {
             Icon(icon, null, Modifier.size(24.dp), tint = Color.White)
         }
         Spacer(Modifier.width(12.dp))
-        Text(text, fontSize = 16.sp, color = TextPrimary)
+        Text(text, fontSize = 16.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
     }
 }
 
 @Composable
 fun ContactItem(name: String, avatarColor: Color) {
     Row(
-        Modifier.fillMaxWidth().background(Color.White).padding(16.dp, 10.dp),
+        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(16.dp, 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)).background(avatarColor))
         Spacer(Modifier.width(12.dp))
-        Text(name, fontSize = 16.sp, color = TextPrimary)
+        Text(name, fontSize = 16.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
     }
 }
 
@@ -338,41 +388,40 @@ fun ContactItem(name: String, avatarColor: Color) {
 fun SectionHeader(title: String) {
     Text(
         title,
-        Modifier.fillMaxWidth().background(WeChatBgColor).padding(horizontal = 16.dp, vertical = 4.dp),
-        fontSize = 12.sp, color = TextSecondary
+        Modifier.fillMaxWidth().background(AchatTheme.colors.background).padding(horizontal = 16.dp, vertical = 4.dp),
+        fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.mono
     )
 }
 
 @Composable
 fun DiscoverMenuItem(text: String, icon: ImageVector, color: Color) {
     Row(
-        Modifier.fillMaxWidth().background(Color.White).padding(16.dp, 14.dp),
+        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(16.dp, 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, Modifier.size(22.dp), tint = color)
         Spacer(Modifier.width(16.dp))
-        Text(text, Modifier.weight(1f), fontSize = 16.sp, color = TextPrimary)
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFCCCCCC))
+        Text(text, Modifier.weight(1f), fontSize = 16.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
     }
 }
 
 @Composable
 fun MeMenuItem(text: String, icon: ImageVector, color: Color) {
     Row(
-        Modifier.fillMaxWidth().background(Color.White).padding(16.dp, 14.dp),
+        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(16.dp, 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, Modifier.size(22.dp), tint = color)
         Spacer(Modifier.width(16.dp))
-        Text(text, Modifier.weight(1f), fontSize = 16.sp, color = TextPrimary)
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFCCCCCC))
+        Text(text, Modifier.weight(1f), fontSize = 16.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeChatBottomBar(selectedTab: WeChatTab, onTabSelect: (WeChatTab) -> Unit) {
-    NavigationBar(containerColor = WeChatBottomBarColor, tonalElevation = 0.dp, modifier = Modifier.height(56.dp)) {
+    NavigationBar(containerColor = AchatTheme.colors.surface, tonalElevation = 0.dp, modifier = Modifier.height(56.dp)) {
         WeChatTab.entries.forEach { tab ->
             val isSelected = selectedTab == tab
             NavigationBarItem(
@@ -382,7 +431,7 @@ fun WeChatBottomBar(selectedTab: WeChatTab, onTabSelect: (WeChatTab) -> Unit) {
                     BadgedBox(
                         badge = {
                             if (tab == WeChatTab.Chats) {
-                                Badge(containerColor = BadgeRed) { Text("1", color = Color.White) }
+                                Badge(containerColor = BadgeRed) { Text("1", color = Color.White, fontFamily = AchatTheme.typography.mono) }
                             } else if (tab == WeChatTab.Discover) {
                                 Badge(containerColor = BadgeRed, modifier = Modifier.size(8.dp))
                             }
@@ -391,12 +440,12 @@ fun WeChatBottomBar(selectedTab: WeChatTab, onTabSelect: (WeChatTab) -> Unit) {
                         Icon(if (isSelected) tab.selectedIcon else tab.unselectedIcon, null, Modifier.size(24.dp))
                     }
                 },
-                label = { Text(tab.label, fontSize = 10.sp) },
+                label = { Text(tab.label, fontSize = 10.sp, fontFamily = AchatTheme.typography.title) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = WeChatGreen,
-                    selectedTextColor = WeChatGreen,
-                    unselectedIconColor = TextPrimary,
-                    unselectedTextColor = TextPrimary,
+                    selectedIconColor = AchatTheme.colors.primary,
+                    selectedTextColor = AchatTheme.colors.primary,
+                    unselectedIconColor = AchatTheme.colors.onSurface.copy(alpha = 0.6f),
+                    unselectedTextColor = AchatTheme.colors.onSurface.copy(alpha = 0.6f),
                     indicatorColor = Color.Transparent
                 )
             )

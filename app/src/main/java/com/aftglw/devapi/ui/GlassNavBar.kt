@@ -25,7 +25,14 @@ private val tabData = listOf(
 )
 
 @Composable
-fun GlassNavBar(backdrop: LayerBackdrop, selectedIndex: Int, onTabSelected: (Int) -> Unit, physicsEnabled: Boolean = true, modifier: Modifier = Modifier) {
+fun GlassNavBar(
+    backdrop: LayerBackdrop,
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    physicsEnabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    selectedColor: Color = Color(0xFF07C160)
+) {
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
     val currentIndex by rememberUpdatedState(selectedIndex)
     LiquidBottomTabs(
@@ -42,11 +49,11 @@ fun GlassNavBar(backdrop: LayerBackdrop, selectedIndex: Int, onTabSelected: (Int
             LiquidBottomTab(onClick = { currentOnTabSelected(i) }) {
                 Icon(
                     if (sel) selIcon else unselIcon, title,
-                    tint = if (sel) Color(0xFF07C160) else Color(0xFF888888),
+                    tint = if (sel) selectedColor else Color(0xFF888888),
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(Modifier.height(2.dp))
-                Text(title, color = if (sel) Color(0xFF07C160) else Color(0xFF888888), style = MaterialTheme.typography.labelSmall)
+                Text(title, color = if (sel) selectedColor else Color(0xFF888888), style = MaterialTheme.typography.labelSmall)
             }
         }
     }

@@ -27,5 +27,15 @@ object PostLLMProcessor {
 
         // ③ 存 AI 回复 → 后续关键词事实提取的素材
         MemoryStore.save(ctx, aiReply.take(100), "reply:$name")
+
+        // ④ AI 自身情绪记忆 — 让 AI 分析自己刚才的情绪
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prompt = "分析你刚才回复的情绪。用户说：${userMessage.take(40)}。你回复：${aiReply.take(40)}。用一句话描述你（AI）在回复时的情绪状态（15字内）："
+                val aiEmo = AiServiceFactory.getService()
+                    .sendMessage(emptyList(), prompt, "你是对话中的AI角色。")
+                if (!aiEmo.isNullOrBlank()) MemoryStore.save(ctx, aiEmo.trim(), "ai_emo:$name")
+            } catch (_: Exception) {} /* 非关键 */
+        }
     }
 }

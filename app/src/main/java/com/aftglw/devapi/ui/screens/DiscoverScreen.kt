@@ -74,6 +74,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.graphics.graphicsLayer
+import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
 
@@ -327,7 +328,13 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    val discoverBgModifier = when(AchatTheme.colors.themeId) {
+        "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+        "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+        else -> Modifier.background(AchatTheme.colors.background)
+    }
+
+    Box(Modifier.fillMaxSize().then(discoverBgModifier)) {
         LazyColumn(
             state = scrollState,
             modifier = Modifier.fillMaxSize(),
@@ -336,6 +343,7 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             item {
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
+                
                 StaggeredEntrance(index = 0, visible = visible) {
                     val alpha = 1f - collapseFraction
                     val scale = 1f - (0.1f * collapseFraction)
@@ -351,19 +359,21 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                 this.translationY = translateY
                             }
                             .padding(vertical = 4.dp)
-                            .clip(RoundedCornerShape(lerp(20f, 12f, collapseFraction).dp))
-                            .background(Color.White)
+                            .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(all = true) else Modifier)
+                            .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier)
+                            .clip(AchatTheme.shapes.card)
+                            .background(AchatTheme.colors.surface)
                             .padding(horizontal = 16.dp, vertical = paddingV)
                     ) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 if (loading) {
-                                    Text("正在加载喵...", fontSize = 15.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
+                                    Text("正在加载喵...", fontSize = 15.sp, color = Color.Gray, fontStyle = FontStyle.Italic, fontFamily = AchatTheme.typography.body)
                                 } else {
                                     Text(
                                         buildMixedText("「$hitokoto」", cnFont, enFont),
                                         fontSize = lerp(17f, 14f, collapseFraction).sp,
-                                        color = Color(0xFF1A1A1A),
+                                        color = AchatTheme.colors.onSurface,
                                         fontWeight = FontWeight.Medium,
                                         lineHeight = lerp(26f, 20f, collapseFraction).sp,
                                         maxLines = if (collapseFraction > 0.5f) 1 else Int.MAX_VALUE,
@@ -374,7 +384,7 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                         Text(
                                             buildMixedText("—— $from", cnFont, enFont),
                                             fontSize = 13.sp,
-                                            color = Color(0xFF888888).copy(alpha = (1f - collapseFraction * 2.5f).coerceIn(0f, 1f)),
+                                            color = AchatTheme.colors.onSurface.copy(alpha = (0.6f - collapseFraction * 2.5f).coerceIn(0f, 0.6f)),
                                             fontStyle = FontStyle.Italic
                                         )
                                     }
@@ -386,7 +396,7 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                     Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(enabled = !loading) { onRefresh() },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("↻", fontSize = 22.sp, color = Color(0xFF07C160).copy(alpha = (1f - collapseFraction * 5f).coerceIn(0f, 1f)), fontFamily = enFont, fontWeight = FontWeight.Bold)
+                                    Text("↻", fontSize = 22.sp, color = AchatTheme.colors.primary.copy(alpha = (1f - collapseFraction * 5f).coerceIn(0f, 1f)), fontFamily = AchatTheme.typography.mono, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -397,26 +407,29 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             item {
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
+                
                 StaggeredEntrance(index = 1, visible = visible) {
                     Surface(
                         Modifier.fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White
+                            .padding(vertical = 4.dp)
+                            .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                            .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, 1) else Modifier),
+                        shape = AchatTheme.shapes.card,
+                        color = AchatTheme.colors.surface
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFF7E6)),
+                                Modifier.size(36.dp).clip(CircleShape).background(AchatTheme.colors.primary.copy(alpha = 0.1f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text("📢", fontSize = 18.sp)
                             }
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+                                Text("更新公告", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
                                 Spacer(Modifier.height(2.dp))
                                 val announcement = """
                                 **v0.1.2** 内容：
@@ -430,8 +443,9 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                 Text(
                                     text = parseMarkdown(announcement),
                                     fontSize = 13.sp,
-                                    color = Color(0xFF666666),
-                                    lineHeight = 18.sp
+                                    color = AchatTheme.colors.onSurface.copy(alpha = 0.7f),
+                                    lineHeight = 18.sp,
+                                    fontFamily = AchatTheme.typography.body
                                 )
                             }
                         }
@@ -442,12 +456,15 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
             itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
                 var visible by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { visible = true }
+                
                 StaggeredEntrance(index = index + 2, visible = visible) {
                     Row(
                         Modifier.fillMaxWidth().defaultMinSize(minHeight = 56.dp)
                             .padding(vertical = 4.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
+                            .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                            .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, index) else Modifier)
+                            .clip(AchatTheme.shapes.card)
+                            .background(AchatTheme.colors.surface)
                             .clickable {
                                 when (item.id) {
                                     "2" -> onCatClick()
@@ -458,9 +475,9 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                             }.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(painterResource(item.iconResId), null, Modifier.size(24.dp), tint = Color(0xFF07C160))
-                        Spacer(Modifier.width(16.dp)); Text(item.title, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color(0xFFBBBBBB), modifier = Modifier.size(20.dp))
+                        Icon(painterResource(item.iconResId), null, Modifier.size(24.dp), tint = AchatTheme.colors.primary)
+                        Spacer(Modifier.width(16.dp)); Text(item.title, fontSize = 16.sp, modifier = Modifier.weight(1f), color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -510,39 +527,47 @@ private fun CatFortunePage(
     cnFont: FontFamily,
     enFont: FontFamily
 ) {
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+    val pageBgModifier = when(AchatTheme.colors.themeId) {
+        "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+        "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+        else -> Modifier.background(AchatTheme.colors.background)
+    }
+    
+    Column(Modifier.fillMaxSize().then(pageBgModifier).statusBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().height(56.dp).background(AchatTheme.colors.surface).padding(horizontal = 16.dp)
+                .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier)
+                .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) }
             Spacer(Modifier.width(4.dp))
-            Text("🐱 喵神谕", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("🐱 喵神谕", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (catLoading && catImg == null) {
-                Text("召唤猫猫中...", fontSize = 16.sp, color = Color.Gray, fontStyle = FontStyle.Italic)
+                Text("召唤猫猫中...", fontSize = 16.sp, color = Color.Gray, fontStyle = FontStyle.Italic, fontFamily = AchatTheme.typography.body)
             } else {
                 if (fortuneText.isNotEmpty()) {
-                    Text(fortuneText, fontSize = 16.sp, lineHeight = 24.sp, color = Color(0xFF1A1A1A))
+                    Text(fortuneText, fontSize = 16.sp, lineHeight = 24.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
                     Spacer(Modifier.height(16.dp))
                 }
                 if (catImg != null) {
                     SubcomposeAsyncImage(
                         model = ImageRequest.Builder(LocalContext.current).data(catImg).crossfade(true).build(),
                         contentDescription = "猫猫",
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(16.dp)),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(AchatTheme.shapes.card),
                         contentScale = ContentScale.Fit,
                         loading = {
                             Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(color = Color(0xFF07C160))
+                                CircularProgressIndicator(color = AchatTheme.colors.primary)
                             }
                         },
                         error = {
                             Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                                Text("图片加载失败喵", color = Color.Gray, fontSize = 13.sp, fontStyle = FontStyle.Italic)
+                                Text("图片加载失败喵", color = Color.Gray, fontSize = 13.sp, fontStyle = FontStyle.Italic, fontFamily = AchatTheme.typography.body)
                             }
                         }
                     )
@@ -550,10 +575,10 @@ private fun CatFortunePage(
                 Spacer(Modifier.height(24.dp))
                 Button(
                     onClick = onRefresh,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                    colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
                     shape = RoundedCornerShape(12.dp),
                     enabled = !catLoading
-                ) { Text(buttonLabel, fontSize = 15.sp) }
+                ) { Text(buttonLabel, fontSize = 15.sp, fontFamily = AchatTheme.typography.title) }
             }
         }
     }
@@ -581,50 +606,58 @@ private fun DailyChallengePage(
         animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f)
     )
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+    val pageBgModifier = when(AchatTheme.colors.themeId) {
+        "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+        "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+        else -> Modifier.background(AchatTheme.colors.background)
+    }
+
+    val surfaceColor = AchatTheme.colors.surface
+    Box(Modifier.fillMaxSize().then(pageBgModifier).statusBarsPadding()) {
         Column(Modifier.fillMaxSize().layerBackdrop(backdrop as LayerBackdrop)) {
             Row(
-                Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(56.dp).background(AchatTheme.colors.surface).padding(horizontal = 16.dp)
+                    .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) }
                 Spacer(Modifier.width(4.dp))
-                Text("🎯 喵神の试炼", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("🎯 喵神の试炼", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
             }
-            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+            HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(60.dp))
 
                 if (challengeLoading || challengeText.isEmpty()) {
-                    Text("加载中...", fontSize = 14.sp, color = Color.Gray, fontStyle = FontStyle.Italic, fontFamily = cnFont)
+                    Text("加载中...", fontSize = 14.sp, color = Color.Gray, fontStyle = FontStyle.Italic, fontFamily = AchatTheme.typography.body)
                 } else {
-                    Text(buildMixedText(challengeText, cnFont, enFont), fontSize = 18.sp, lineHeight = 28.sp, color = Color(0xFF1A1A1A), fontWeight = FontWeight.Medium)
+                    Text(buildMixedText(challengeText, cnFont, enFont), fontSize = 18.sp, lineHeight = 28.sp, color = AchatTheme.colors.onSurface, fontWeight = FontWeight.Medium)
 
                     if (isLeetCode && leetCodeLink.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
-                        Text(leetCodeLink, fontSize = 11.sp, color = Color(0xFF888888), fontFamily = enFont)
+                        Text(leetCodeLink, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.mono)
                     }
 
                     Spacer(Modifier.height(32.dp))
                     if (!challengeDone) {
                         Button(
                             onClick = onDone,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                            colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth().height(48.dp)
-                        ) { Text("✅ 完成挑战", fontSize = 16.sp) }
+                        ) { Text("✅ 完成挑战", fontSize = 16.sp, fontFamily = AchatTheme.typography.title) }
                     } else {
                         Text("🎉", fontSize = 64.sp, modifier = Modifier.scale(scale))
                         Spacer(Modifier.height(12.dp))
-                        Text("挑战完成！", fontSize = 20.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
+                        Text("挑战完成！", fontSize = 20.sp, color = AchatTheme.colors.primary, fontWeight = FontWeight.Bold, fontFamily = AchatTheme.typography.title)
                         Spacer(Modifier.height(8.dp))
-                        Text("很棒喵！要不要再来一个挑战呢喵？", fontSize = 14.sp, color = Color(0xFF888888))
+                        Text("很棒喵！要不要再来一个挑战呢喵？", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), fontFamily = AchatTheme.typography.body)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = if (isLeetCode) onLeetCodeRefresh else onBoredRefresh) {
-                    Text("🔀 换一个", fontSize = 13.sp, color = Color(0xFF888888))
+                    Text("🔀 换一个", fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), fontFamily = AchatTheme.typography.body)
                 }
             }
         }
@@ -635,15 +668,15 @@ private fun DailyChallengePage(
                     backdrop = backdrop,
                     shape = { Capsule() },
                     effects = { blur(8f.dp.toPx()); lens(12f.dp.toPx(), 24f.dp.toPx()) },
-                    onDrawSurface = { drawRect(Color.White.copy(alpha = 0.85f)) }
+                    onDrawSurface = { drawRect(surfaceColor.copy(alpha = 0.85f)) }
                 )
                 .height(44.dp)
         ) {
             Box(Modifier.weight(1f).fillMaxSize().clickable { selectedTabChange(0) }, contentAlignment = Alignment.Center) {
-                Text("🎲 趣味", color = if (!isLeetCode) Color(0xFF07C160) else Color(0xFF888888), fontWeight = if (!isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+                Text("🎲 趣味", color = if (!isLeetCode) AchatTheme.colors.primary else AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = if (!isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp, fontFamily = AchatTheme.typography.title)
             }
             Box(Modifier.weight(1f).fillMaxSize().clickable { selectedTabChange(1) }, contentAlignment = Alignment.Center) {
-                Text("💻 编程", color = if (isLeetCode) Color(0xFF07C160) else Color(0xFF888888), fontWeight = if (isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+                Text("💻 编程", color = if (isLeetCode) AchatTheme.colors.primary else AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = if (isLeetCode) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp, fontFamily = AchatTheme.typography.title)
             }
         }
     }
@@ -675,41 +708,48 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
 
     LaunchedEffect(Unit) { vm.refresh() }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+    val pageBgModifier = when(AchatTheme.colors.themeId) {
+        "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+        "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+        else -> Modifier.background(AchatTheme.colors.background)
+    }
+
+    Box(Modifier.fillMaxSize().then(pageBgModifier).statusBarsPadding()) {
         Column(Modifier.fillMaxSize().layerBackdrop(backdrop as LayerBackdrop)) {
             Row(
-                Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(56.dp).background(AchatTheme.colors.surface).padding(horizontal = 16.dp)
+                    .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) }
                 Spacer(Modifier.width(4.dp))
-                Text("📋 Too-Do", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("📋 Too-Do", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
             }
-            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+            HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
-            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("🐱 ", fontSize = 13.sp)
-                Text("喵神说：", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color.Gray)
+                Text("喵神说：", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
                 Spacer(Modifier.width(4.dp))
                 if (fortuneText.isNotEmpty()) {
-                    Text(fortuneText.split("\n").firstOrNull() ?: "", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color(0xFF07C160))
+                    Text(fortuneText.split("\n").firstOrNull() ?: "", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = AchatTheme.colors.primary, fontFamily = AchatTheme.typography.body)
                 } else {
-                    Text("先去喵神谕求个签吧～", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = Color.Gray)
+                    Text("先去喵神谕求个签吧～", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), fontFamily = AchatTheme.typography.body)
                 }
             }
 
-            Row(Modifier.fillMaxWidth().background(Color.White)) {
+            Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface)) {
                 TextButton(
                     onClick = { showChains = false },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("📋 自由", color = if (!showChains) Color(0xFF07C160) else Color.Gray, fontWeight = if (!showChains) FontWeight.Bold else FontWeight.Normal)
+                    Text("📋 自由", color = if (!showChains) AchatTheme.colors.primary else AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = if (!showChains) FontWeight.Bold else FontWeight.Normal, fontFamily = AchatTheme.typography.title)
                 }
                 TextButton(
                     onClick = { showChains = true; chains = vm.loadChains() },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("📜 任务链", color = if (showChains) Color(0xFF07C160) else Color.Gray, fontWeight = if (showChains) FontWeight.Bold else FontWeight.Normal)
+                    Text("📜 任务链", color = if (showChains) AchatTheme.colors.primary else AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = if (showChains) FontWeight.Bold else FontWeight.Normal, fontFamily = AchatTheme.typography.title)
                 }
             }
 
@@ -727,61 +767,55 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
             ) { isChainTab ->
                 if (!isChainTab) {
                     Column(Modifier.fillMaxSize()) {
-                        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 input, { input = it }, Modifier.weight(1f),
                                 placeholder = { Text("写一个新任务...", fontSize = 14.sp) },
                                 singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider)
                             )
                             Spacer(Modifier.width(8.dp))
                             TextButton(
                                 onClick = { if (input.isNotBlank()) { vm.add(input.trim()); input = "" } },
-                                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF07C160))
-                            ) { Text("添加", fontWeight = FontWeight.Bold) }
+                                colors = ButtonDefaults.textButtonColors(contentColor = AchatTheme.colors.primary)
+                            ) { Text("添加", fontWeight = FontWeight.Bold, fontFamily = AchatTheme.typography.title) }
                         }
 
                         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 80.dp)) {
                             if (items.isEmpty()) {
-                                item { Text("还没有任务，写一个吧～", fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(16.dp)) }
+                                item { Text("还没有任务，写一个吧～", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), modifier = Modifier.padding(16.dp), fontFamily = AchatTheme.typography.body) }
                             }
                             itemsIndexed(items, key = { _, it -> it.id }) { index, todo ->
                                 var visible by remember { mutableStateOf(false) }
                                 LaunchedEffect(Unit) { visible = true }
-                                val entryProgress by animateFloatAsState(
-                                    targetValue = if (visible) 1f else 0f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                                    label = "todo_entry"
-                                )
-
                                 val strikeAlpha by animateFloatAsState(
                                     targetValue = if (todo.done) 1f else 0f,
                                     animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f)
                                 )
-
-                                Row(
-                                    Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                        .graphicsLayer {
-                                            alpha = entryProgress
-                                            translationY = (1f - entryProgress) * 20f
+                                
+                                StaggeredEntrance(index = index, visible = visible) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                            .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(bottom = true) else Modifier)
+                                            .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, index) else Modifier)
+                                            .clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface)
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(checked = todo.done, onCheckedChange = {
+                                            vm.toggle(todo.id)
+                                        }, colors = CheckboxDefaults.colors(checkedColor = AchatTheme.colors.primary))
+                                        Spacer(Modifier.width(8.dp))
+                                        Box(Modifier.weight(1f)) {
+                                            Text(todo.text, fontSize = 15.sp, color = if (todo.done) AchatTheme.colors.onSurface.copy(alpha = 0.5f) else AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
+                                            if (strikeAlpha > 0.01f) {
+                                                HorizontalDivider(modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(), thickness = 1.5.dp, color = AchatTheme.colors.onSurface.copy(alpha = strikeAlpha * 0.5f))
+                                            }
                                         }
-                                        .clip(RoundedCornerShape(16.dp)).background(Color.White)
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(checked = todo.done, onCheckedChange = {
-                                        vm.toggle(todo.id)
-                                    }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160)))
-                                    Spacer(Modifier.width(8.dp))
-                                    Box(Modifier.weight(1f)) {
-                                        Text(todo.text, fontSize = 15.sp, color = if (todo.done) Color.Gray else Color(0xFF1A1A1A))
-                                        if (strikeAlpha > 0.01f) {
-                                            HorizontalDivider(modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(), thickness = 1.5.dp, color = Color.Gray.copy(alpha = strikeAlpha))
-                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        TextButton(onClick = { vm.delete(todo.id) }) { Text("✕", fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.2f), fontFamily = AchatTheme.typography.mono) }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    TextButton(onClick = { vm.delete(todo.id) }) { Text("✕", fontSize = 13.sp, color = Color(0xFFCCCCCC)) }
                                 }
                             }
                         }
@@ -791,19 +825,13 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
                         Spacer(Modifier.height(8.dp))
                         if (chains.isEmpty()) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text("还没有任务链，创建一个吧～", fontSize = 14.sp, color = Color.Gray)
+                                Text("还没有任务链，创建一个吧～", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), fontFamily = AchatTheme.typography.body)
                             }
                         } else {
                             LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 80.dp)) {
                                 itemsIndexed(chains) { index, chain ->
                                     var visible by remember { mutableStateOf(false) }
                                     LaunchedEffect(Unit) { visible = true }
-                                    val entryProgress by animateFloatAsState(
-                                        targetValue = if (visible) 1f else 0f,
-                                        animationSpec = spring(stiffness = Spring.StiffnessLow),
-                                        label = "chain_entry"
-                                    )
-
                                     val doneCount = chain.steps.count { it.done }
                                     val total = chain.steps.size
                                     val targetProgress = if (total > 0) doneCount.toFloat() / total else 0f
@@ -819,59 +847,58 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
                                         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                                         label = "trophy_scale"
                                     )
-
-                                    Box(Modifier.fillMaxWidth()
-                                        .graphicsLayer {
-                                            alpha = entryProgress
-                                            translationY = (1f - entryProgress) * 30f
-                                        }
-                                        .padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(16.dp)) {
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(chain.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                                Box(Modifier.scale(trophyScale)) {
-                                                    Text("🏆", fontSize = 20.sp)
+                                    
+                                    StaggeredEntrance(index = index, visible = visible) {
+                                        Box(Modifier.fillMaxWidth()
+                                            .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(all = true) else Modifier)
+                                            .padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(16.dp)) {
+                                            Column {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(chain.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
+                                                    Box(Modifier.scale(trophyScale)) {
+                                                        Text("🏆", fontSize = 20.sp)
+                                                    }
                                                 }
-                                            }
-                                            Spacer(Modifier.height(8.dp))
-                                            LinearProgressIndicator(
-                                                progress = { animatedProgress },
-                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                                color = if (allDone) Color(0xFF07C160) else Color(0xFF07C160).copy(alpha = 0.5f),
-                                                trackColor = Color(0xFFE0E0E0)
-                                            )
-                                            Spacer(Modifier.height(8.dp))
-                                            Text("$doneCount / $total", fontSize = 12.sp, color = Color.Gray)
-                                            Spacer(Modifier.height(8.dp))
-                                            chain.steps.forEachIndexed { si, step ->
-                                                val prevDone = si == 0 || chain.steps[si - 1].done
-                                                val stepAlpha by animateFloatAsState(
-                                                    targetValue = if (prevDone) 1f else 0.4f,
-                                                    label = "step_lock"
+                                                Spacer(Modifier.height(8.dp))
+                                                LinearProgressIndicator(
+                                                    progress = { animatedProgress },
+                                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                    color = if (allDone) AchatTheme.colors.primary else AchatTheme.colors.primary.copy(alpha = 0.5f),
+                                                    trackColor = AchatTheme.colors.divider.copy(alpha = 0.5f)
                                                 )
-                                                Row(
-                                                    Modifier.fillMaxWidth().padding(vertical = 2.dp).graphicsLayer { alpha = stepAlpha },
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Checkbox(
-                                                        checked = step.done,
-                                                        onCheckedChange = {
-                                                            if (prevDone) {
-                                                                vm.toggleChainStep(chain.id, si)
-                                                                chains = vm.loadChains()
-                                                            }
-                                                        },
-                                                        enabled = prevDone,
-                                                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160), disabledUncheckedColor = Color(0xFFE0E0E0))
+                                                Spacer(Modifier.height(8.dp))
+                                                Text("$doneCount / $total", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.mono)
+                                                Spacer(Modifier.height(8.dp))
+                                                chain.steps.forEachIndexed { si, step ->
+                                                    val prevDone = si == 0 || chain.steps[si - 1].done
+                                                    val stepAlpha by animateFloatAsState(
+                                                        targetValue = if (prevDone) 1f else 0.4f,
+                                                        label = "step_lock"
                                                     )
-                                                    Spacer(Modifier.width(6.dp))
-                                                    Text(step.text, fontSize = 14.sp, color = if (step.done) Color.Gray else Color(0xFF1A1A1A))
+                                                    Row(
+                                                        Modifier.fillMaxWidth().padding(vertical = 2.dp).graphicsLayer { alpha = stepAlpha },
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Checkbox(
+                                                            checked = step.done,
+                                                            onCheckedChange = {
+                                                                if (prevDone) {
+                                                                    vm.toggleChainStep(chain.id, si)
+                                                                    chains = vm.loadChains()
+                                                                }
+                                                            },
+                                                            enabled = prevDone,
+                                                            colors = CheckboxDefaults.colors(checkedColor = AchatTheme.colors.primary, disabledUncheckedColor = AchatTheme.colors.divider)
+                                                        )
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text(step.text, fontSize = 14.sp, color = if (step.done) AchatTheme.colors.onSurface.copy(alpha = 0.5f) else AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
+                                                    }
                                                 }
-                                            }
-                                            Spacer(Modifier.height(4.dp))
-                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                                TextButton(onClick = { vm.deleteChain(chain.id); chains = vm.loadChains() }) {
-                                                    Text("删除链", fontSize = 12.sp, color = Color(0xFFFA5151))
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                    TextButton(onClick = { vm.deleteChain(chain.id); chains = vm.loadChains() }) {
+                                                        Text("删除链", fontSize = 12.sp, color = AchatTheme.colors.primary, fontFamily = AchatTheme.typography.body)
+                                                    }
                                                 }
                                             }
                                         }
@@ -881,10 +908,10 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
                         }
                         Button(
                             onClick = { chainDialogStep = 1 },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                            colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) { Text("+ 新建任务链", fontSize = 14.sp) }
+                        ) { Text("+ 新建任务链", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }
                     }
                 }
             }
@@ -892,26 +919,26 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
             if (chainDialogStep == 1) {
                 AlertDialog(
                     onDismissRequest = { chainDialogStep = 0 },
-                    title = { Text("你的目标是什么？") },
+                    title = { Text("你的目标是什么？", fontFamily = AchatTheme.typography.title) },
                     text = {
                         OutlinedTextField(chainTitle, { chainTitle = it }, Modifier.fillMaxWidth(),
-                            placeholder = { Text("例：学习 Compose", fontSize = 14.sp) }, singleLine = true)
+                            placeholder = { Text("例：学习 Compose", fontSize = 14.sp) }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary))
                     },
                     confirmButton = {
                         TextButton({ if (chainTitle.isNotBlank()) chainDialogStep = 2 }) {
-                            Text("下一步 →", color = Color(0xFF07C160))
+                            Text("下一步 →", color = AchatTheme.colors.primary, fontFamily = AchatTheme.typography.title)
                         }
                     },
-                    dismissButton = { TextButton({ chainDialogStep = 0 }) { Text("取消", color = Color.Gray) } }
+                    dismissButton = { TextButton({ chainDialogStep = 0 }) { Text("取消", color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body) } }
                 )
             }
             if (chainDialogStep >= 2) {
                 AlertDialog(
                     onDismissRequest = {},
-                    title = { Text(if (chainDialogStep > 2) "还要添加步骤吗？" else "添加第一个步骤") },
+                    title = { Text(if (chainDialogStep > 2) "还要添加步骤吗？" else "添加第一个步骤", fontFamily = AchatTheme.typography.title) },
                     text = {
                         OutlinedTextField(chainStepText, { chainStepText = it }, Modifier.fillMaxWidth(),
-                            placeholder = { Text("写一个具体步骤...", fontSize = 14.sp) }, singleLine = true)
+                            placeholder = { Text("写一个具体步骤...", fontSize = 14.sp) }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary))
                     },
                     confirmButton = {
                         TextButton({
@@ -920,7 +947,7 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
                                 chainStepText = ""
                                 chainDialogStep++
                             }
-                        }) { Text("添加并继续", color = Color(0xFF07C160)) }
+                        }) { Text("添加并继续", color = AchatTheme.colors.primary, fontFamily = AchatTheme.typography.title) }
                     },
                     dismissButton = {
                         TextButton({
@@ -928,30 +955,31 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
                             if (finalSteps.isNotEmpty()) vm.addChain(chainTitle.trim(), finalSteps)
                             chainTitle = ""; chainStepText = ""; pendingSteps = emptyList(); chainDialogStep = 0
                             chains = vm.loadChains()
-                        }) { Text(if (pendingSteps.isNotEmpty()) "完成" else "跳过", color = Color.Gray) }
+                        }) { Text(if (pendingSteps.isNotEmpty()) "完成" else "跳过", color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body) }
                     }
                 )
             }
         }
 
+        val primaryColor = AchatTheme.colors.primary
         if (!showChains && items.any { it.done }) {
             Box(Modifier.fillMaxWidth().padding(12.dp).align(Alignment.BottomCenter).navigationBarsPadding()) {
                 Row(
                     Modifier.drawBackdrop(
-                        backdrop = backdrop, shape = { Capsule() },
+                        backdrop = backdrop!!, shape = { Capsule() },
                         effects = { blur(4f.dp.toPx()); lens(6f.dp.toPx(), 12f.dp.toPx()) },
                         layerBlock = {
                             val s = lerp(1f, clearDampedDrag.pressedScale, clearDampedDrag.pressProgress)
                             scaleX = s; scaleY = s
                         },
-                        onDrawSurface = { drawRect(Color(0xFFFA5151).copy(alpha = 0.9f)) }
+                        onDrawSurface = { drawRect(primaryColor.copy(alpha = 0.9f)) }
                     )
                     .then(clearHighlight.modifier)
                     .then(clearDampedDrag.modifier)
                     .clickable { vm.clearDone() }.height(44.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
-                ) { Text("🗑️ 清除已完成", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold) }
+                ) { Text("🗑️ 清除已完成", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold, fontFamily = AchatTheme.typography.title) }
             }
         }
     }
@@ -974,6 +1002,12 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
     var banSelfAware by remember { mutableStateOf(true) }
     var showPreview by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+
+    val pageBgModifier = when(AchatTheme.colors.themeId) {
+        "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
+        "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
+        else -> Modifier.background(AchatTheme.colors.background)
+    }
 
     val generatedPrompt = buildString {
         append("以下是你的人设：\n")
@@ -999,16 +1033,18 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
         append("你必须严格遵守以上格式规定。")
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5)).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().then(pageBgModifier).statusBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().height(56.dp).background(AchatTheme.colors.surface).padding(horizontal = 16.dp)
+                .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier)
+                .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = Color(0xFF1A1A1A)) }
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) }
             Spacer(Modifier.width(4.dp))
-            Text("人设工坊", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("人设工坊", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
             PromptSectionHeader("ta是？")
@@ -1025,15 +1061,15 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
 
             Spacer(Modifier.height(8.dp))
             PromptSectionHeader("ta的过往？")
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                Text("背景故事", fontSize = 12.sp, color = Color(0xFF888888))
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text("背景故事", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     backstory, { backstory = it }, Modifier.fillMaxWidth().height(100.dp),
                     placeholder = { Text("例：曾是流浪猫，被主角收养后化为人形", fontSize = 14.sp) },
                     maxLines = 4, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                     shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider)
                 )
             }
 
@@ -1054,25 +1090,27 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { showPreview = !showPreview },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF888888)),
-                    modifier = Modifier.weight(1f)
-                ) { Text(if (showPreview) "隐藏预览" else "预览", fontSize = 14.sp) }
+                    colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.onSurface.copy(alpha = 0.4f)),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text(if (showPreview) "隐藏预览" else "预览", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }
                 Button(
                     onClick = {
                         clipboard.setText(AnnotatedString(generatedPrompt))
                         Toast.makeText(ctx, "已复制到剪贴板喵~", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
-                    modifier = Modifier.weight(1f)
-                ) { Text("复制人设", fontSize = 14.sp) }
+                    colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("复制人设", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }
             }
 
             if (showPreview) {
                 Spacer(Modifier.height(8.dp))
                 Box(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).padding(12.dp)
+                    Modifier.fillMaxWidth().clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)
                 ) {
-                    Text(generatedPrompt, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFF333333))
+                    Text(generatedPrompt, fontSize = 13.sp, lineHeight = 18.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
                 }
             }
             Spacer(Modifier.height(40.dp))
@@ -1082,20 +1120,20 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
 
 @Composable
 private fun PromptSectionHeader(title: String) {
-    Text(title, Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+    Text(title, Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.title)
 }
 
 @Composable
 private fun CardField(label: String, value: String, onChange: (String) -> Unit, placeholder: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, fontSize = 12.sp, color = Color(0xFF888888))
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(label, fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
         Spacer(Modifier.height(4.dp))
         OutlinedTextField(
             value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 40.dp),
             placeholder = { Text(placeholder, fontSize = 14.sp) },
             singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
             shape = RoundedCornerShape(10.dp),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0))
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider)
         )
     }
 }
@@ -1103,11 +1141,11 @@ private fun CardField(label: String, value: String, onChange: (String) -> Unit, 
 @Composable
 private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(horizontal = 16.dp, vertical = 9.dp),
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, Modifier.weight(1f), fontSize = 14.sp)
-        Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160)))
+        Text(label, Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.body)
+        Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = AchatTheme.colors.primary))
     }
 }
 
