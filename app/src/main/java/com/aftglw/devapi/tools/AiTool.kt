@@ -26,7 +26,6 @@ object ToolRegistry {
         register(TimeTool())
         register(NoteTool())
         register(RecallTool())
-        register(DeviceInfoTool())
         register(SendMessageTool())
     }
 }
