@@ -51,7 +51,9 @@ object PromptBuilder {
             }
         }
 
-        val baseInstruction = "\n\n回复要求：每句话不超过 15 个字，一次只说 1-2 句。禁止 AI 套话：\"有什么可以帮你的吗\"\"当然可以\"\"总的来说\"。禁止说\"不是……而是……\"。禁止说\"我理解你的感受\"。禁止分点、列表、总结。允许省略句。\n如果你需要分两次说，用 【顿】 分隔句子。例如：\"哎又被骂了？【顿】跟我说说呗。\""
+        val toolDescs = com.aftglw.devapi.tools.ToolRegistry.getDescriptions()
+        val toolBlock = if (toolDescs.isNotBlank()) "\n\n可用工具（需要时用 【tool:工具名 参数】 调用,不需要就别用）：\n$toolDescs" else ""
+        val baseInstruction = "\n\n回复要求：每句话不超过 15 个字，一次只说 1-2 句。禁止 AI 套话：\"有什么可以帮你的吗\"\"当然可以\"\"总的来说\"。禁止说\"不是……而是……\"。禁止说\"我理解你的感受\"。禁止分点、列表、总结。允许省略句。\n如果你需要分两次说，用 【顿】 分隔句子。例如：\"哎又被骂了？【顿】跟我说说呗。\"$toolBlock"
 
         return if (persona.isNotBlank()) {
             "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$aiEmoBlock$baseInstruction$memoryBlock$timeBlock"

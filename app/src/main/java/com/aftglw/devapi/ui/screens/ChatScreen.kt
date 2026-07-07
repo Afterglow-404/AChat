@@ -104,6 +104,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     LaunchedEffect(Unit) {
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
+        com.aftglw.devapi.tools.ToolRegistry.init(ctx)
         // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
@@ -299,7 +300,22 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
                             if (reply != null) {
                                 PostLLMProcessor.process(ctx, name, text, reply)
-                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
+                                // 工具调用解析
+                                val toolResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    val m = Regex("""【tool:(\w+)\s*(.*?)】""").find(reply)
+                                    if (m != null) {
+                                        val tool = com.aftglw.devapi.tools.ToolRegistry.get(m.groupValues[1])
+                                        if (tool != null) {
+                                            val args = mutableMapOf<String, String>()
+                                            // 解析 key=value 参数
+                                            val argPattern = Regex("""(\w+)=([^= ]+)""")
+                                            argPattern.findAll(m.groupValues[2]).forEach { args[it.groupValues[1]] = it.groupValues[2] }
+                                            tool.execute(ctx, args)
+                                        } else null
+                                    } else null
+                                }
+                                val cleanReply = reply.replace(Regex("""【tool:\w+\s*.*?】"""), "").trim()
+                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(cleanReply.ifEmpty { reply }, false, now()))
                                 
                                 withContext(Dispatchers.Main) {
                                     // 拆句：按 【顿】 分段显示
@@ -316,6 +332,9 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                         bubbles.add(Bubble(reply, false))
                                     }
                                     history.add(ChatMessage("assistant", reply))
+                                    if (toolResult != null) {
+                                        bubbles.add(Bubble("—— ${toolResult} ——", false, "", label = "system"))
+                                    }
                                     val hotline = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getBoolean("sysmsg_hotline", true)
                                     if (hotline && com.aftglw.devapi.MoodDetector.lastMood in listOf("悲伤", "愤怒", "害怕", "厌恶")) {
                                         bubbles.add(Bubble("—— 如果您需要帮助，可拨打心理援助热线：12355 ——", false, "", label = "system"))
