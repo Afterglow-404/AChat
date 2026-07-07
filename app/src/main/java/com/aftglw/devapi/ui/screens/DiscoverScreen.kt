@@ -72,8 +72,6 @@ import com.aftglw.devapi.viewmodel.TodoViewModel
 import com.kyant.shapes.Capsule
 import androidx.compose.ui.tooling.preview.Preview
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import coil.compose.SubcomposeAsyncImage
-import androidx.compose.ui.graphics.graphicsLayer
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance

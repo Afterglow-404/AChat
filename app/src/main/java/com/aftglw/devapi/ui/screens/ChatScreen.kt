@@ -107,8 +107,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
-        bubbles.addAll(saved.map { Bubble(it.first, it.second, it.third) })
-        history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first) })
+        saved.forEach { (text, isMe, time) ->
+            val parts = text.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
+            if (parts.size > 1) parts.forEach { bubbles.add(Bubble(it, isMe, time)) }
+            else bubbles.add(Bubble(text, isMe, time))
+        }
+        history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first.replace("【顿】", "").trim()) })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", chatKey).apply()
         // 异步：模型加载 + 归档检查
@@ -298,7 +302,19 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                 ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
                                 
                                 withContext(Dispatchers.Main) {
-                                    bubbles.add(Bubble(reply, false))
+                                    // 拆句：按 【顿】 分段显示
+                                    val parts = reply.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
+                                    if (parts.size > 1) {
+                                        bubbles.add(Bubble(parts[0], false))
+                                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                                            for (i in 1 until parts.size) {
+                                                delay(500)
+                                                bubbles.add(Bubble(parts[i], false))
+                                            }
+                                        }
+                                    } else {
+                                        bubbles.add(Bubble(reply, false))
+                                    }
                                     history.add(ChatMessage("assistant", reply))
                                     val hotline = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getBoolean("sysmsg_hotline", true)
                                     if (hotline && com.aftglw.devapi.MoodDetector.lastMood in listOf("悲伤", "愤怒", "害怕", "厌恶")) {
