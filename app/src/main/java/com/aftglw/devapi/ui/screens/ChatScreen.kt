@@ -359,6 +359,11 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                     }
                                     waiting = false
                                 }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(ctx, "AI 回复失败，请检查 API 配置和网络连接", android.widget.Toast.LENGTH_SHORT).show()
+                                    waiting = false
+                                }
                             }
                         }
                     },
