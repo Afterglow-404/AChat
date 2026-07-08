@@ -77,6 +77,8 @@ import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import com.aftglw.devapi.LingChatScript
 import com.aftglw.devapi.ui.screens.ScriptPage
+import com.aftglw.devapi.ui.screens.ScriptBrowserPage
+import com.aftglw.devapi.ScriptLoader
 
 @Composable
 fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {
@@ -101,7 +103,14 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
 
     var showChallenge by remember { mutableStateOf(false) }
     var showScript by remember { mutableStateOf(false) }
+    var showScriptBrowser by remember { mutableStateOf(false) }
     var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
+    var scriptCharacterPrompt by remember { mutableStateOf("") }
+    var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        availableScripts = ScriptLoader.loadFromAssets(ctx)
+    }
     var challengeText by remember { mutableStateOf("") }
     var challengeDone by remember { mutableStateOf(false) }
     var challengeLoading by remember { mutableStateOf(false) }
@@ -279,13 +288,13 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
         }
     }
 
-    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript
+    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript || showScriptBrowser
     LaunchedEffect(subPageOpen) { onSubPageChange(subPageOpen) }
 
     LaunchedEffect(Unit) { fetchHitokoto() }
 
     AnimatedContent(
-        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 5 else 0,
+        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 6 else if (showScriptBrowser) 5 else 0,
         transitionSpec = {
             AnimationUtils.slideHorizontal(forward = targetState > initialState)
         },
@@ -308,20 +317,28 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
             )
             3 -> TodoPage(onBack = { showTodo = false }, cnFont = cnFont, enFont = enFont, fortuneText = fortuneText, backdrop = todoBackdrop)
             4 -> PromptBuilderPage(onBack = { showPromptBuilder = false })
-            5 -> if (demoScript != null) ScriptPage(script = demoScript!!, onBack = { showScript = false })
+            5 -> ScriptBrowserPage(
+                scripts = availableScripts,
+                onPlay = { info ->
+                    val loaded = ScriptLoader.loadScriptFromAssets(ctx, info.id)
+                    if (loaded != null) {
+                        demoScript = loaded
+                        scriptCharacterPrompt = info.characterPrompt
+                        showScript = true
+                    } else {
+                        android.widget.Toast.makeText(ctx, "剧本加载失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onBack = { showScriptBrowser = false }
+            )
+            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, onBack = { showScript = false; showScriptBrowser = true })
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
             else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
                 onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
                 onTodoClick = { showTodo = true },
                 onPromptBuilderClick = { showPromptBuilder = true },
-                onScriptClick = {
-                    val yaml = com.aftglw.devapi.ScriptEngine.generateSampleYaml()
-                    val parsed = com.aftglw.devapi.ScriptEngine.parseYaml(yaml)?.let {
-                        demoScript = it; showScript = true
-                    }
-                    if (parsed == null) android.widget.Toast.makeText(ctx, "剧本加载失败", android.widget.Toast.LENGTH_SHORT).show()
-                })
+                onScriptClick = { showScriptBrowser = true })
         }
     }
 }
