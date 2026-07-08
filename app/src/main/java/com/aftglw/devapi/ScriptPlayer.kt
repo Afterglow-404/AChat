@@ -125,7 +125,7 @@ object ScriptEngine {
     private fun parseChapterYaml(yaml: String): List<ScriptEvent>? = try {
         val doc = Yaml().load<Map<String, Any>>(yaml) ?: return null
         val eventsRaw = doc["events"] as? List<Map<String, Any>> ?: return null
-        eventsRaw.mapNotNull { parseEvent(it) }
+        eventsRaw.mapNotNull { parseEventDirect(it) }
     } catch (_: Exception) { null }
 
     // ---------- 兼容：单文件 YAML ----------
@@ -141,13 +141,13 @@ object ScriptEngine {
                 for ((chName, chData) in rawChapters) {
                     val eventsRaw = (chData as? Map<String, Any>)?.get("events") as? List<Map<String, Any>>
                     if (eventsRaw != null) {
-                        chapters[chName] = eventsRaw.mapNotNull { parseEvent(it) }
+                        chapters[chName] = eventsRaw.mapNotNull { parseEventDirect(it) }
                     }
                 }
             } else {
                 val eventsRaw = doc["events"] as? List<Map<String, Any>> ?: return null
                 val chName = (doc["intro_chapter"] as? String) ?: "main"
-                chapters[chName] = eventsRaw.mapNotNull { parseEvent(it) }
+                chapters[chName] = eventsRaw.mapNotNull { parseEventDirect(it) }
             }
 
             LingChatScript(
@@ -161,7 +161,7 @@ object ScriptEngine {
 
     // ---------- 事件解析器 ----------
 
-    private fun parseEvent(e: Map<String, Any>): ScriptEvent? {
+    fun parseEventDirect(e: Map<String, Any>): ScriptEvent? {
         val type = e["type"] as? String ?: return null
         return ScriptEvent(
             type = type,
