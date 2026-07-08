@@ -1,6 +1,6 @@
 package com.aftglw.devapi.ui.screens
 
-import android.content.Context
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,31 +18,33 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aftglw.devapi.ScriptChoice
-import com.aftglw.devapi.ScriptEngine
-import com.aftglw.devapi.ScriptEvent
-import com.aftglw.devapi.ScriptPlayer
+import com.aftglw.devapi.*
 import com.aftglw.devapi.network.AiServiceFactory
+import com.aftglw.devapi.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private data class DisplayBubble(
+private data class DispBubble(
     val text: String,
-    val label: String = "",  // 角色名
+    val label: String = "",
     val isNarration: Boolean = false,
     val isUser: Boolean = false
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
+fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var currentIndex by remember { mutableIntStateOf(0) }
-    val bubbles = remember { mutableStateListOf<DisplayBubble>() }
+    val bubbles = remember { mutableStateListOf<DispBubble>() }
+    var currentChapter by remember { mutableStateOf(initialChapter.ifEmpty { script.introChapter }) }
+    var eventIndex by remember { mutableIntStateOf(0) }
+    var events by remember { mutableStateOf(loadScriptEvents(script, currentChapter)) }
     var waiting by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
     var choices by remember { mutableStateOf<List<ScriptChoice>>(emptyList()) }
@@ -51,102 +53,141 @@ fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
 
     fun isUserChar(char: String) = char == "你" || char == "用户" || char == "我"
 
-    fun nextEvent() {
-        if (currentIndex >= scriptEvents.size) { finished = true; return }
-        val event = scriptEvents[currentIndex]
-        currentIndex++
+    /** 跳过被条件过滤的事件 */
+    fun skipToValid(): Int {
+        var idx = eventIndex
+        while (idx < events.size) {
+            val ev = events[idx]
+            if (!ScriptEngine.checkCondition(ev.condition)) { idx++; continue }
+            if (ev.type == "dialogue" && ev.options.isNotEmpty()) { choices = ev.options; return idx }
+            break
+        }
+        return idx
+    }
 
-        when (event.type) {
+    fun advanceOne() {
+        if (finished || waiting) return
+        eventIndex = skipToValid()
+        if (eventIndex >= events.size) { finished = true; return }
+
+        val ev = events[eventIndex]
+        eventIndex++
+
+        when (ev.type) {
             "narration" -> {
-                bubbles.add(DisplayBubble(text = event.text, isNarration = true))
+                bubbles.add(DispBubble(text = ev.text, isNarration = true))
+                // 旁白自动推进
+                scope.launch {
+                    val ms = (ev.text.length * 50L).coerceIn(300L, 2000L)
+                    delay(ms)
+                    advanceOne()
+                }
             }
             "dialogue" -> {
-                val isUser = isUserChar(event.character)
+                val isUser = isUserChar(ev.character)
                 if (aiMode && !isUser) {
-                    // AI 扮演角色回复
+                    // AI 扮演角色生成回复
                     waiting = true
                     scope.launch {
-                        val reply = withContext(Dispatchers.IO) {
+                        val aiReply = withContext(Dispatchers.IO) {
                             try {
                                 AiServiceFactory.getService().sendMessage(
                                     emptyList(), "",
-                                    "你是${event.character}。${event.text}"
+                                    "你是${ev.character}。请用${ev.character}的口吻说：${ev.text}"
                                 )
                             } catch (_: Exception) { null }
                         }
-                        bubbles.add(DisplayBubble(
-                            text = event.text,
-                            label = event.character,
-                            isUser = false
+                        bubbles.add(DispBubble(
+                            text = aiReply ?: ev.text,
+                            label = ev.character
                         ))
                         waiting = false
-                        nextEvent()
+                        advanceOne()
                     }
                 } else {
-                    bubbles.add(DisplayBubble(
-                        text = event.text,
-                        label = if (isUser) "" else event.character,
+                    bubbles.add(DispBubble(
+                        text = ev.text,
+                        label = if (isUser) "" else ev.character,
                         isUser = isUser
                     ))
-                    // 纯脚本模式不自动推进，等用户点"继续"
+                    // AI 模式下用户发言后 AI 自动回应
                     if (aiMode && isUser) {
-                        // 用户发言 → AI 回复
                         waiting = true
                         scope.launch {
-                            val reply = withContext(Dispatchers.IO) {
+                            val aiReply = withContext(Dispatchers.IO) {
                                 try {
                                     AiServiceFactory.getService().sendMessage(
-                                        emptyList(), event.text,
-                                        "你是角色的朋友，自然地回应。"
+                                        emptyList(), ev.text,
+                                        "请自然地回应对方。用日常口语短句。"
                                     )
                                 } catch (_: Exception) { null }
                             }
-                            if (reply != null) {
-                                bubbles.add(DisplayBubble(text = reply, label = "AI", isUser = false))
+                            if (aiReply != null) {
+                                bubbles.add(DispBubble(text = aiReply, label = "AI"))
                             }
                             waiting = false
-                            nextEvent()
+                            advanceOne()
                         }
-                    } else {
-                        nextEvent()
                     }
                 }
             }
-            "choices" -> {
-                choices = event.options
-            }
             "chapter_end" -> {
-                finished = true
+                if (ev.nextChapter.isNotBlank() && script.chapters.containsKey(ev.nextChapter)) {
+                    val next = ev.nextChapter
+                    // 自动跳转下一章
+                    currentChapter = next
+                    events = loadScriptEvents(script, next)
+                    eventIndex = 0
+                    advanceOne()
+                } else {
+                    finished = true
+                }
             }
-            else -> nextEvent()
         }
     }
 
-    LaunchedEffect(Unit) { nextEvent() }
+    // 启动
+    LaunchedEffect(Unit) {
+        ScriptEngine.reset()
+        advanceOne()
+    }
 
+    // 自动滚底
     LaunchedEffect(bubbles.size) {
         if (bubbles.isNotEmpty()) listState.animateScrollToItem(bubbles.size - 1)
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+    val pageBg = AchatTheme.colors.background
+    val pageSurface = AchatTheme.colors.surface
+    val pageText = AchatTheme.colors.onSurface
+
+    Column(Modifier.fillMaxSize().background(pageBg)) {
         // 顶栏
         CenterAlignedTopAppBar(
-            title = { Text("剧本播放", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back") } },
+            title = {
+                Text(script.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = pageText)
+            },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = pageText)
+                }
+            },
             actions = {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
                     Text("AI", fontSize = 11.sp, color = if (aiMode) Color(0xFF07C160) else Color.Gray)
                     Switch(
-                        checked = aiMode, onCheckedChange = { aiMode = it },
-                        modifier = Modifier.padding(horizontal = 4.dp).heightIn(max = 24.dp)
+                        checked = aiMode,
+                        onCheckedChange = { aiMode = it },
+                        modifier = Modifier.padding(horizontal = 4.dp).heightIn(max = 24.dp),
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF07C160))
                     )
                     Text("脚本", fontSize = 11.sp, color = if (!aiMode) Color(0xFF07C160) else Color.Gray)
                 }
             },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = pageSurface),
             modifier = Modifier.statusBarsPadding()
         )
-        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFE0E0E0))
+        HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
         // 气泡列表
         LazyColumn(
@@ -155,64 +196,105 @@ fun ScriptPage(scriptEvents: List<ScriptEvent>, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             itemsIndexed(bubbles, key = { i, _ -> i }) { _, b ->
-                if (b.isNarration) {
-                    // 旁白：居中斜体
-                    Text(b.text, fontSize = 14.sp, color = Color(0xFF888888),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        lineHeight = 22.sp)
-                } else if (b.isUser) {
-                    // 用户消息：右对齐
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Box(Modifier.background(Color(0xFF07C160).copy(alpha = 0.15f), RoundedCornerShape(12.dp, 4.dp, 12.dp, 12.dp)).padding(12.dp).widthIn(max = 240.dp)) {
-                            Text(b.text, fontSize = 14.sp, color = Color(0xFF1A1A1A))
+                when {
+                    b.isNarration -> {
+                        Text(
+                            b.text, fontSize = 14.sp, color = pageText.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center, lineHeight = 22.sp
+                        )
+                    }
+                    b.isUser -> {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Box(
+                                Modifier.background(
+                                    AchatTheme.colors.primary.copy(alpha = 0.12f),
+                                    AchatTheme.shapes.bubbleMe
+                                ).padding(14.dp).widthIn(max = 270.dp)
+                            ) {
+                                Text(b.text, fontSize = 14.sp, color = pageText)
+                            }
                         }
                     }
-                } else {
-                    // AI/角色消息：左对齐
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                        Column(Modifier.widthIn(max = 260.dp)) {
-                            if (b.label.isNotEmpty()) Text(b.label, fontSize = 11.sp, color = Color(0xFF07C160), fontWeight = FontWeight.Bold)
-                            Box(Modifier.background(Color.White, RoundedCornerShape(4.dp, 12.dp, 12.dp, 12.dp)).padding(12.dp)) {
-                                Text(b.text, fontSize = 14.sp, color = Color(0xFF1A1A1A))
+                    else -> {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+                            Column(Modifier.widthIn(max = 290.dp)) {
+                                if (b.label.isNotEmpty()) {
+                                    Text(
+                                        b.label, fontSize = 11.sp,
+                                        color = AchatTheme.colors.primary,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                    )
+                                }
+                                Box(
+                                    Modifier.background(pageSurface, AchatTheme.shapes.bubbleAi).padding(14.dp)
+                                ) {
+                                    Text(b.text, fontSize = 14.sp, color = pageText)
+                                }
                             }
                         }
                     }
                 }
             }
+            // 加载中指示
             if (waiting) {
-                item { Text("● ● ●", fontSize = 12.sp, color = Color(0xFFBBBBBB), modifier = Modifier.padding(8.dp)) }
+                item {
+                    Box(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text("● ● ●", fontSize = 11.sp, color = pageText.copy(alpha = 0.3f))
+                    }
+                }
             }
+            // 选项
             if (choices.isNotEmpty()) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         choices.forEach { c ->
-                            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White).clickable {
-                                c.actions.forEach { a -> ScriptEngine.applyAction(a) }
-                                choices = emptyList()
-                                nextEvent()
-                            }.padding(12.dp), contentAlignment = Alignment.Center) {
-                                Text(c.text, fontSize = 14.sp, color = Color(0xFF1A1A1A))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(0.7f).clip(AchatTheme.shapes.card),
+                                shape = AchatTheme.shapes.card,
+                                color = pageSurface,
+                                tonalElevation = 2.dp,
+                                onClick = {
+                                    c.actions.forEach { a -> ScriptEngine.applyAction(a) }
+                                    choices = emptyList()
+                                    advanceOne()
+                                }
+                            ) {
+                                Text(
+                                    c.text, fontSize = 14.sp, color = pageText,
+                                    modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }
                 }
             }
+            // 剧终
             if (finished) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("— 剧终 —", fontSize = 16.sp, color = Color(0xFFBBBBBB))
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        Text("— 剧终 —", fontSize = 16.sp, color = pageText.copy(alpha = 0.3f))
                     }
                 }
             }
         }
 
-        // 底部控制
+        // 继续按钮
         if (!finished && choices.isEmpty() && !waiting) {
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { nextEvent() }) {
-                    Text("继续", fontSize = 14.sp)
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Center) {
+                OutlinedButton(onClick = { advanceOne() }) {
+                    Text("继续 ▼", fontSize = 14.sp)
                 }
             }
         }
     }
+}
+
+private fun loadScriptEvents(script: LingChatScript, chapter: String): List<ScriptEvent> {
+    return ScriptEngine.getChapter(script, chapter)
 }
