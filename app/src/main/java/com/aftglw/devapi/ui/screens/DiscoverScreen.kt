@@ -75,6 +75,8 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
+import com.aftglw.devapi.LingChatScript
+import com.aftglw.devapi.ui.screens.ScriptPage
 
 @Composable
 fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {
@@ -98,6 +100,8 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     val todoBackdrop = rememberLayerBackdrop(onDraw = { drawRect(Color.Transparent); drawContent() })
 
     var showChallenge by remember { mutableStateOf(false) }
+    var showScript by remember { mutableStateOf(false) }
+    var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
     var challengeText by remember { mutableStateOf("") }
     var challengeDone by remember { mutableStateOf(false) }
     var challengeLoading by remember { mutableStateOf(false) }
@@ -275,13 +279,13 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
         }
     }
 
-    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder
+    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript
     LaunchedEffect(subPageOpen) { onSubPageChange(subPageOpen) }
 
     LaunchedEffect(Unit) { fetchHitokoto() }
 
     AnimatedContent(
-        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else 0,
+        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 5 else 0,
         transitionSpec = {
             AnimationUtils.slideHorizontal(forward = targetState > initialState)
         },
@@ -304,17 +308,26 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
             )
             3 -> TodoPage(onBack = { showTodo = false }, cnFont = cnFont, enFont = enFont, fortuneText = fortuneText, backdrop = todoBackdrop)
             4 -> PromptBuilderPage(onBack = { showPromptBuilder = false })
+            5 -> if (demoScript != null) ScriptPage(script = demoScript!!, onBack = { showScript = false })
+                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
             else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
                 onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
                 onTodoClick = { showTodo = true },
-                onPromptBuilderClick = { showPromptBuilder = true })
+                onPromptBuilderClick = { showPromptBuilder = true },
+                onScriptClick = {
+                    val yaml = com.aftglw.devapi.ScriptEngine.generateSampleYaml()
+                    val parsed = com.aftglw.devapi.ScriptEngine.parseYaml(yaml)?.let {
+                        demoScript = it; showScript = true
+                    }
+                    if (parsed == null) android.widget.Toast.makeText(ctx, "剧本加载失败", android.widget.Toast.LENGTH_SHORT).show()
+                })
         }
     }
 }
 
 @Composable
-fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from: String = "", loading: Boolean = false, onRefresh: () -> Unit = {}, cnFont: FontFamily = FontFamily.Default, enFont: FontFamily = FontFamily.Default, onCatClick: () -> Unit = {}, onChallengeClick: () -> Unit = {}, onTodoClick: () -> Unit = {}, onPromptBuilderClick: () -> Unit = {}) {
+fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from: String = "", loading: Boolean = false, onRefresh: () -> Unit = {}, cnFont: FontFamily = FontFamily.Default, enFont: FontFamily = FontFamily.Default, onCatClick: () -> Unit = {}, onChallengeClick: () -> Unit = {}, onTodoClick: () -> Unit = {}, onPromptBuilderClick: () -> Unit = {}, onScriptClick: () -> Unit = {}) {
     val scrollState = rememberLazyListState()
     val collapseFraction by remember {
         derivedStateOf {
@@ -468,6 +481,9 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                     "2" -> onCatClick()
                                     "3" -> onChallengeClick()
                                     "4" -> onTodoClick()
+                                    "5" -> {}
+                                    "6" -> {}
+                                    "7" -> onScriptClick()
                                     "8" -> onPromptBuilderClick()
                                 }
                             }.padding(horizontal = 16.dp, vertical = 12.dp),

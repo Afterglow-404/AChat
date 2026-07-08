@@ -111,6 +111,47 @@ object ScriptEngine {
         return script.chapters[chapterName]?.events ?: emptyList()
     }
 
+    fun generateSampleYaml(): String = """name: 日常片段
+description: 一段日常对话
+intro_chapter: main
+chapters:
+  main:
+    events:
+      - type: narration
+        text: "傍晚，你坐在窗边发呆。"
+      - type: dialogue
+        character: "朋友"
+        text: "嘿，发什么呆呢？"
+      - type: dialogue
+        character: "你"
+        text: "没什么，就是觉得有点累。"
+      - type: dialogue
+        character: "朋友"
+        text: "累了就歇会儿呗，我给你泡了茶。"
+        options:
+          - text: "谢谢"
+            actions:
+              - type: set_variable
+                content: "mood=温暖"
+          - text: "不用了"
+            actions:
+              - type: set_variable
+                content: "mood=冷淡"
+      - type: narration
+        text: "一杯热茶放在了你面前。温暖透过杯壁传到手心。"
+        condition: "mood==温暖"
+      - type: narration
+        text: "朋友叹了口气，把茶放在桌上。"
+        condition: "mood==冷淡"
+      - type: chapter_end
+        end_type: "linear"
+        next_chapter: "end"
+  end:
+    events:
+      - type: narration
+        text: "—— 完 ——"
+"""
+
     fun checkCondition(condition: String): Boolean {
         if (condition.isBlank()) return true
         val parts = condition.split("==").map { it.trim() }
