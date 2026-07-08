@@ -70,7 +70,7 @@ object MoodDetector {
             val result = MoodInfo(label, hint)
             lastMood = result.mood; lastHint = result.hint; lastSource = if (conf >= 0.6f) "model" else "api"
             appCtx?.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                ?.edit()?.putString("last_mood_$currentChatName", label ?: "")?.apply()
+                ?.edit()?.putString("last_mood_$currentChatName", label)?.apply()
             return result
         }
         lastMood = null; lastHint = null; lastSource = "model_unavailable"

@@ -92,9 +92,7 @@ class DebugOverlayService : Service() {
         overlay = layout
         updateInfo()
 
-        val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE
+        val flag = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,

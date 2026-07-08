@@ -151,7 +151,7 @@ class QwenTokenizer(private val ctx: Context) {
         // 1. UTF-8 encode text → bytes
         // 2. BPE merge → token IDs
         // 简化返回
-        return intArrayOf(1) + text.take(512).map { (it.code % 100000 + 100).toInt() }.toIntArray()
+        return intArrayOf(1) + text.take(512).map { (it.code % 100000 + 100) }.toIntArray()
     }
 
     fun decode(tokenIds: IntArray): String {

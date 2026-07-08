@@ -964,7 +964,7 @@ private fun TodoPage(onBack: () -> Unit, cnFont: FontFamily, enFont: FontFamily,
             Box(Modifier.fillMaxWidth().padding(12.dp).align(Alignment.BottomCenter).navigationBarsPadding()) {
                 Row(
                     Modifier.drawBackdrop(
-                        backdrop = backdrop!!, shape = { Capsule() },
+                        backdrop = backdrop, shape = { Capsule() },
                         effects = { blur(4f.dp.toPx()); lens(6f.dp.toPx(), 12f.dp.toPx()) },
                         layerBlock = {
                             val s = lerp(1f, clearDampedDrag.pressedScale, clearDampedDrag.pressProgress)
@@ -999,6 +999,7 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
     var minSentences by remember { mutableStateOf(true) }
     var banSelfAware by remember { mutableStateOf(true) }
     var showPreview by remember { mutableStateOf(false) }
+    @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
 
     val pageBgModifier = when(AchatTheme.colors.themeId) {

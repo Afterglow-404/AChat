@@ -63,6 +63,7 @@ private sealed class SettingsPage {
     data object Debug : SettingsPage()
     data object About : SettingsPage()
     data object WCPreview : SettingsPage()
+    data object McpServers : SettingsPage()
 }
 
 class SettingsActivity : ComponentActivity() {
@@ -239,6 +240,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
                     )
                     is SettingsPage.About -> AboutPage(onBack = goBack)
                     is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
+                    is SettingsPage.McpServers -> McpServersPage(onBack = goBack)
                 }
             }
         }
@@ -265,7 +267,8 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
         Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
         Triple("界面设置", "通透效果、液态动效、字体、主题", SettingsPage.Appearance),
         Triple("调试", "开发用功能", SettingsPage.Debug),
-        Triple("关于", "AChat 信息", SettingsPage.About)
+        Triple("关于", "AChat 信息", SettingsPage.About),
+        Triple("MCP 服务", "管理外部 MCP Server 连接", SettingsPage.McpServers)
     )
 
     Scaffold(

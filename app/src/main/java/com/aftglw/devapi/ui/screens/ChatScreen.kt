@@ -104,6 +104,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     LaunchedEffect(Unit) {
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
+        com.aftglw.devapi.tools.ToolRegistry.init(ctx)
         // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
@@ -296,26 +297,62 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val historyText = bubbles.takeLast(8).joinToString("\n") { "${if (it.isMe) "我" else "AI"}：${it.text}" }
                             val mood = if (moodEnabled) { MoodDetector.feed(text, listOf(historyText)) } else MoodInfo(null, null)
                             val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
-                            val reply = AiServiceFactory.getService().sendMessage(history.toList(), text, moodPersona)
+                            // 收集流式完整文本（不逐字显示）
+                            val service = AiServiceFactory.getService()
+                            val fullReply = StringBuilder()
+                            val doneLatch = kotlinx.coroutines.CompletableDeferred<String?>()
+
+                            service.sendMessageStream(
+                                history.toList(), text, moodPersona,
+                                onChunk = { chunk -> fullReply.append(chunk) },
+                                onDone = { full -> doneLatch.complete(full.ifEmpty { null }) }
+                            )
+
+                            val reply = doneLatch.await()
+
                             if (reply != null) {
                                 PostLLMProcessor.process(ctx, name, text, reply)
-                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(reply, false, now()))
-                                
+
+                                // 提取并执行 【tool:xxx】 调用
+                                val toolResult = withContext(Dispatchers.IO) {
+                                    val m = Regex("""【tool:(\w+)\s*(.*?)】""").find(reply)
+                                    if (m != null) {
+                                        val toolName = m.groupValues[1]
+                                        val rawArgs = m.groupValues[2].trim()
+                                        val tool = com.aftglw.devapi.tools.ToolRegistry.get(toolName)
+                                        if (tool != null) {
+                                            val args = tool.parseTextArgs(rawArgs)
+                                            tool.execute(ctx, args)
+                                        } else null
+                                    } else null
+                                }
+                                val cleanReply = reply.replace(Regex("""【tool:\w+\s*.*?】"""), "").trim()
+
+                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(cleanReply.ifEmpty { reply }, false, now()))
+
                                 withContext(Dispatchers.Main) {
-                                    // 拆句：按 【顿】 分段显示
-                                    val parts = reply.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
-                                    if (parts.size > 1) {
-                                        bubbles.add(Bubble(parts[0], false))
-                                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
-                                            for (i in 1 until parts.size) {
-                                                delay(500)
-                                                bubbles.add(Bubble(parts[i], false))
+                                    // 拆句：按 \n\n 或 【顿】 分段，动态延迟弹出
+                                    if (cleanReply.isNotBlank()) {
+                                        val parts = cleanReply.split(Regex("【顿】|\\n\\n"))
+                                            .map { it.trim() }.filter { it.isNotBlank() }
+                                        if (parts.size > 1) {
+                                            bubbles.add(Bubble(parts[0], false))
+                                            kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                                                for (i in 1 until parts.size) {
+                                                    val len = parts[i].length
+                                                    val delayMs = (len * 50L).coerceIn(200L, 1500L)
+                                                    delay(delayMs)
+                                                    bubbles.add(Bubble(parts[i], false))
+                                                }
                                             }
+                                        } else {
+                                            bubbles.add(Bubble(cleanReply, false))
                                         }
-                                    } else {
-                                        bubbles.add(Bubble(reply, false))
                                     }
-                                    history.add(ChatMessage("assistant", reply))
+                                    if (toolResult != null) {
+                                        bubbles.add(Bubble("—— ${toolResult} ——", false, "", label = "system"))
+                                    }
+                                    history.add(ChatMessage("assistant", cleanReply.ifEmpty { reply }))
                                     val hotline = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getBoolean("sysmsg_hotline", true)
                                     if (hotline && com.aftglw.devapi.MoodDetector.lastMood in listOf("悲伤", "愤怒", "害怕", "厌恶")) {
                                         bubbles.add(Bubble("—— 如果您需要帮助，可拨打心理援助热线：12355 ——", false, "", label = "system"))
@@ -367,6 +404,7 @@ fun ChatContent(
     val localInput = remember(input) { mutableStateOf(input) }
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+    @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
     Box(Modifier.fillMaxSize()) {
         if (chatBgBitmap != null) {
@@ -414,7 +452,7 @@ fun ChatContent(
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "详情", tint = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
                     .then(if (AchatTheme.colors.themeId == "newspaper") Modifier.headerDoubleRule() else Modifier)
                     .then(if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider) else Modifier)
@@ -605,7 +643,7 @@ private fun ChatInfoPage(
         CenterAlignedTopAppBar(
             title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
 
@@ -949,7 +987,7 @@ private fun DiaryPage(name: String, onBack: () -> Unit) {
         CenterAlignedTopAppBar(
             title = { Text("📖 日记", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         if (diaries.isEmpty()) {
@@ -991,7 +1029,7 @@ private fun MemoryPage(name: String, onBack: () -> Unit) {
         CenterAlignedTopAppBar(
             title = { Text("🧠 全部记忆", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "back", tint = AchatTheme.colors.onSurface) } },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             modifier = Modifier.statusBarsPadding())
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         OutlinedTextField(

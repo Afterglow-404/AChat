@@ -169,7 +169,7 @@ fun ContactsScreen() {
         Triple("新的朋友", Icons.Default.PersonAdd, Color(0xFFFA9D3B)),
         Triple("仅聊天的朋友", Icons.Default.PersonSearch, Color(0xFFFA9D3B)),
         Triple("群聊", Icons.Default.Group, Color(0xFF07C160)),
-        Triple("标签", Icons.Default.Label, Color(0xFF2782D7)),
+        Triple("标签", Icons.AutoMirrored.Filled.Label, Color(0xFF2782D7)),
         Triple("公众号", Icons.Default.ChatBubble, Color(0xFF2782D7))
     )
     LazyColumn(Modifier.fillMaxSize()) {

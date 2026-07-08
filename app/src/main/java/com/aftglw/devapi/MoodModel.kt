@@ -94,7 +94,8 @@ object MoodModel {
             val r = s.run(mapOf("input_ids" to input, "attention_mask" to attn, "token_type_ids" to ttIds))
             r.use { result ->
                 val raw = result.get("logits")
-                val tensor = if (raw is java.util.Optional) (raw as java.util.Optional<OnnxTensor>).get() else raw as OnnxTensor
+                @Suppress("CAST_NEVER_SUCCEEDS")
+                val tensor = if (raw is java.util.Optional<*>) (raw.get() as OnnxTensor) else raw as OnnxTensor
                 val scores = tensor.floatBuffer.array()
                 val idx = scores.indices.maxByOrNull { scores[it] } ?: return@use null
                 val maxScore = scores[idx]
