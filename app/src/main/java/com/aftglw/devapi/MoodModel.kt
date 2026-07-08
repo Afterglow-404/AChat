@@ -8,26 +8,24 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * 19 类中文情绪分类器。
+ * 7 类中文情绪分类器（基于 Chinese_sentiment 微调，83% 准确率）
  *
- * 模型: BERT-base-chinese 微调 → ONNX 导出 → ONNX Runtime 推理
- * 输入: input_ids + attention_mask (max_len=48)
- * 输出: 19 类情绪 logits
+ * 模型: chinese-roberta-wwm-ext 微调 → ONNX 导出
+ * 输入: input_ids + attention_mask (max_len=128)
+ * 输出: 7 类情绪 logits
  */
 object MoodModel {
     private const val MODEL_NAME = "model_quant.onnx"
     private const val VOCAB_FILE = "bert_vocab.txt"
-    private const val MAX_LEN = 48
+    private const val MAX_LEN = 128
     private var session: OrtSession? = null
     private val env = OrtEnvironment.getEnvironment()
     var lastError = ""
 
-    // 19 类情绪（与训练脚本 label_mapping.json 一致）
+    // 7 类情绪（中文情感数据集微调，83% accuracy）
     val labels = listOf(
-        "兴奋", "厌恶", "哭泣", "害怕", "害羞",
-        "平静", "心动", "惊讶", "慌张", "担心",
-        "无奈", "生气", "疑惑", "紧张", "自信",
-        "认真", "调皮", "难为情", "高兴",
+        "开心", "悲伤", "愤怒", "害怕",
+        "惊讶", "厌恶", "中性",
     )
 
     fun isDownloaded(context: Context) = true
