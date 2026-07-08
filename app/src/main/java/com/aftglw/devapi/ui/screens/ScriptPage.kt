@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -20,6 +21,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.BitmapFactory
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -67,6 +72,7 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
     var freeDlgChar by remember { mutableStateOf("") }
     var freeDlgHint by remember { mutableStateOf("") }
     var freeDlgPromptText by remember { mutableStateOf("") }
+    var currentBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
     val listState = rememberLazyListState()
 
@@ -83,6 +89,7 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
             try {
                 AiServiceFactory.getService().sendMessage(emptyList(), "", prompt)
             } catch (_: Exception) { null }
+
         }
     }
 
@@ -173,7 +180,12 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                 }
             }
 
-            "background", "background_effect", "music", "sound", "present_pic", "modify_character", "ambient", "set_variable" -> {
+            "background" -> {
+                loadBackground(ev.imagePath, script, ctx, scope) { currentBgBitmap = it }
+                advance()
+            }
+            "background_effect" -> advance()
+            "music", "sound", "present_pic", "modify_character", "ambient", "set_variable" -> {
                 // UI 效果类事件 - 已通过解析处理，直接跳过
                 advance()
             }
@@ -259,7 +271,11 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
     val pageSurface = AchatTheme.colors.surface
     val pageText = AchatTheme.colors.onSurface
 
-    Column(Modifier.fillMaxSize().background(pageBg)) {
+    Box(Modifier.fillMaxSize()) {
+        if (currentBgBitmap != null) {
+            Image(currentBgBitmap!!, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        Column(Modifier.fillMaxSize().background(if (currentBgBitmap != null) Color.Transparent else pageBg)) {
         // 顶栏
         CenterAlignedTopAppBar(
             title = { Text(script.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = pageText) },
@@ -347,6 +363,20 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                 OutlinedButton(onClick = { advance() }) { Text("继续 ▼", fontSize = 14.sp) }
             }
         }
+    }
+    }
+}
+
+fun loadBackground(path: String, script: LingChatScript, ctx: android.content.Context, scope: kotlinx.coroutines.CoroutineScope, setBg: (androidx.compose.ui.graphics.ImageBitmap?) -> Unit) {
+    if (path.isBlank() || script.assetBasePath.isBlank()) return
+    scope.launch {
+        val bmp = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                val fullPath = "${script.assetBasePath}/Assets/Backgrounds/$path"
+                ctx.assets.open(fullPath).use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+            } catch (_: Exception) { null }
+        }
+        if (bmp != null) setBg(bmp)
     }
 }
 
