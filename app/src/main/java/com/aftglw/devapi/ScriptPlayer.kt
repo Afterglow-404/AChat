@@ -58,7 +58,8 @@ data class LingChatScript(
     val description: String = "",
     val introChapter: String = "",
     val chapters: Map<String, List<ScriptEvent>> = emptyMap(),
-    val storyConfigPath: String = ""
+    val storyConfigPath: String = "",
+    val assetBasePath: String = ""
 )
 
 // ===== YAML 引擎 =====

@@ -113,7 +113,8 @@ object ScriptLoader {
                 name = (config["script_name"] as? String) ?: scriptId,
                 description = (config["description"] as? String) ?: "",
                 introChapter = intro,
-                chapters = chapters
+                chapters = chapters,
+                assetBasePath = "scripts/$scriptId"
             )
         } catch (_: Exception) { null }
     }
