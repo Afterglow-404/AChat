@@ -1,7 +1,7 @@
 <p align="center">
   <img src="docs/logo.png" width="128" alt="AChat Logo"/>
 </p>
-<p align="center"><strong>AChat</strong><br/>一个 AI 聊天应用</p>
+<p align="center"><strong>Wisp (原AChat)</strong><br/>一个 AI 聊天应用</p>
 
 > 代码由 AI 生成，功能设计参考了类似项目。
 
@@ -28,7 +28,7 @@
 
 ## 注意
 
-AChat 使用了 kyant0 的 AndroidLiquidGlass 库，建议使用 **Android 12 以上**。
+Wisp 使用了 kyant0 的 AndroidLiquidGlass 库，建议使用 **Android 12 以上**。
 
 ## 我要玩！
 
