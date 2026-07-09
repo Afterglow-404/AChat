@@ -109,6 +109,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     var showScriptManager by remember { mutableStateOf(false) }
     var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
     var scriptCharacterPrompt by remember { mutableStateOf("") }
+    var scriptCharacterFolder by remember { mutableStateOf("") }
     var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
     LaunchedEffect(showScriptBrowser) {
         if (showScriptBrowser)
@@ -335,7 +336,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
                 onBack = { showScriptBrowser = false },
                 onManage = { showScriptManager = true }
             )
-            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, characterPrompt = scriptCharacterPrompt, onBack = { showScript = false; showScriptBrowser = true })
+            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, characterPrompt = scriptCharacterPrompt, characterFolder = scriptCharacterFolder, onBack = { showScript = false; showScriptBrowser = true })
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
             7 -> ScriptManagerPage(
                 scripts = ScriptLoader.loadFromAssets(ctx),

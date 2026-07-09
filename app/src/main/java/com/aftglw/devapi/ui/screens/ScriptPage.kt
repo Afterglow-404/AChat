@@ -64,6 +64,7 @@ fun ScriptPage(
     script: LingChatScript,
     initialChapter: String = "",
     characterPrompt: String = "",
+    characterFolder: String = "",
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -121,6 +122,19 @@ fun ScriptPage(
     var lastChapterTitle by remember { mutableStateOf("") }
 
     val assetBase = script.assetBasePath
+    // 情绪头像缓存
+    val avatarCache = remember { mutableStateMapOf<String, ImageBitmap>() }
+    fun loadAvatar(emotion: String): ImageBitmap? {
+        if (characterFolder.isBlank() || emotion.isBlank()) return null
+        val key = "$characterFolder/$emotion"
+        avatarCache[key]?.let { return it }
+        val bmp = try {
+            val path = "characters/$characterFolder/avatar/$emotion.webp"
+            ctx.assets.open(path).use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+        } catch (_: Exception) { null }
+        if (bmp != null) avatarCache[key] = bmp
+        return bmp
+    }
     val listState = rememberLazyListState()
 
     /** 字符级阅读延迟 */
@@ -558,8 +572,21 @@ fun ScriptPage(
                         }
                     }
                     else -> Row(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Bottom) {
-                        Box(Modifier.size(32.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
-                            Text(b.label.take(1).ifEmpty { "?" }, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        val avatarBmp = remember(b.label, characterFolder) {
+                            mutableStateOf(
+                                if (characterFolder.isNotBlank()) loadAvatar("头像")
+                                else null
+                            )
+                        }.value
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape).background(if (avatarBmp != null) Color.Transparent else AchatTheme.colors.divider),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (avatarBmp != null) {
+                                Image(avatarBmp, null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                            } else {
+                                Text(b.label.take(1).ifEmpty { "?" }, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                         Spacer(Modifier.width(6.dp))
                         Column(Modifier.widthIn(max = 290.dp)) {
