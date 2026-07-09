@@ -16,6 +16,7 @@ object ScriptLoader {
         val source: ScriptSource,
         val script: LingChatScript? = null,
         val characterPrompt: String = "",
+        val characterFolder: String = "",
         val order: Int = 99,
         val isAdventure: Boolean = false,
         val unlockConditions: List<UnlockCondition> = emptyList()
@@ -67,6 +68,7 @@ object ScriptLoader {
                         description = desc,
                         source = ScriptSource("asset", configPath),
                         characterPrompt = charPrompt,
+                        characterFolder = charFolder ?: "",
                         order = ((adventure?.get("order") as? Number)?.toInt()) ?: 99,
                         isAdventure = (adventure?.get("is_adventure") as? Boolean) ?: false,
                         unlockConditions = parseUnlockConditions(rawUnlocks)
