@@ -53,7 +53,7 @@ object ScriptLoader {
                     val adventure = config["adventure"] as? Map<String, Any>
                     val charFolder = adventure?.get("bound_character_folder") as? String
                     if (charFolder != null) {
-                        val charInfo = loadCharacterFromAssets(ctx, charFolder)
+                        val charInfo = loadCharacter(ctx, charFolder)
                         if (charInfo != null) {
                             charPrompt = charInfo.prompt
                             ScriptEngine.playerName = charInfo.userName.ifEmpty { "你" }
