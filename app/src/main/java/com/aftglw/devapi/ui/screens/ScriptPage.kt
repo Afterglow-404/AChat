@@ -85,6 +85,10 @@ fun ScriptPage(
     var aiMode by remember { mutableStateOf(false) }
     var currentBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
+    // 图片展示
+    var showPicDialog by remember { mutableStateOf(false) }
+    var picDialogBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+
     // 音乐播放器
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) {
@@ -358,7 +362,33 @@ fun ScriptPage(
                 waitingForContinue = true
             }
 
-            "present_pic", "set_variable" -> {
+            "present_pic" -> {
+                val picPath = ev.imagePath.ifEmpty { ev.content.ifEmpty { "" } }
+                if (picPath.isNotBlank()) {
+                    scope.launch {
+                        val bmp = withContext(Dispatchers.IO) {
+                            try {
+                                val fullPath = "$assetBase/Assets/Images/$picPath"
+                                ctx.assets.open(fullPath).use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+                            } catch (_: Exception) { null }
+                        }
+                        if (bmp != null) {
+                            picDialogBitmap = bmp
+                            showPicDialog = true
+                        } else {
+                            waitingForContinue = true
+                        }
+                    }
+                } else {
+                    waitingForContinue = true
+                }
+            }
+
+            "set_variable" -> {
+                ScriptEngine.applyAction(ScriptAction(
+                    type = ev.action.ifEmpty { "set_variable" },
+                    content = ev.content.ifEmpty { ev.text }
+                ))
                 advance()
             }
 
@@ -632,6 +662,18 @@ fun ScriptPage(
             Box(Modifier.fillMaxWidth().clickable { waitingForContinue = false; advance() }.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                 Text("▼ 点击继续", fontSize = 12.sp, color = pageText.copy(alpha = 0.35f))
             }
+        }
+        // 图片展示弹窗
+        if (showPicDialog && picDialogBitmap != null) {
+            AlertDialog(
+                onDismissRequest = { showPicDialog = false; waitingForContinue = true },
+                text = {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Image(picDialogBitmap!!, "插画", Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Fit)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showPicDialog = false; waitingForContinue = true }) { Text("关闭") } }
+            )
         }
     }
     }
