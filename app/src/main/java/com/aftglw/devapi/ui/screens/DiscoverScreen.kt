@@ -78,6 +78,7 @@ import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import com.aftglw.devapi.LingChatScript
 import com.aftglw.devapi.ui.screens.ScriptPage
 import com.aftglw.devapi.ui.screens.ScriptBrowserPage
+import com.aftglw.devapi.ui.screens.ScriptManagerPage
 import com.aftglw.devapi.ScriptLoader
 import com.aftglw.devapi.ScriptProgress
 
@@ -105,6 +106,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     var showChallenge by remember { mutableStateOf(false) }
     var showScript by remember { mutableStateOf(false) }
     var showScriptBrowser by remember { mutableStateOf(false) }
+    var showScriptManager by remember { mutableStateOf(false) }
     var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
     var scriptCharacterPrompt by remember { mutableStateOf("") }
     var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
@@ -289,13 +291,13 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
         }
     }
 
-    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript || showScriptBrowser
+    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript || showScriptBrowser || showScriptManager
     LaunchedEffect(subPageOpen) { onSubPageChange(subPageOpen) }
 
     LaunchedEffect(Unit) { fetchHitokoto() }
 
     AnimatedContent(
-        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 6 else if (showScriptBrowser) 5 else 0,
+        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 6 else if (showScriptBrowser) 5 else if (showScriptManager) 7 else 0,
         transitionSpec = {
             AnimationUtils.slideHorizontal(forward = targetState > initialState)
         },
@@ -330,10 +332,24 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
                         android.widget.Toast.makeText(ctx, "剧本加载失败", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 },
-                onBack = { showScriptBrowser = false }
+                onBack = { showScriptBrowser = false },
+                onManage = { showScriptManager = true }
             )
             6 -> if (demoScript != null) ScriptPage(script = demoScript!!, characterPrompt = scriptCharacterPrompt, onBack = { showScript = false; showScriptBrowser = true })
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
+            7 -> ScriptManagerPage(
+                scripts = ScriptLoader.loadFromAssets(ctx),
+                onPlay = { info ->
+                    val loaded = ScriptLoader.loadScriptFromAssets(ctx, info.id)
+                    if (loaded != null) {
+                        demoScript = loaded
+                        scriptCharacterPrompt = info.characterPrompt
+                        showScriptManager = false
+                        showScript = true
+                    }
+                },
+                onBack = { showScriptManager = false }
+            )
             else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
                 onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
