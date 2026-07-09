@@ -100,25 +100,32 @@ object ScriptLoader {
             val config = Yaml().load<Map<String, Any>>(configYaml)
             val intro = (config["intro_chapter"] as? String) ?: "main"
 
-            // 扫描 Chapters/
+            // 扫描 Chapters/（递归）
             val chaptersDir = "$basePath/Chapters"
-            val chapterFiles = ctx.assets.list(chaptersDir) ?: return null
             val chapters = mutableMapOf<String, List<ScriptEvent>>()
             val chapterNames = mutableMapOf<String, String>()
 
-            for (f in chapterFiles) {
-                if (!f.endsWith(".yaml") && !f.endsWith(".yml")) continue
-                val yaml = ctx.assets.open("$chaptersDir/$f").bufferedReader().use { it.readText() }
-                val doc = Yaml().load<Map<String, Any>>(yaml)
-                val eventsRaw = doc?.get("events") as? List<Map<String, Any>> ?: continue
-                val chName = doc?.get("name") as? String ?: ""
-
-                ScriptEngine::class.java // 初始化
-                val events = eventsRaw.mapNotNull { ScriptEngine.parseEventDirect(it) }
-                val key = f.removeSuffix(".yaml").removeSuffix(".yml")
-                chapters[key] = events
-                if (chName.isNotBlank()) chapterNames[key] = chName
+            fun scanDir(path: String, prefix: String) {
+                val entries = try { ctx.assets.list(path) } catch (_: Exception) { null } ?: return
+                for (entry in entries) {
+                    val full = "$path/$entry"
+                    if (entry.contains(".")) {
+                        if (!entry.endsWith(".yaml") && !entry.endsWith(".yml")) continue
+                        val yaml = ctx.assets.open(full).bufferedReader().use { it.readText() }
+                        val doc = Yaml().load<Map<String, Any>>(yaml)
+                        val eventsRaw = doc?.get("events") as? List<Map<String, Any>> ?: continue
+                        val chName = doc?.get("name") as? String ?: ""
+                        ScriptEngine::class.java
+                        val events = eventsRaw.mapNotNull { ScriptEngine.parseEventDirect(it) }
+                        val key = (if (prefix.isNotEmpty()) "$prefix/" else "") + entry.removeSuffix(".yaml").removeSuffix(".yml")
+                        chapters[key] = events
+                        if (chName.isNotBlank()) chapterNames[key] = chName
+                    } else {
+                        scanDir(full, if (prefix.isNotEmpty()) "$prefix/$entry" else entry)
+                    }
+                }
             }
+            scanDir(chaptersDir, "")
 
             LingChatScript(
                 name = (config["script_name"] as? String) ?: scriptId,
