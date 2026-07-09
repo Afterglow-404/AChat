@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
                         Column {
                             Text(
                                 buildAnnotatedString {
-                                    append("此版本 AChat 处于 ")
+                                    append("此版本 Wisp 处于 ")
                                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Dev") }
                                     append(" 阶段\n\n")
                                     append("• 功能特性随时变动\n")
@@ -59,8 +59,8 @@ class MainActivity : ComponentActivity() {
                                     withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• 请勿依赖 AI 聊天\n") }
                                     withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• 请勿随意分享您的 API Key\n") }
                                     withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)) { append("• AI 无法真正理解人类的情绪，AI 只是在当下语境选择了最可能出现的词汇并输出\n") }
-                                    append("• AChat 不保存任何您的聊天数据，也不共享\n\n")
-                                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("请...理性地使用 AChat 喵...") }
+                                    append("• Wisp 不保存任何您的聊天数据，也不共享\n\n")
+                                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("请...理性地使用 Wisp 喵...") }
                                 },
                                 fontSize = 14.sp, lineHeight = 20.sp
                             )
@@ -92,11 +92,11 @@ class MainActivity : ComponentActivity() {
             if (agreed && !onboardingDone) {
                 AlertDialog(
                     onDismissRequest = {},
-                    title = { Text("欢迎来到 AChat", fontWeight = FontWeight.Bold) },
+                    title = { Text("欢迎来到 Wisp", fontWeight = FontWeight.Bold) },
                     text = {
                         Column {
                             Text(
-                                "AChat 是一个 AI 聊天应用。\n\n" +
+                                " Wisp 是一个 AI 聊天应用。\n\n" +
                                 "您可以：\n" +
                                 "• 配置 API 后和 AI 自由对话\n" +
                                 "• 在「发现」页面看看趣味功能\n" +

@@ -187,7 +187,7 @@ fun MeScreenContent(
 @Composable
 fun MeScreenPreview() {
     val sampleItems = listOf(
-        "Android Dev|个人签名: Hello AChat|#07C160",
+        "Android Dev|个人签名: Hello Wisp|#07C160",
         Unit,
         MeItem("pay", "支付", R.drawable.ic_wallet),
         Unit,

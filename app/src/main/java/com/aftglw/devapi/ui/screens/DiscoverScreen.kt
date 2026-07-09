@@ -479,12 +479,12 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                 Spacer(Modifier.height(2.dp))
                                 val announcement = """
                                 **v0.1.2** 内容：
-                                  AChatの第三个版本
+                                  Wispの第三个版本
                                 - 修正部分内容
                                 - 暂时不像微信
                                 - 根据《人工智能拟人化互动服务管理暂行办法》做出修改
                                 - 加入Herobrine
-                                给AChat点点Star谢谢喵！
+                                给Wisp点点Star谢谢喵！
                             """.trimIndent()
                                 Text(
                                     text = parseMarkdown(announcement),

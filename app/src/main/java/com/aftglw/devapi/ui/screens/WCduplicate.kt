@@ -264,7 +264,7 @@ fun MeScreenMock() {
                     Column(Modifier.weight(1f)) {
                         Text("User Name", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface, fontFamily = AchatTheme.typography.title)
                         Spacer(Modifier.height(4.dp))
-                        Text("个人签名: Hello AChat", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
+                        Text("个人签名: Hello Wisp", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontFamily = AchatTheme.typography.body)
                         Spacer(Modifier.height(8.dp))
                         Row {
                             Surface(shape = RoundedCornerShape(12.dp), color = AchatTheme.colors.background) {

@@ -119,7 +119,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     LaunchedEffect(customFont) { typography.value = if (customFont) buildCustomTypography() else Typography() }
 
     var profileName by remember { mutableStateOf(prefs.getString("profile_name", "User") ?: "User") }
-    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "个人签名: Hello AChat") ?: "个人签名: Hello AChat") }
+    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "个人签名: Hello Wisp") ?: "个人签名: Hello Wisp") }
     var profileAvatarUri by remember { mutableStateOf(prefs.getString("profile_avatar_uri", "") ?: "") }
 
     var mainBgUri by remember { mutableStateOf(prefs.getString("main_bg_uri", "") ?: "") }
@@ -269,7 +269,7 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
         Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
         Triple("界面设置", "通透效果、液态动效、字体、主题", SettingsPage.Appearance),
         Triple("调试", "开发用功能", SettingsPage.Debug),
-        Triple("关于", "AChat 信息", SettingsPage.About),
+        Triple("关于", "Wisp 信息", SettingsPage.About),
         Triple("MCP 服务", "管理外部 MCP Server 连接", SettingsPage.McpServers)
     )
 
@@ -355,7 +355,7 @@ private fun ProfilePage(
         }
         HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
         TextFieldRow("昵称", "User", profileName, onProfileNameChange)
-        TextFieldRow("个人签名", "Hello AChat", profileWechatId, onProfileWechatIdChange)
+        TextFieldRow("个人签名", "Hello Wisp", profileWechatId, onProfileWechatIdChange)
     }
 }
 
@@ -670,7 +670,7 @@ private fun DebugPage(
         val shareLog: () -> Unit = {
                 try {
                     val sb = StringBuilder()
-                    sb.appendLine("=== AChat Debug Log ===")
+                    sb.appendLine("=== Wisp Debug Log ===")
                     sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                     sb.appendLine("Device: ${android.os.Build.MODEL} (API ${android.os.Build.VERSION.SDK_INT})")
                     sb.appendLine()
@@ -738,7 +738,7 @@ private fun DebugPage(
                     // 写入 log 目录后分享
                     val logDir = java.io.File(ctx.cacheDir, "log")
                     logDir.mkdirs()
-                    val logFile = java.io.File(logDir, "AChat_debug_log.txt")
+                    val logFile = java.io.File(logDir, "Wisp_debug_log.txt")
                     logFile.writeText(sb.toString())
                     val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                         type = "text/plain"
@@ -780,12 +780,12 @@ private fun AboutPage(onBack: () -> Unit) {
     SubPageScaffold("关于", onBack) {
         Spacer(Modifier.height(8.dp))
         Column(Modifier.fillMaxWidth().background(Color.White).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("AChat", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+            Text("Wisp", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
             Spacer(Modifier.height(4.dp))
             Text("Preview Version", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Normal)
             Text("Pre-Alpha (Dev)", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             Spacer(Modifier.height(12.dp))
-            Text("WeChat 的拙劣模仿品，你能在「AChat」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
+            Text("WeChat 的拙劣模仿品，你能在「Wisp」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
             Text("支持 OpenAI 兼容 API 对话，支持自定义对话人设。", fontSize = 12.sp, color = Color(0xFF888888))
             Spacer(Modifier.height(8.dp))
             Text("💗 爱来自 AFTGLW 与 Deepseek-Reasonix 💗", fontSize = 11.sp, color = Color(0xFFBBBBBB))
