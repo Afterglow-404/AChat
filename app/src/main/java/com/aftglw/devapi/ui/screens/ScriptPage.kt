@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import android.content.Context
+import android.media.MediaPlayer
 import android.graphics.BitmapFactory
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -84,6 +85,14 @@ fun ScriptPage(
     var aiMode by remember { mutableStateOf(false) }
     var currentBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
+    // 音乐播放器
+    val mediaPlayer = remember { MediaPlayer() }
+    DisposableEffect(Unit) {
+        onDispose {
+            try { mediaPlayer.release() } catch (_: Exception) {}
+        }
+    }
+
     // 自由对话模式
     var freeDlg by remember { mutableStateOf(false) }
     var freeMaxRounds by remember { mutableIntStateOf(-1) }
@@ -107,6 +116,7 @@ fun ScriptPage(
     // 上次显示过的章节名（避免重复）
     var lastChapterTitle by remember { mutableStateOf("") }
 
+    val assetBase = script.assetBasePath
     val listState = rememberLazyListState()
 
     /** 字符级阅读延迟 */
@@ -318,7 +328,37 @@ fun ScriptPage(
                 waitingForContinue = true
             }
 
-            "music", "sound", "present_pic", "ambient", "set_variable" -> {
+            "music", "ambient" -> {
+                val musicPath = ev.imagePath.ifEmpty { ev.text.ifEmpty { "" } }
+                if (musicPath.isNotBlank()) {
+                    try {
+                        mediaPlayer.reset()
+                        val afd = ctx.assets.openFd("$assetBase/Music/$musicPath")
+                        mediaPlayer.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                        mediaPlayer.isLooping = ev.type == "ambient"
+                        mediaPlayer.prepare()
+                        mediaPlayer.start()
+                    } catch (_: Exception) {}
+                }
+                waitingForContinue = true
+            }
+
+            "sound" -> {
+                val soundPath = ev.imagePath.ifEmpty { ev.content.ifEmpty { "" } }
+                if (soundPath.isNotBlank()) {
+                    try {
+                        val sp = MediaPlayer()
+                        val afd = ctx.assets.openFd("$assetBase/Music/$soundPath")
+                        sp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                        sp.setOnCompletionListener { try { sp.release() } catch (_: Exception) {} }
+                        sp.prepare()
+                        sp.start()
+                    } catch (_: Exception) {}
+                }
+                waitingForContinue = true
+            }
+
+            "present_pic", "set_variable" -> {
                 advance()
             }
 
@@ -431,8 +471,8 @@ fun ScriptPage(
     }
 
     val pageBg = AchatTheme.colors.background
-    val pageSurface = AchatTheme.colors.surface
     val pageText = AchatTheme.colors.onSurface
+    val pageSurface = AchatTheme.colors.surface
 
     Box(Modifier.fillMaxSize()) {
         if (currentBgBitmap != null) {
