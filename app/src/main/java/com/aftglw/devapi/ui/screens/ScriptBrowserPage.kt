@@ -25,12 +25,18 @@ import com.aftglw.devapi.ui.theme.*
 fun ScriptBrowserPage(
     scripts: List<ScriptLoader.ScriptInfo>,
     onPlay: (ScriptLoader.ScriptInfo) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onManage: (() -> Unit)? = null
 ) {
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
             title = { Text("剧本选择", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface) } },
+            actions = {
+                if (onManage != null) {
+                    TextButton(onClick = onManage) { Text("管理", fontSize = 13.sp, color = AchatTheme.colors.primary) }
+                }
+            },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = AchatTheme.colors.surface)
         )
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)

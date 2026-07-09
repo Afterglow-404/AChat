@@ -45,6 +45,13 @@ object ScriptProgress {
         else raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
     }
 
+    /** 重置单个剧本的通关记录 */
+    fun resetScript(ctx: Context, scriptId: String) {
+        val set = getCompleted(ctx).toMutableSet()
+        set.remove(scriptId)
+        save(ctx, set)
+    }
+
     /** 重置所有进度（调试用） */
     fun resetAll(ctx: Context) {
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
