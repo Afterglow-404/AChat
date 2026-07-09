@@ -79,19 +79,34 @@ object ScriptLoader {
         return result.sortedBy { it.order }
     }
 
+    /** 从 assets 或 filesDir 加载角色设定 */
+    fun loadCharacter(ctx: Context, folder: String): CharacterInfo? {
+        // 优先从 filesDir（导入的角色）
+        val filePath = File(ctx.filesDir, "characters/$folder/settings.yml")
+        if (filePath.exists()) {
+            return parseCharacterFile(filePath.readText(), folder)
+        }
+        // 回退到 assets（内置角色）
+        return loadCharacterFromAssets(ctx, folder)
+    }
+
     /** 从 assets 加载角色设定 */
     fun loadCharacterFromAssets(ctx: Context, folder: String): CharacterInfo? {
         return try {
             val path = "characters/$folder/settings.yml"
             val yamlStr = ctx.assets.open(path).bufferedReader().use { it.readText() }
-            val doc = Yaml().load<Map<String, Any>>(yamlStr)
-            CharacterInfo(
-                name = (doc["ai_name"] as? String) ?: folder,
-                prompt = (doc["system_prompt"] as? String) ?: "",
-                userName = (doc["user_name"] as? String) ?: ""
-            )
+            parseCharacterFile(yamlStr, folder)
         } catch (_: Exception) { null }
     }
+
+    private fun parseCharacterFile(yamlStr: String, folder: String): CharacterInfo? = try {
+        val doc = Yaml().load<Map<String, Any>>(yamlStr)
+        CharacterInfo(
+            name = (doc["ai_name"] as? String) ?: folder,
+            prompt = (doc["system_prompt"] as? String) ?: "",
+            userName = (doc["user_name"] as? String) ?: ""
+        )
+    } catch (_: Exception) { null }
 
     /** 从 assets 加载完整剧本数据 */
     fun loadScriptFromAssets(ctx: Context, scriptId: String): LingChatScript? {

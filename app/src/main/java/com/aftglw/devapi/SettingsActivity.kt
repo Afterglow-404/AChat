@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import java.io.File
+import com.aftglw.devapi.CharacterImporter
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -453,6 +455,37 @@ private fun ManageRolesPage(
             }
             TextButton(onClick = { importSkillLauncher.launch(arrayOf("text/*")) }, modifier = Modifier.fillMaxWidth()) {
                 Text("导入 Skill（从 ex-skill 文件）", fontSize = 13.sp, color = Color(0xFF888888))
+            }
+            Spacer(Modifier.height(4.dp))
+            // LingChat 角色 ZIP 导入
+            val importCharLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                uri?.let {
+                    try {
+                        val input = ctx.contentResolver.openInputStream(it)
+                        val tmpFile = File(ctx.cacheDir, "import_char_${System.currentTimeMillis()}.zip")
+                        input?.use { src -> tmpFile.outputStream().use { dst -> src.copyTo(dst) } }
+                        val result = CharacterImporter.importFromZip(ctx, tmpFile.absolutePath)
+                        tmpFile.delete()
+                        result.onSuccess { name ->
+                            // 自动填入人设
+                            val settings = CharacterImporter.loadSettings(ctx, name)
+                            val prompt = settings?.get("system_prompt") as? String ?: ""
+                            val aiName = settings?.get("ai_name") as? String ?: name
+                            onNewChatNameChange(aiName)
+                            if (prompt.isNotBlank()) onNewChatPersonaChange(prompt)
+                            android.widget.Toast.makeText(ctx, "角色「$aiName」导入成功！", Toast.LENGTH_LONG).show()
+                        }.onFailure { e ->
+                            android.widget.Toast.makeText(ctx, "导入失败：${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) {
+                        android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            TextButton(onClick = { importCharLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
+                Text("导入角色（从 LingChat ZIP）", fontSize = 13.sp, color = Color(0xFF07C160))
             }
             Spacer(Modifier.height(8.dp))
             Button(onClick = onCreateChat, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = CircleShape) { Text("创建角色") }
