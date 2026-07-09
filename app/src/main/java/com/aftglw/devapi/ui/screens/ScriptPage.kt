@@ -266,6 +266,9 @@ fun ScriptPage(
                     val fallback = ev.branches.firstOrNull { it.default }
                     val target = matchedBranch ?: fallback
                     if (target != null && script.chapters.containsKey(target.nextChapter)) {
+                        if (target.text.isNotBlank()) {
+                            addBubble(text = "→ ${target.text}", isSystem = true)
+                        }
                         val next = target.nextChapter
                         currentChapter = next
                         events = loadEventsForChapter(next)
@@ -382,6 +385,28 @@ fun ScriptPage(
                 waiting = false
                 advance()
             }
+        }
+    }
+
+    /** AI 模式：自由发送消息 */
+    fun onAiModeSend(text: String) {
+        val input = text.trim()
+        if (input.isEmpty()) return
+        addBubble(text = input, isUser = true)
+        waitingForContinue = false
+        val bubbleIdx = bubbles.size
+        val charName = "MAIN"
+        bubbles.add(DispBubble(text = "...", label = charName))
+        scope.launch {
+            val prompt = buildString {
+                if (characterPrompt.isNotBlank()) append(characterPrompt).append("\n\n")
+                append("请以$charName 的身份自然地回复用户的消息。用户说：$input")
+            }
+            val reply = callAi(prompt) ?: "..."
+            if (bubbleIdx in bubbles.indices) {
+                bubbles[bubbleIdx] = bubbles[bubbleIdx].copy(text = reply)
+            }
+            waitingForContinue = true
         }
     }
 
@@ -529,6 +554,33 @@ fun ScriptPage(
                 Spacer(Modifier.width(8.dp))
                 TextButton(
                     onClick = { onUserInput(inputText); inputText = "" },
+                    modifier = Modifier.background(AchatTheme.colors.primary, RoundedCornerShape(18.dp)),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
+                ) { Text("发送", fontSize = 14.sp) }
+            }
+        }
+
+        // AI 模式输入框
+        if (aiMode && waitingForContinue && !finished && !showInput && showChoices.isEmpty()) {
+            var aiInput by remember { mutableStateOf("") }
+            Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(8.dp).navigationBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = aiInput, onValueChange = { aiInput = it },
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
+                    placeholder = { Text("与角色自由对话...", fontSize = 14.sp) },
+                    singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.5f),
+                        unfocusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.3f)
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onAiModeSend(aiInput); aiInput = "" })
+                )
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = { onAiModeSend(aiInput); aiInput = "" },
                     modifier = Modifier.background(AchatTheme.colors.primary, RoundedCornerShape(18.dp)),
                     colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
                 ) { Text("发送", fontSize = 14.sp) }
