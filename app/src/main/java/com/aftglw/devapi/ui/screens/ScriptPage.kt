@@ -1,11 +1,11 @@
 package com.aftglw.devapi.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -37,19 +38,36 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+private fun now() = timeFormat.format(java.util.Date())
+
 private data class DispBubble(
     val text: String,
     val label: String = "",
     val isNarration: Boolean = false,
     val isUser: Boolean = false,
-    val isSystem: Boolean = false
+    val isSystem: Boolean = false,
+    val time: String = ""
 )
+
+/** 中文/混合文本的估计阅读延迟（毫秒/字符） */
+private const val CN_READ_MS_PER_CHAR = 60L
+private const val EN_READ_MS_PER_CHAR = 30L
+/** 保存用的 preference key 前缀 */
+private const val PREFS_KEY = "script_progress"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -> Unit) {
+fun ScriptPage(
+    script: LingChatScript,
+    initialChapter: String = "",
+    characterPrompt: String = "",
+    onBack: () -> Unit
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+    val saveKey = "script_${script.name}"
 
     // 状态
     val bubbles = remember { mutableStateListOf<DispBubble>() }
@@ -63,6 +81,8 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
     var showInput by remember { mutableStateOf(false) }
     var inputHint by remember { mutableStateOf("") }
     var aiMode by remember { mutableStateOf(false) }
+    var currentBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+
     // 自由对话模式
     var freeDlg by remember { mutableStateOf(false) }
     var freeMaxRounds by remember { mutableIntStateOf(-1) }
@@ -72,12 +92,28 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
     var freeDlgChar by remember { mutableStateOf("") }
     var freeDlgHint by remember { mutableStateOf("") }
     var freeDlgPromptText by remember { mutableStateOf("") }
-    var currentBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var waitingForContinue by remember { mutableStateOf(false) }
+
+    // 上次显示过的章节名（避免重复）
+    var lastChapterTitle by remember { mutableStateOf("") }
 
     val listState = rememberLazyListState()
 
+    /** 字符级阅读延迟 */
+    fun estimateReadDelay(text: String): Long {
+        var cn = 0; var en = 0
+        for (c in text) { if (c.code in 0x4E00..0x9FFF || c.code in 0x3000..0x303F) cn++ else en++ }
+        val total = cn * CN_READ_MS_PER_CHAR + en * EN_READ_MS_PER_CHAR
+        // 段落感：每 30 字额外加 200ms
+        val paragraphBonus = (text.length / 30) * 200L
+        // 多行文本：每行额外加 300ms
+        val lineCount = text.count { it == '\n' } + 1
+        val lineBonus = (lineCount - 1) * 300L
+        return (total + paragraphBonus + lineBonus).coerceIn(500L, 4000L)
+    }
+
     fun addBubble(text: String, label: String = "", isNarration: Boolean = false, isUser: Boolean = false, isSystem: Boolean = false) {
-        bubbles.add(DispBubble(text = text, label = label, isNarration = isNarration, isUser = isUser, isSystem = isSystem))
+        bubbles.add(DispBubble(text = text, label = label, isNarration = isNarration, isUser = isUser, isSystem = isSystem, time = now()))
     }
 
     fun loadEventsForChapter(name: String): List<ScriptEvent> {
@@ -89,8 +125,38 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
             try {
                 AiServiceFactory.getService().sendMessage(emptyList(), "", prompt)
             } catch (_: Exception) { null }
-
         }
+    }
+
+    /** 保存进度 */
+    fun saveProgress() {
+        prefs.edit()
+            .putString("${saveKey}_chapter", currentChapter)
+            .putInt("${saveKey}_event", eventIndex)
+            .apply()
+    }
+
+    /** 清除保存的进度 */
+    fun clearProgress() {
+        prefs.edit()
+            .remove("${saveKey}_chapter")
+            .remove("${saveKey}_event")
+            .apply()
+    }
+
+    /** 加载保存的进度 */
+    fun loadSavedProgress(): Pair<String, Int>? {
+        val ch = prefs.getString("${saveKey}_chapter", null) ?: return null
+        val ev = prefs.getInt("${saveKey}_event", -1)
+        if (ev < 0 || !script.chapters.containsKey(ch)) return null
+        return ch to ev
+    }
+
+    /** 显示章节标题 */
+    fun showChapterTitle(chapterKey: String) {
+        val title = script.chapterNames[chapterKey]?.takeIf { it != lastChapterTitle } ?: return
+        lastChapterTitle = title
+        addBubble(text = "—— $title ——", isNarration = true)
     }
 
     fun advance() {
@@ -107,13 +173,14 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
 
         val ev = events[eventIndex]
         eventIndex++
+        saveProgress()
 
         when (ev.type) {
             "narration" -> {
                 addBubble(text = ev.text, isNarration = true)
                 scope.launch {
-                    delay((ev.text.length * 40L).coerceIn(200L, 1500L))
-                    advance()
+                    delay(estimateReadDelay(ev.text))
+                    waitingForContinue = true
                 }
             }
 
@@ -123,32 +190,40 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                 if (ev.emotion.isNotBlank()) {
                     addBubble(text = "（${ev.emotion}）", isNarration = true)
                 }
+                waitingForContinue = true
             }
 
             "ai_dialogue" -> {
                 val charName = ev.character.ifEmpty { "MAIN" }
-                val prompt = ev.prompt.ifEmpty { "请以$charName 的身份自然地回复一句话" }
+                val prompt = buildString {
+                    if (characterPrompt.isNotBlank()) append(characterPrompt).append("\n\n")
+                    append(ev.prompt.ifEmpty { "请以$charName 的身份自然地回复一句话" })
+                }
                 waiting = true
+                val bubbleIdx = bubbles.size
+                bubbles.add(DispBubble(text = "...", label = charName))
                 scope.launch {
-                    val reply = callAi(prompt)
-                    addBubble(text = reply ?: "...", label = charName)
+                    val reply = callAi(prompt) ?: "..."
+                    if (bubbleIdx in bubbles.indices) {
+                        bubbles[bubbleIdx] = bubbles[bubbleIdx].copy(text = reply)
+                    }
                     waiting = false
-                    advance()
+                    waitingForContinue = true
                 }
             }
 
             "player" -> {
                 addBubble(text = ev.text, isUser = true)
+                waitingForContinue = true
             }
 
             "input" -> {
                 inputHint = ev.hint.ifEmpty { "请输入..." }
                 showInput = true
-                waiting = true // 等待用户输入
+                waiting = true
             }
 
             "choices" -> {
-                // 过滤有条件且不满足的选项
                 val valid = ev.options.filter { ScriptEngine.checkCondition(it.condition) }
                 showChoices = valid
                 allowFreeInput = ev.allowFree
@@ -163,7 +238,13 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                 freeRound = 0
                 freeEndLine = ev.endLine
                 freeEndPrompt = ev.endPrompt
-                freeDlgPromptText = ev.dialogPrompt
+                freeDlgPromptText = buildString {
+                    if (characterPrompt.isNotBlank()) append(characterPrompt).append("\n\n")
+                    append(ev.dialogPrompt.ifEmpty {
+                        if (characterPrompt.isNotBlank()) "请以${freeDlgChar}的身份继续自然地对话"
+                        else "你是$freeDlgChar，请自然地对话。"
+                    })
+                }
                 showInput = true
                 inputHint = freeDlgHint
             }
@@ -174,19 +255,38 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                     currentChapter = next
                     events = loadEventsForChapter(next)
                     eventIndex = 0
+                    showChapterTitle(next)
+                    saveProgress()
                     advance()
                 } else {
                     finished = true
+                    clearProgress()
                 }
             }
 
             "background" -> {
                 loadBackground(ev.imagePath, script, ctx, scope) { currentBgBitmap = it }
-                advance()
+                waitingForContinue = true
             }
-            "background_effect" -> advance()
-            "music", "sound", "present_pic", "modify_character", "ambient", "set_variable" -> {
-                // UI 效果类事件 - 已通过解析处理，直接跳过
+
+            "background_effect" -> {
+                val effectName = ev.effect.ifEmpty { "背景变化" }
+                addBubble(text = "✨ $effectName", isSystem = true)
+                waitingForContinue = true
+            }
+
+            "modify_character" -> {
+                val charName = ev.character.ifEmpty { "角色" }
+                val action = when (ev.action) {
+                    "show_character" -> "出现在眼前"
+                    "hide_character" -> "离开了"
+                    else -> ev.action.ifEmpty { "出现了变化" }
+                }
+                addBubble(text = "⚡ $charName $action", isSystem = true)
+                waitingForContinue = true
+            }
+
+            "music", "sound", "present_pic", "ambient", "set_variable" -> {
                 advance()
             }
 
@@ -205,21 +305,22 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
 
         when {
             freeDlg -> {
-                // 自由对话模式
                 addBubble(text = input, isUser = true)
                 freeRound++
                 waiting = true
+                val bubbleIdx = bubbles.size
+                bubbles.add(DispBubble(text = "...", label = freeDlgChar))
                 scope.launch {
                     val reply = callAi(freeDlgPromptText.ifEmpty { "你是$freeDlgChar，请自然地对话。" })
-                    if (reply != null) addBubble(text = reply, label = freeDlgChar)
-
-                    // 检查是否结束
+                    val fullText = reply ?: "..."
+                    if (bubbleIdx in bubbles.indices) {
+                        bubbles[bubbleIdx] = bubbles[bubbleIdx].copy(text = fullText)
+                    }
                     val shouldEnd = input.contains(freeEndLine) ||
                             (freeMaxRounds > 0 && freeRound >= freeMaxRounds)
                     if (shouldEnd) {
                         freeDlg = false
                         waiting = false
-                        // 用 endPrompt 继续
                         if (freeEndPrompt.isNotBlank()) {
                             val endReply = callAi(freeEndPrompt)
                             if (endReply != null) addBubble(text = endReply, label = freeDlgChar)
@@ -233,7 +334,6 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
                 }
             }
             showChoices.isNotEmpty() -> {
-                // 匹配选项
                 val matched = showChoices.firstOrNull { it.text == input }
                 if (matched != null) {
                     addBubble(text = input, isUser = true)
@@ -259,12 +359,21 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
     // 启动
     LaunchedEffect(Unit) {
         ScriptEngine.reset()
+        val saved = loadSavedProgress()
+        if (saved != null) {
+            currentChapter = saved.first
+            events = loadEventsForChapter(saved.first)
+            eventIndex = saved.second
+            showChapterTitle(saved.first)
+        }
         advance()
     }
 
     // 自动滚底
     LaunchedEffect(bubbles.size) {
-        if (bubbles.isNotEmpty()) listState.animateScrollToItem(bubbles.size - 1)
+        if (bubbles.isNotEmpty()) {
+            try { listState.animateScrollToItem(bubbles.size - 1) } catch (_: Exception) {}
+        }
     }
 
     val pageBg = AchatTheme.colors.background
@@ -279,7 +388,10 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
         // 顶栏
         CenterAlignedTopAppBar(
             title = { Text(script.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = pageText) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = pageText) } },
+            navigationIcon = { IconButton(onClick = {
+                saveProgress()
+                onBack()
+            }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = pageText) } },
             actions = {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
                     Text("AI", fontSize = 11.sp, color = if (aiMode) Color(0xFF07C160) else Color.Gray)
@@ -296,20 +408,48 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
 
         // 气泡列表
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(bubbles, key = { i, _ -> i }) { _, b ->
+            itemsIndexed(bubbles, key = { i, _ -> i }) { i, b ->
                 when {
+                    b.isSystem -> Text(b.text, fontSize = 11.sp, color = pageText.copy(alpha = 0.35f),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), textAlign = TextAlign.Center, lineHeight = 18.sp)
                     b.isNarration -> Text(b.text, fontSize = 13.sp, color = pageText.copy(alpha = 0.5f),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), textAlign = TextAlign.Center, lineHeight = 20.sp)
-                    b.isUser -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Box(Modifier.background(AchatTheme.colors.primary.copy(alpha = 0.12f), AchatTheme.shapes.bubbleMe).padding(14.dp).widthIn(max = 270.dp)) {
-                            Text(b.text, fontSize = 14.sp, color = pageText)
+                    b.isUser -> Row(Modifier.fillMaxWidth().padding(end = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
+                        Column(Modifier.widthIn(max = 270.dp)) {
+                            Box(Modifier.background(AchatTheme.colors.chatBubbleMe, AchatTheme.shapes.bubbleMe).padding(12.dp)) {
+                                Column {
+                                    Text(b.text, fontSize = 15.sp, color = pageText)
+                                    if (b.time.isNotEmpty()) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            Text(b.time, fontSize = 10.sp, color = pageText.copy(alpha = 0.4f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Box(Modifier.size(32.dp).clip(CircleShape).background(AchatTheme.colors.primary), contentAlignment = Alignment.Center) {
+                            Text("我", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+                    else -> Row(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Bottom) {
+                        Box(Modifier.size(32.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
+                            Text(b.label.take(1).ifEmpty { "?" }, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(6.dp))
                         Column(Modifier.widthIn(max = 290.dp)) {
                             if (b.label.isNotEmpty()) Text(b.label, fontSize = 11.sp, color = AchatTheme.colors.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
-                            Box(Modifier.background(pageSurface, AchatTheme.shapes.bubbleAi).padding(14.dp)) {
-                                Text(b.text, fontSize = 14.sp, color = pageText)
+                            Box(Modifier.background(AchatTheme.colors.chatBubbleAi, AchatTheme.shapes.bubbleAi).padding(12.dp)) {
+                                Column {
+                                    Text(b.text, fontSize = 15.sp, color = pageText)
+                                    if (b.time.isNotEmpty()) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            Text(b.time, fontSize = 10.sp, color = pageText.copy(alpha = 0.4f))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -357,10 +497,10 @@ fun ScriptPage(script: LingChatScript, initialChapter: String = "", onBack: () -
             }
         }
 
-        // 继续按钮（无输入/无选项/不等待时）
-        if (!finished && !showInput && showChoices.isEmpty() && !waiting) {
+        // 继续按钮
+        if (waitingForContinue) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { advance() }) { Text("继续 ▼", fontSize = 14.sp) }
+                OutlinedButton(onClick = { waitingForContinue = false; advance() }) { Text("继续 ▼", fontSize = 14.sp) }
             }
         }
     }

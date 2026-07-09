@@ -58,6 +58,7 @@ data class LingChatScript(
     val description: String = "",
     val introChapter: String = "",
     val chapters: Map<String, List<ScriptEvent>> = emptyMap(),
+    val chapterNames: Map<String, String> = emptyMap(), // chapter key -> display name
     val storyConfigPath: String = "",
     val assetBasePath: String = ""
 )
@@ -80,17 +81,20 @@ object ScriptEngine {
         if (!chaptersDir.exists()) return null
 
         val chapters = mutableMapOf<String, List<ScriptEvent>>()
+        val chapterNames = mutableMapOf<String, String>()
         val chapterFiles = findChapterFiles(chaptersDir)
 
         for (cf in chapterFiles) {
             val yaml = File(cf).readText()
-            val events = parseChapterYaml(yaml)
-            if (events != null) {
+            val result = parseChapterYaml(yaml)
+            if (result != null) {
+                val (chName, events) = result
                 // 用不含扩展名的路径作为 key
                 val key = cf.removePrefix(chaptersDir.absolutePath).removePrefix(File.separator)
                     .removeSuffix(".yaml").removeSuffix(".yml")
                     .replace("\\", "/")
                 chapters[key] = events
+                if (chName.isNotBlank()) chapterNames[key] = chName
             }
         }
 
@@ -99,6 +103,7 @@ object ScriptEngine {
             description = config.description,
             introChapter = config.introChapter,
             chapters = chapters,
+            chapterNames = chapterNames,
             storyConfigPath = dir.absolutePath
         )
     }
@@ -123,10 +128,11 @@ object ScriptEngine {
         return result.sorted()
     }
 
-    private fun parseChapterYaml(yaml: String): List<ScriptEvent>? = try {
+    private fun parseChapterYaml(yaml: String): Pair<String, List<ScriptEvent>>? = try {
         val doc = Yaml().load<Map<String, Any>>(yaml) ?: return null
+        val chapterName = (doc["name"] as? String) ?: ""
         val eventsRaw = doc["events"] as? List<Map<String, Any>> ?: return null
-        eventsRaw.mapNotNull { parseEventDirect(it) }
+        chapterName to eventsRaw.mapNotNull { parseEventDirect(it) }
     } catch (_: Exception) { null }
 
     // ---------- 兼容：单文件 YAML ----------
@@ -137,12 +143,16 @@ object ScriptEngine {
             val doc = yaml.load<Map<String, Any>>(yamlContent) ?: return null
 
             val chapters = mutableMapOf<String, List<ScriptEvent>>()
+            val chapterNames = mutableMapOf<String, String>()
             val rawChapters = doc["chapters"] as? Map<String, Any>
             if (rawChapters != null) {
                 for ((chName, chData) in rawChapters) {
-                    val eventsRaw = (chData as? Map<String, Any>)?.get("events") as? List<Map<String, Any>>
+                    val chMap = chData as? Map<String, Any>
+                    val chDisplayName = chMap?.get("name") as? String ?: ""
+                    val eventsRaw = chMap?.get("events") as? List<Map<String, Any>>
                     if (eventsRaw != null) {
                         chapters[chName] = eventsRaw.mapNotNull { parseEventDirect(it) }
+                        if (chDisplayName.isNotBlank()) chapterNames[chName] = chDisplayName
                     }
                 }
             } else {
@@ -155,7 +165,8 @@ object ScriptEngine {
                 name = (doc["name"] as? String) ?: (doc["script_name"] as? String) ?: "",
                 description = (doc["description"] as? String) ?: "",
                 introChapter = (doc["intro_chapter"] as? String) ?: chapters.keys.firstOrNull() ?: "main",
-                chapters = chapters
+                chapters = chapters,
+                chapterNames = chapterNames
             )
         } catch (_: Exception) { null }
     }

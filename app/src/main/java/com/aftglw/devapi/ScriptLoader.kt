@@ -96,17 +96,20 @@ object ScriptLoader {
             val chaptersDir = "$basePath/Chapters"
             val chapterFiles = ctx.assets.list(chaptersDir) ?: return null
             val chapters = mutableMapOf<String, List<ScriptEvent>>()
+            val chapterNames = mutableMapOf<String, String>()
 
             for (f in chapterFiles) {
                 if (!f.endsWith(".yaml") && !f.endsWith(".yml")) continue
                 val yaml = ctx.assets.open("$chaptersDir/$f").bufferedReader().use { it.readText() }
                 val doc = Yaml().load<Map<String, Any>>(yaml)
                 val eventsRaw = doc?.get("events") as? List<Map<String, Any>> ?: continue
+                val chName = doc?.get("name") as? String ?: ""
 
                 ScriptEngine::class.java // 初始化
                 val events = eventsRaw.mapNotNull { ScriptEngine.parseEventDirect(it) }
                 val key = f.removeSuffix(".yaml").removeSuffix(".yml")
                 chapters[key] = events
+                if (chName.isNotBlank()) chapterNames[key] = chName
             }
 
             LingChatScript(
@@ -114,6 +117,7 @@ object ScriptLoader {
                 description = (config["description"] as? String) ?: "",
                 introChapter = intro,
                 chapters = chapters,
+                chapterNames = chapterNames,
                 assetBasePath = "scripts/$scriptId"
             )
         } catch (_: Exception) { null }
