@@ -110,9 +110,9 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
     var scriptCharacterPrompt by remember { mutableStateOf("") }
     var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        availableScripts = ScriptLoader.loadFromAssets(ctx).filter { ScriptProgress.isScriptUnlocked(ctx, it.unlockConditions) }
+    LaunchedEffect(showScriptBrowser) {
+        if (showScriptBrowser)
+            availableScripts = ScriptLoader.loadFromAssets(ctx).filter { ScriptProgress.isScriptUnlocked(ctx, it.unlockConditions) }
     }
     var challengeText by remember { mutableStateOf("") }
     var challengeDone by remember { mutableStateOf(false) }
