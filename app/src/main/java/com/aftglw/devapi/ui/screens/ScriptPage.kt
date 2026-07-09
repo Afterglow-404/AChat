@@ -1,6 +1,7 @@
 package com.aftglw.devapi.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -93,6 +94,15 @@ fun ScriptPage(
     var freeDlgHint by remember { mutableStateOf("") }
     var freeDlgPromptText by remember { mutableStateOf("") }
     var waitingForContinue by remember { mutableStateOf(false) }
+
+    // 动画：打字指示器
+    var dotCount by remember { mutableIntStateOf(1) }
+    LaunchedEffect(waiting) {
+        while (waiting && !showInput && showChoices.isEmpty()) {
+            dotCount = (dotCount % 3) + 1
+            delay(400L)
+        }
+    }
 
     // 上次显示过的章节名（避免重复）
     var lastChapterTitle by remember { mutableStateOf("") }
@@ -250,7 +260,24 @@ fun ScriptPage(
             }
 
             "chapter_end" -> {
-                if (ev.nextChapter.isNotBlank() && script.chapters.containsKey(ev.nextChapter)) {
+                // 分支路由
+                if (ev.branches.isNotEmpty()) {
+                    val matchedBranch = ev.branches.firstOrNull { ScriptEngine.checkCondition(it.condition) }
+                    val fallback = ev.branches.firstOrNull { it.default }
+                    val target = matchedBranch ?: fallback
+                    if (target != null && script.chapters.containsKey(target.nextChapter)) {
+                        val next = target.nextChapter
+                        currentChapter = next
+                        events = loadEventsForChapter(next)
+                        eventIndex = 0
+                        showChapterTitle(next)
+                        saveProgress()
+                        advance()
+                    } else {
+                        finished = true
+                        clearProgress()
+                    }
+                } else if (ev.nextChapter.isNotBlank() && script.chapters.containsKey(ev.nextChapter)) {
                     val next = ev.nextChapter
                     currentChapter = next
                     events = loadEventsForChapter(next)
@@ -261,6 +288,8 @@ fun ScriptPage(
                 } else {
                     finished = true
                     clearProgress()
+                    // 通关时记录
+                    ScriptProgress.markCompleted(ctx, script.name)
                 }
             }
 
@@ -456,7 +485,8 @@ fun ScriptPage(
                 }
             }
             if (waiting && !showInput && showChoices.isEmpty()) {
-                item { Box(Modifier.fillMaxWidth().padding(12.dp)) { Text("● ● ●", fontSize = 11.sp, color = pageText.copy(alpha = 0.3f)) } }
+                val dots = buildString { repeat(dotCount) { append("● ") } }
+                item { Box(Modifier.fillMaxWidth().padding(12.dp)) { Text(dots.trimEnd(), fontSize = 11.sp, color = pageText.copy(alpha = 0.3f)) } }
             }
             // 选项
             if (showChoices.isNotEmpty()) {
@@ -481,26 +511,34 @@ fun ScriptPage(
         // 输入框
         if (showInput && !finished) {
             var inputText by remember { mutableStateOf("") }
-            Row(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(8.dp).navigationBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = inputText, onValueChange = { inputText = it },
-                    modifier = Modifier.weight(1f), placeholder = { Text(inputHint.ifEmpty { "输入..." }, fontSize = 14.sp) },
-                    singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
+                    placeholder = { Text(inputHint.ifEmpty { "说些什么吧..." }, fontSize = 14.sp) },
+                    singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.5f),
+                        unfocusedContainerColor = AchatTheme.colors.divider.copy(alpha = 0.3f)
+                    ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { onUserInput(inputText); inputText = "" })
                 )
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = { onUserInput(inputText); inputText = "" }) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "发送", tint = AchatTheme.colors.primary)
-                }
+                TextButton(
+                    onClick = { onUserInput(inputText); inputText = "" },
+                    modifier = Modifier.background(AchatTheme.colors.primary, RoundedCornerShape(18.dp)),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
+                ) { Text("发送", fontSize = 14.sp) }
             }
         }
 
         // 继续按钮
         if (waitingForContinue) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { waitingForContinue = false; advance() }) { Text("继续 ▼", fontSize = 14.sp) }
+            Box(Modifier.fillMaxWidth().clickable { waitingForContinue = false; advance() }.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                Text("▼ 点击继续", fontSize = 12.sp, color = pageText.copy(alpha = 0.35f))
             }
         }
     }

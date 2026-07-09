@@ -79,6 +79,7 @@ import com.aftglw.devapi.LingChatScript
 import com.aftglw.devapi.ui.screens.ScriptPage
 import com.aftglw.devapi.ui.screens.ScriptBrowserPage
 import com.aftglw.devapi.ScriptLoader
+import com.aftglw.devapi.ScriptProgress
 
 @Composable
 fun DiscoverScreen(vm: DiscoverViewModel = viewModel<DiscoverViewModel>(), onSubPageChange: (Boolean) -> Unit = {}) {
@@ -109,7 +110,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        availableScripts = ScriptLoader.loadFromAssets(ctx)
+        availableScripts = ScriptLoader.loadFromAssets(ctx).filter { ScriptProgress.isScriptUnlocked(ctx, it.unlockConditions) }
     }
     var challengeText by remember { mutableStateOf("") }
     var challengeDone by remember { mutableStateOf(false) }

@@ -14,7 +14,24 @@ data class StoryConfig(
     val scriptName: String,
     val introChapter: String = "main",
     val description: String = "",
-    val chapters: List<ScriptChapterFile> = emptyList()
+    val chapters: List<ScriptChapterFile> = emptyList(),
+    val isAdventure: Boolean = false,
+    val boundCharacterFolder: String = "",
+    val order: Int = 99,
+    val unlockConditions: List<UnlockCondition> = emptyList(),
+    val triggerMode: String = "manual"
+)
+
+data class UnlockCondition(
+    val type: String,          // "adventure_completed"
+    val adventureFolder: String // 需要先完成的剧本文件夹名
+)
+
+data class ScriptBranch(
+    val nextChapter: String,
+    val condition: String = "",
+    val text: String = "",
+    val default: Boolean = false
 )
 
 data class ScriptEvent(
@@ -33,6 +50,7 @@ data class ScriptEvent(
     val effect: String = "",
     val endType: String = "linear",
     val nextChapter: String = "",
+    val branches: List<ScriptBranch> = emptyList(),
     val action: String = "",
     val duration: Double = 1.0,
     val maxRounds: Int = -1,
@@ -110,11 +128,23 @@ object ScriptEngine {
 
     private fun parseStoryConfig(yaml: String): StoryConfig? = try {
         val doc = Yaml().load<Map<String, Any>>(yaml) ?: return null
+        val adv = doc["adventure"] as? Map<String, Any>
+        val rawUnlocks = adv?.get("unlock_conditions") as? List<Map<String, Any>>
         StoryConfig(
             scriptName = (doc["script_name"] as? String) ?: "",
             introChapter = (doc["intro_chapter"] as? String) ?: "main",
             description = (doc["description"] as? String) ?: "",
-            chapters = emptyList()
+            chapters = emptyList(),
+            isAdventure = (adv?.get("is_adventure") as? Boolean) ?: false,
+            boundCharacterFolder = (adv?.get("bound_character_folder") as? String) ?: "",
+            order = ((adv?.get("order") as? Number)?.toInt()) ?: 99,
+            triggerMode = (adv?.get("trigger") as? Map<String, Any>)?.get("mode") as? String ?: "manual",
+            unlockConditions = if (rawUnlocks != null) rawUnlocks.mapNotNull { u ->
+                UnlockCondition(
+                    type = (u["type"] as? String) ?: "",
+                    adventureFolder = (u["adventure_folder"] as? String) ?: ""
+                )
+            } else emptyList()
         )
     } catch (_: Exception) { null }
 
@@ -191,6 +221,7 @@ object ScriptEngine {
             effect = (e["effect"] as? String) ?: "",
             endType = (e["end_type"] as? String) ?: "linear",
             nextChapter = (e["next_chapter"] as? String) ?: (e["next"] as? String) ?: "",
+            branches = parseBranches(e["branches"] as? List<Map<String, Any>>),
             action = (e["action"] as? String) ?: "",
             duration = ((e["duration"] as? Number)?.toDouble()) ?: 1.0,
             maxRounds = ((e["max_rounds"] as? Number)?.toInt()) ?: -1,
@@ -199,6 +230,19 @@ object ScriptEngine {
             dialogPrompt = (e["dialog_prompt"] as? String) ?: (e["prompt"] as? String) ?: "",
             content = processText(e["content"] as? String)
         )
+    }
+
+    private fun parseBranches(raw: List<Map<String, Any>>?): List<ScriptBranch> {
+        if (raw == null) return emptyList()
+        return raw.mapNotNull { b ->
+            val next = (b["next_chapter"] as? String) ?: return@mapNotNull null
+            ScriptBranch(
+                nextChapter = next,
+                condition = (b["condition"] as? String) ?: "",
+                text = (b["text"] as? String) ?: "",
+                default = (b["default"] as? Boolean) ?: false
+            )
+        }
     }
 
     private fun processText(raw: Any?): String {
@@ -233,12 +277,52 @@ object ScriptEngine {
 
     // ---------- 条件和变量 ----------
 
+    /**
+     * 检查条件表达式。支持:
+     *   key==value  相等
+     *   key!=value  不等
+     *   key>=value  大于等于（数值优先）
+     *   key<=value  小于等于（数值优先）
+     *   key>value   大于（数值优先）
+     *   key<value   小于（数值优先）
+     */
     fun checkCondition(condition: String): Boolean {
         if (condition.isBlank()) return true
-        val parts = condition.split("==").map { it.trim() }
-        if (parts.size == 2) return variables[parts[0]] == parts[1].trim().trim('"')
-        val notParts = condition.split("!=").map { it.trim() }
-        if (notParts.size == 2) return variables[notParts[0]] != notParts[1].trim().trim('"')
+
+        val operators = listOf(">=", "<=", "!=", "==", ">", "<")
+        for (op in operators) {
+            val parts = condition.split(op).map { it.trim() }
+            if (parts.size == 2) {
+                val key = parts[0]
+                val expected = parts[1].trim('"')
+                val actual = variables[key] ?: ""
+                return when (op) {
+                    "==" -> actual == expected
+                    "!=" -> actual != expected
+                    ">=", "<=", ">", "<" -> {
+                        val aNum = actual.toDoubleOrNull()
+                        val eNum = expected.toDoubleOrNull()
+                        if (aNum != null && eNum != null) {
+                            when (op) {
+                                ">=" -> aNum >= eNum; "<=" -> aNum <= eNum
+                                ">" -> aNum > eNum; "<" -> aNum < eNum
+                                else -> true
+                            }
+                        } else {
+                            // 非数值回退字符串比较
+                            when (op) {
+                                ">=" -> actual >= expected
+                                "<=" -> actual <= expected
+                                ">" -> actual > expected
+                                "<" -> actual < expected
+                                else -> true
+                            }
+                        }
+                    }
+                    else -> true
+                }
+            }
+        }
         return true
     }
 

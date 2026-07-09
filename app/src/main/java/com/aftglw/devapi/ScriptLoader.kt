@@ -15,7 +15,10 @@ object ScriptLoader {
         val description: String,
         val source: ScriptSource,
         val script: LingChatScript? = null,
-        val characterPrompt: String = ""
+        val characterPrompt: String = "",
+        val order: Int = 99,
+        val isAdventure: Boolean = false,
+        val unlockConditions: List<UnlockCondition> = emptyList()
     )
 
     data class ScriptSource(
@@ -56,17 +59,22 @@ object ScriptLoader {
                         }
                     }
 
+                    val rawUnlocks = adventure?.get("unlock_conditions") as? List<Map<String, Any>>
+
                     result.add(ScriptInfo(
                         id = entry,
                         name = name,
                         description = desc,
                         source = ScriptSource("asset", configPath),
-                        characterPrompt = charPrompt
+                        characterPrompt = charPrompt,
+                        order = ((adventure?.get("order") as? Number)?.toInt()) ?: 99,
+                        isAdventure = (adventure?.get("is_adventure") as? Boolean) ?: false,
+                        unlockConditions = parseUnlockConditions(rawUnlocks)
                     ))
                 } catch (_: Exception) { /* 跳过无效目录 */ }
             }
         } catch (_: Exception) { }
-        return result
+        return result.sortedBy { it.order }
     }
 
     /** 从 assets 加载角色设定 */
@@ -121,5 +129,15 @@ object ScriptLoader {
                 assetBasePath = "scripts/$scriptId"
             )
         } catch (_: Exception) { null }
+    }
+
+    private fun parseUnlockConditions(raw: List<Map<String, Any>>?): List<UnlockCondition> {
+        if (raw == null) return emptyList()
+        return raw.mapNotNull { u ->
+            UnlockCondition(
+                type = (u["type"] as? String) ?: "",
+                adventureFolder = (u["adventure_folder"] as? String) ?: ""
+            )
+        }
     }
 }
