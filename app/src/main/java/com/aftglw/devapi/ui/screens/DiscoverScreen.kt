@@ -331,7 +331,7 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
                 },
                 onBack = { showScriptBrowser = false }
             )
-            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, onBack = { showScript = false; showScriptBrowser = true })
+            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, characterPrompt = scriptCharacterPrompt, onBack = { showScript = false; showScriptBrowser = true })
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
             else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
