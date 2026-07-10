@@ -97,20 +97,46 @@ class OpenAiService(context: Context) : AiService {
             val reader = conn.inputStream.bufferedReader()
             var line: String?
             val full = StringBuilder()
+            val toolCallAccum = mutableMapOf<Int, StringBuilder>()
             try {
                 while (reader.readLine().also { line = it } != null) {
                     val text = line ?: continue
                     if (!text.startsWith("data: ")) continue
                     val data = text.removePrefix("data: ").trim()
                     if (data == "[DONE]") break
-                    val delta = try {
-                        JSONObject(data).optJSONArray("choices")?.optJSONObject(0)
-                            ?.optJSONObject("delta")?.optString("content", "") ?: ""
-                    } catch (_: Exception) { "" }
-                    if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
+                    try {
+                        val choices = JSONObject(data).optJSONArray("choices")
+                        val delta = choices?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+                        val content = delta.optString("content", "")
+                        if (content.isNotEmpty()) { full.append(content); onChunk(content) }
+                        val tcArray = delta.optJSONArray("tool_calls")
+                        if (tcArray != null) {
+                            for (i in 0 until tcArray.length()) {
+                                val tc = tcArray.getJSONObject(i)
+                                val idx = tc.getInt("index")
+                                val acc = toolCallAccum.getOrPut(idx) { StringBuilder() }
+                                tc.optJSONObject("function")?.let { func ->
+                                    val name = func.optString("name", "")
+                                    if (name.isNotEmpty()) acc.append(name).append("\n")
+                                    acc.append(func.optString("arguments", ""))
+                                }
+                            }
+                        }
+                    } catch (_: Exception) { }
                 }
             } finally { reader.close(); conn.disconnect() }
-            full.toString()
+            if (toolCallAccum.isNotEmpty()) {
+                val sb = StringBuilder(full.toString().trim())
+                for ((_, acc) in toolCallAccum) {
+                    val parts = acc.toString().split("\n", limit = 2)
+                    val tName = parts.getOrElse(0) { "unknown" }
+                    val tArgs = parts.getOrElse(1) { "{}" }
+                    sb.append("【tool:" + tName + " " + tArgs + "】")
+                }
+                sb.toString().trim()
+            } else {
+                full.toString()
+            }
             }
             onDone(result)
         } catch (e: Exception) {

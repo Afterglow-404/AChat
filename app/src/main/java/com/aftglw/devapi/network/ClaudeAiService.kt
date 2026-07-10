@@ -87,17 +87,46 @@ class ClaudeAiService(context: Context) : AiService {
             val full = StringBuilder()
             try {
                 var pendingEvent = ""
+            var toolName = ""
+            var toolIdx = -1
+            val toolArgs = StringBuilder()
                 while (reader.readLine().also { line = it } != null) {
                     val text = line ?: continue
                     when {
                         text.startsWith("event: ") -> pendingEvent = text.removePrefix("event: ").trim()
                         text.startsWith("data: ") -> {
                             val data = text.removePrefix("data: ").trim()
-                            if (pendingEvent == "content_block_delta") {
-                                val delta = try {
-                                    JSONObject(data).optJSONObject("delta")?.optString("text", "") ?: ""
-                                } catch (_: Exception) { "" }
-                                if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
+                            when (pendingEvent) {
+                                "content_block_delta" -> {
+                                    val delta = try {
+                                        JSONObject(data).optJSONObject("delta")?.optString("text", "") ?: ""
+                                    } catch (_: Exception) { "" }
+                                    if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
+                                }
+                                "content_block_start" -> {
+                                    try {
+                                        val block = JSONObject(data).optJSONObject("content_block")
+                                        if (block != null && block.optString("type") == "tool_use") {
+                                            toolName = block.optString("name", "")
+                                            toolIdx = JSONObject(data).optInt("index", -1)
+                                            toolArgs.setLength(0)
+                                            val initInput = block.optJSONObject("input")?.toString() ?: ""
+                                            if (initInput.isNotEmpty()) toolArgs.append(initInput)
+                                        }
+                                    } catch (_: Exception) { }
+                                }
+                                "input_json_delta" -> {
+                                    try {
+                                        toolArgs.append(JSONObject(data).optJSONObject("delta")?.optString("partial_json", "") ?: "")
+                                    } catch (_: Exception) { }
+                                }
+                                "content_block_stop" -> {
+                                    if (toolName.isNotEmpty()) {
+                                        full.append("【tool:" + toolName + " " + toolArgs.toString() + "】")
+                                        toolName = ""
+                                        toolArgs.setLength(0)
+                                    }
+                                }
                             }
                             pendingEvent = ""
                         }
