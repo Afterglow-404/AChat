@@ -8,10 +8,11 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
-class OpenAiService(private val context: Context) : AiService {
+class OpenAiService(context: Context) : AiService {
+
+    private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
 
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String): String? {
-        val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
@@ -19,11 +20,8 @@ class OpenAiService(private val context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
-            val messages = buildMessages(history, userMessage, systemPrompt, prefs)
-            val body = JSONObject().apply {
-                put("model", model)
-                put("messages", messages)
-            }
+            val messages = buildMessages(history, userMessage, systemPrompt)
+            val body = buildRequestBody(model, messages, streaming = false)
             val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
@@ -50,6 +48,7 @@ class OpenAiService(private val context: Context) : AiService {
                 reply
             } else null
         } catch (e: Exception) {
+            android.util.Log.w("OpenAi", "sendMessage failed", e)
             null
         }
     }
@@ -61,7 +60,6 @@ class OpenAiService(private val context: Context) : AiService {
         onChunk: (String) -> Unit,
         onDone: (String) -> Unit
     ) {
-        val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
@@ -69,12 +67,8 @@ class OpenAiService(private val context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) { onDone(""); return }
 
         try {
-            val messages = buildMessages(history, userMessage, systemPrompt, prefs)
-            val body = JSONObject().apply {
-                put("model", model)
-                put("messages", messages)
-                put("stream", true)
-            }
+            val messages = buildMessages(history, userMessage, systemPrompt)
+            val body = buildRequestBody(model, messages, streaming = true)
             val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
@@ -101,12 +95,27 @@ class OpenAiService(private val context: Context) : AiService {
                 }
             } finally { reader.close(); conn.disconnect() }
             onDone(full.toString())
-        } catch (e: Exception) { onDone("") }
+        } catch (e: Exception) {
+            android.util.Log.w("OpenAi", "sendMessageStream failed", e)
+            onDone("")
+        }
+    }
+
+    private fun buildRequestBody(
+        model: String, messages: JSONArray, streaming: Boolean
+    ): JSONObject = JSONObject().apply {
+        put("model", model)
+        put("messages", messages)
+        put("stream", streaming)
+        // 从 SharedPreferences 读取可选生成参数（UI 设置后可动态生效）
+        prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
+        prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
+        prefs.getString("ai_max_tokens", null)?.toIntOrNull()?.let { put("max_completion_tokens", it) }
+        prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
     }
 
     private fun buildMessages(
-        history: List<ChatMessage>, userMessage: String, systemPrompt: String,
-        prefs: android.content.SharedPreferences
+        history: List<ChatMessage>, userMessage: String, systemPrompt: String
     ): JSONArray = JSONArray().apply {
         if (systemPrompt.isNotBlank()) {
             put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })

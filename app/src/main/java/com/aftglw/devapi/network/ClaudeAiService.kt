@@ -8,10 +8,11 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
-class ClaudeAiService(private val context: Context) : AiService {
+class ClaudeAiService(context: Context) : AiService {
+
+    private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
 
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String): String? {
-        val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
@@ -35,14 +36,16 @@ class ClaudeAiService(private val context: Context) : AiService {
                 prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()
                 reply.trim()
             } else null
-        } catch (e: Exception) { null }
+        } catch (e: Exception) {
+            android.util.Log.w("Claude", "sendMessage failed", e)
+            null
+        }
     }
 
     override fun sendMessageStream(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String,
         onChunk: (String) -> Unit, onDone: (String) -> Unit
     ) {
-        val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
@@ -80,7 +83,10 @@ class ClaudeAiService(private val context: Context) : AiService {
                 }
             } finally { reader.close(); conn.disconnect() }
             onDone(full.toString())
-        } catch (e: Exception) { onDone("") }
+        } catch (e: Exception) {
+            android.util.Log.w("Claude", "sendMessageStream failed", e)
+            onDone("")
+        }
     }
 
     private fun buildRequestBody(
@@ -88,18 +94,25 @@ class ClaudeAiService(private val context: Context) : AiService {
         model: String, streaming: Boolean
     ): JSONObject {
         val messages = JSONArray().apply {
-            val longContext = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
-                .getBoolean("long_context_mode", true)
+            val longContext = prefs.getBoolean("long_context_mode", true)
             val recent = history.takeLast(if (longContext) 20 else 10)
             for (msg in recent) { put(JSONObject().apply { put("role", msg.role); put("content", msg.content) }) }
             put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
         }
+
+        // 从 SharedPreferences 读取 max_tokens（默认 4096）
+        val maxTokens = prefs.getString("ai_max_tokens", null)?.toIntOrNull() ?: 4096
+
         return JSONObject().apply {
             put("model", model)
             if (systemPrompt.isNotBlank()) put("system", systemPrompt)
             put("messages", messages)
-            put("max_tokens", 4096)
+            put("max_tokens", maxTokens)
             if (streaming) put("stream", true)
+            // 可选生成参数
+            prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
+            prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
+            prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
         }
     }
 }
