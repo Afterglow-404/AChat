@@ -4,9 +4,6 @@ import android.content.Context
 import com.aftglw.devapi.model.ChatMessage
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 
 class ClaudeAiService(context: Context) : AiService {
 
@@ -21,16 +18,9 @@ class ClaudeAiService(context: Context) : AiService {
         return try {
             HttpRetry.retry("Claude") {
             val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false)
-            val conn = URL("$baseUrl/messages").openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("x-api-key", apiKey)
-            conn.setRequestProperty("anthropic-version", "2023-06-01")
-            conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 60_000
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            HttpRetry.checkResponse(conn)
-            val response = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
+            val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
+                "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+            val response = HttpClient.execute(request)
             val json = JSONObject(response)
             val contentArr = json.optJSONArray("content")
             var reply = ""
@@ -74,22 +64,23 @@ class ClaudeAiService(context: Context) : AiService {
         try {
             val result = HttpRetry.retry("Claude") {
             val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true)
-            val conn = URL("$baseUrl/messages").openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("x-api-key", apiKey)
-            conn.setRequestProperty("anthropic-version", "2023-06-01")
-            conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 60_000
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            HttpRetry.checkResponse(conn)
-            val reader = conn.inputStream.bufferedReader()
+            val httpReq = HttpClient.postJson("$baseUrl/messages", body.toString(),
+                "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+            val httpResp = HttpClient.client.newCall(httpReq).execute()
+            if (!httpResp.isSuccessful) {
+                val errBody = httpResp.body?.string() ?: ""
+                httpResp.close()
+                throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
+            }
+            val reader = httpResp.body?.byteStream()?.bufferedReader()
+                ?: throw java.io.IOException("No response body")
             var line: String?
             val full = StringBuilder()
-            try {
-                var pendingEvent = ""
+            var pendingEvent = ""
             var toolName = ""
             var toolIdx = -1
             val toolArgs = StringBuilder()
+            try {
                 while (reader.readLine().also { line = it } != null) {
                     val text = line ?: continue
                     when {
@@ -122,7 +113,7 @@ class ClaudeAiService(context: Context) : AiService {
                                 }
                                 "content_block_stop" -> {
                                     if (toolName.isNotEmpty()) {
-                                        full.append("【tool:" + toolName + " " + toolArgs.toString() + "】")
+                                        full.append("tool:" + toolName + " " + toolArgs.toString() + "")
                                         toolName = ""
                                         toolArgs.setLength(0)
                                     }
@@ -132,7 +123,7 @@ class ClaudeAiService(context: Context) : AiService {
                         }
                     }
                 }
-            } finally { reader.close(); conn.disconnect() }
+            } finally { reader.close(); httpResp.close() }
             full.toString()
             }
             onDone(result)
@@ -150,9 +141,10 @@ class ClaudeAiService(context: Context) : AiService {
             val ctxWindow = prefs.getInt("context_window", 0)
             val maxTokens = if (ctxWindow > 0) ctxWindow else if (prefs.getBoolean("long_context_mode", true)) 4096 else 2048
             val recent = mutableListOf<ChatMessage>()
-            var tokCount = estimateTokenCount(systemPrompt) + estimateTokenCount(userMessage) + 10
+            val modelHint = prefs.getString("ai_model", "") ?: ""
+            var tokCount = estimateTokenCount(systemPrompt, modelHint) + estimateTokenCount(userMessage, modelHint) + 10
             for (msg in history.reversed()) {
-                val t = estimateTokenCount(msg.content) + 4
+                val t = estimateTokenCount(msg.content, modelHint) + 4
                 if (tokCount + t > maxTokens) break
                 tokCount += t
                 recent.add(0, msg)

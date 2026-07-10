@@ -4,9 +4,6 @@ import android.content.Context
 import com.aftglw.devapi.model.ChatMessage
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 
 class OpenAiService(context: Context) : AiService {
 
@@ -23,17 +20,9 @@ class OpenAiService(context: Context) : AiService {
             HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
             val body = buildRequestBody(model, messages, streaming = false)
-            val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.doOutput = true
-            conn.connectTimeout = 30_000
-            conn.readTimeout = 60_000
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            HttpRetry.checkResponse(conn)
-            val response = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
+            val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
+                "Authorization" to "Bearer $apiKey")
+            val response = HttpClient.execute(request)
 
             val json = JSONObject(response)
             val choices = json.getJSONArray("choices")
@@ -84,17 +73,16 @@ class OpenAiService(context: Context) : AiService {
             val result = HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
             val body = buildRequestBody(model, messages, streaming = true)
-            val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.doOutput = true
-            conn.connectTimeout = 30_000
-            conn.readTimeout = 60_000
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            HttpRetry.checkResponse(conn)
-
-            val reader = conn.inputStream.bufferedReader()
+            val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
+                "Authorization" to "Bearer $apiKey")
+            val httpResp = HttpClient.client.newCall(httpReq).execute()
+            if (!httpResp.isSuccessful) {
+                val errBody = httpResp.body?.string() ?: ""
+                httpResp.close()
+                throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
+            }
+            val reader = httpResp.body?.byteStream()?.bufferedReader()
+                ?: throw java.io.IOException("No response body")
             var line: String?
             val full = StringBuilder()
             val toolCallAccum = mutableMapOf<Int, StringBuilder>()
@@ -124,14 +112,14 @@ class OpenAiService(context: Context) : AiService {
                         }
                     } catch (_: Exception) { }
                 }
-            } finally { reader.close(); conn.disconnect() }
+            } finally { reader.close(); httpResp.close() }
             if (toolCallAccum.isNotEmpty()) {
                 val sb = StringBuilder(full.toString().trim())
                 for ((_, acc) in toolCallAccum) {
                     val parts = acc.toString().split("\n", limit = 2)
                     val tName = parts.getOrElse(0) { "unknown" }
                     val tArgs = parts.getOrElse(1) { "{}" }
-                    sb.append("【tool:" + tName + " " + tArgs + "】")
+                    sb.append("tool:" + tName + " " + tArgs + "")
                 }
                 sb.toString().trim()
             } else {
@@ -179,9 +167,10 @@ class OpenAiService(context: Context) : AiService {
         val ctxWindow = prefs.getInt("context_window", 0)
         val maxTokens = if (ctxWindow > 0) ctxWindow else if (prefs.getBoolean("long_context_mode", true)) 4096 else 2048
         val recent = mutableListOf<ChatMessage>()
-        var tokCount = estimateTokenCount(systemPrompt) + estimateTokenCount(userMessage) + 10
+        val modelHint = prefs.getString("ai_model", "") ?: ""
+        var tokCount = estimateTokenCount(systemPrompt, modelHint) + estimateTokenCount(userMessage, modelHint) + 10
         for (msg in history.reversed()) {
-            val t = estimateTokenCount(msg.content) + 4
+            val t = estimateTokenCount(msg.content, modelHint) + 4
             if (tokCount + t > maxTokens) break
             tokCount += t
             recent.add(0, msg)
