@@ -1,0 +1,3 @@
+D:/deepseek-reasonix-SandBox/WeChatClone/app/.cxx/Release/m21d75s4/arm64-v8a/CMakeFiles/llamawisp.dir
+D:/deepseek-reasonix-SandBox/WeChatClone/app/.cxx/Release/m21d75s4/arm64-v8a/CMakeFiles/edit_cache.dir
+D:/deepseek-reasonix-SandBox/WeChatClone/app/.cxx/Release/m21d75s4/arm64-v8a/CMakeFiles/rebuild_cache.dir
