@@ -20,6 +20,7 @@ class OpenAiService(context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
+            HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
             val body = buildRequestBody(model, messages, streaming = false)
             val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
@@ -30,6 +31,7 @@ class OpenAiService(context: Context) : AiService {
             conn.connectTimeout = 30_000
             conn.readTimeout = 60_000
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            HttpRetry.checkResponse(conn)
             val response = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
 
@@ -57,6 +59,7 @@ class OpenAiService(context: Context) : AiService {
                 }
                 reply
             } else null
+            }
         } catch (e: Exception) {
             android.util.Log.w("OpenAi", "sendMessage failed", e)
             null
@@ -78,6 +81,7 @@ class OpenAiService(context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) { onDone(""); return }
 
         try {
+            val result = HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
             val body = buildRequestBody(model, messages, streaming = true)
             val conn = URL("$baseUrl/chat/completions").openConnection() as HttpURLConnection
@@ -88,6 +92,7 @@ class OpenAiService(context: Context) : AiService {
             conn.connectTimeout = 30_000
             conn.readTimeout = 60_000
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            HttpRetry.checkResponse(conn)
 
             val reader = conn.inputStream.bufferedReader()
             var line: String?
@@ -105,7 +110,9 @@ class OpenAiService(context: Context) : AiService {
                     if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
                 }
             } finally { reader.close(); conn.disconnect() }
-            onDone(full.toString())
+            full.toString()
+            }
+            onDone(result)
         } catch (e: Exception) {
             android.util.Log.w("OpenAi", "sendMessageStream failed", e)
             onDone("")

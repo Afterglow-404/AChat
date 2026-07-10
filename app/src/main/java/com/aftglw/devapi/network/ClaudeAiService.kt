@@ -19,6 +19,7 @@ class ClaudeAiService(context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
+            HttpRetry.retry("Claude") {
             val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false)
             val conn = URL("$baseUrl/messages").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -27,6 +28,7 @@ class ClaudeAiService(context: Context) : AiService {
             conn.setRequestProperty("anthropic-version", "2023-06-01")
             conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 60_000
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            HttpRetry.checkResponse(conn)
             val response = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
             val json = JSONObject(response)
@@ -52,6 +54,7 @@ class ClaudeAiService(context: Context) : AiService {
                 prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()
                 reply.trim()
             } else null
+            }
         } catch (e: Exception) {
             android.util.Log.w("Claude", "sendMessage failed", e)
             null
@@ -69,6 +72,7 @@ class ClaudeAiService(context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) { onDone(""); return }
 
         try {
+            val result = HttpRetry.retry("Claude") {
             val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true)
             val conn = URL("$baseUrl/messages").openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -77,6 +81,7 @@ class ClaudeAiService(context: Context) : AiService {
             conn.setRequestProperty("anthropic-version", "2023-06-01")
             conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 60_000
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            HttpRetry.checkResponse(conn)
             val reader = conn.inputStream.bufferedReader()
             var line: String?
             val full = StringBuilder()
@@ -99,7 +104,9 @@ class ClaudeAiService(context: Context) : AiService {
                     }
                 }
             } finally { reader.close(); conn.disconnect() }
-            onDone(full.toString())
+            full.toString()
+            }
+            onDone(result)
         } catch (e: Exception) {
             android.util.Log.w("Claude", "sendMessageStream failed", e)
             onDone("")
