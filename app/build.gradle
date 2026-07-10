@@ -48,7 +48,6 @@ dependencies {
     implementation("io.github.kyant0:backdrop:2.0.0")
     implementation("io.github.kyant0:shapes:1.2.0")
 
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.activity:activity-compose:1.13.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'

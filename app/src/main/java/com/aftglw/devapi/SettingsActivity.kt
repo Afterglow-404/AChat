@@ -37,7 +37,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.ui.buildCustomTypography
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
@@ -732,8 +731,7 @@ private fun DebugPage(
                     sb.appendLine("Last Hint: ${com.aftglw.devapi.MoodDetector.lastHint ?: "N/A"}")
                     sb.appendLine("Source: ${com.aftglw.devapi.MoodDetector.lastSource}")
                     sb.appendLine("Feed Count: ${com.aftglw.devapi.MoodDetector.feedCount}")
-                    sb.appendLine("Model Error: ${com.aftglw.devapi.MoodDetector.lastModelError}")
-                    sb.appendLine("Last ONNX Confidence: ${(com.aftglw.devapi.MoodModel.lastConfidence * 100).toInt()}%")
+                    sb.appendLine("Model Error: N/A (ONNX removed)")
                     sb.appendLine("AI Emotion Memory: active (via reflection)")
                     sb.appendLine()
                     sb.appendLine("=== Usage ===")

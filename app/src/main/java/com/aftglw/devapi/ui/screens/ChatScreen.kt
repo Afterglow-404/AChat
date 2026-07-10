@@ -50,7 +50,6 @@ import com.aftglw.devapi.AffinityManager
 import com.aftglw.devapi.ChatHistory
 import com.aftglw.devapi.MoodDetector
 import com.aftglw.devapi.MoodInfo
-import com.aftglw.devapi.MoodModel
 import com.aftglw.devapi.MemoryStore
 import com.aftglw.devapi.model.ChatMessage
 import com.aftglw.devapi.network.AiServiceFactory
@@ -119,7 +118,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         // 异步：模型加载 + 归档检查
         launch(Dispatchers.IO) {
             if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                    .getBoolean("mood_enabled", false)) MoodModel.load(ctx)
+                    .getBoolean("mood_enabled", false)) 
             // 归档检查：用已加载的 saved，不再重复 load
             if (saved.size >= 5) {
                 val chunkKey = "chunk:$name:${saved.size}"

@@ -146,23 +146,18 @@ class DebugOverlayService : Service() {
         tvGlass.text = glass
         val emoEnabled = prefs.getBoolean("mood_enabled", false)
         tvEmo.text = if (emoEnabled) "true" else "false"
-        val modelStatus = if (MoodModel.isDownloaded(this)) "ready" else "not ready"
-        tvOnnx.text = modelStatus + if (MoodModel.lastError.isNotEmpty()) "|${MoodModel.lastError}" else ""
+        val modelStatus = "pure_api (prompt)"
+        tvOnnx.text = modelStatus
         val last = MoodDetector.lastMood
         val hint = MoodDetector.lastHint
         val src = MoodDetector.lastSource
-        val modelErr = MoodDetector.lastModelError
-        val conf = MoodModel.lastConfidence
         val activeChat = prefs.getString("last_active_chat", "") ?: ""
         val aiEmo = if (activeChat.isNotEmpty()) com.aftglw.devapi.MemoryStore.search(this, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: "" else ""
         tvEmoResult.text = when {
             !emoEnabled -> "off"
-            src == "model_unavailable" -> "no model${if (modelErr.isNotEmpty()) "|$modelErr" else ""}"
-            src == "model" && hint != null -> "model:$last(${hint.take(20)}) (${(conf*100).toInt()}%)"
-            src == "model" -> "model:$last (${(conf*100).toInt()}%)"
             MoodDetector.feedCount == 0 -> "not triggered"
             last == null -> "waiting..."
-            hint != null -> "$last(${hint.take(20)})"
+            hint != null -> "$last(${hint.take(20)})" + " | via API"
             else -> last
         } + if (aiEmo.isNotEmpty()) " | AI:$aiEmo" else ""
         val affPrefs = getSharedPreferences("wechat_settings", MODE_PRIVATE)
