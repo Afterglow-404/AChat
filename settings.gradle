@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "apitest"
+rootProject.name = "Wisp"
 include ':app'

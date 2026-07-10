@@ -92,5 +92,8 @@ object ToolRegistry {
         register(RecallTool())
         register(SendMessageTool())
         register(WebSearchTool())
+        register(LocationTool())
+        register(ReadNotificationsTool())
+        register(ReadAppUsageTool())
     }
 }

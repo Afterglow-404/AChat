@@ -150,7 +150,7 @@ class WebSearchTool : AiTool {
             conn.connectTimeout = 10000
             conn.readTimeout = 15000
             if (apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.setRequestProperty("User-Agent", "AChat/1.0")
+            conn.setRequestProperty("User-Agent", "Wisp/1.0")
             val raw = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
             raw.take(1000) // 限制长度，防止 AI context 爆炸

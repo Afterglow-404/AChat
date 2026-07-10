@@ -24,8 +24,19 @@ data class AchatColors(
     val chatBubbleMe: Color,
     val chatBubbleAi: Color,
     val stampRed: Color = Color(0xFFC62828),
+    val accentYellow: Color = Color(0xFFFFD600),
     val isDark: Boolean = false,
     val themeId: String = "default"
+)
+
+/**
+ * Global spacing and sizing tokens for UI consistency.
+ */
+data class DesignTokens(
+    val screenPadding: androidx.compose.ui.unit.Dp = 20.dp,
+    val itemSpacing: androidx.compose.ui.unit.Dp = 12.dp,
+    val cardCorner: androidx.compose.ui.unit.Dp = 16.dp,
+    val buttonHeight: androidx.compose.ui.unit.Dp = 52.dp
 )
 
 /**
@@ -55,6 +66,7 @@ val DefaultAchatColors = AchatColors(
     divider = Color(0xFFE0E0E0),
     chatBubbleMe = Color(0xFF8CE09C),
     chatBubbleAi = Color.White,
+    accentYellow = Color(0xFFFFD600),
     themeId = "default"
 )
 
@@ -67,6 +79,7 @@ val NewspaperAchatColors = AchatColors(
     divider = Color(0xFFC0BBA8),
     chatBubbleMe = Color(0xFFE0DAC8),
     chatBubbleAi = Color.White,
+    accentYellow = Color(0xFFD32F2F),
     themeId = "newspaper"
 )
 
@@ -80,7 +93,21 @@ val WashiAchatColors = AchatColors(
     chatBubbleMe = Color(0xFFDEE4E7),
     chatBubbleAi = Color.White,
     stampRed = Color(0xFFC62828),
+    accentYellow = Color(0xFFC62828),
     themeId = "washi"
+)
+
+val MarathonAchatColors = AchatColors(
+    primary = Color(0xFF00E5FF), // Electric Cyan
+    background = Color(0xFF0A0A0A), // Deep Tech Black
+    surface = Color(0xFF1A1A1A), // Dark Slate
+    onBackground = Color.White,
+    onSurface = Color.White,
+    divider = Color(0xFF2C2C2C),
+    chatBubbleMe = Color(0xFF00E5FF),
+    chatBubbleAi = Color(0xFF2A2A2A),
+    accentYellow = Color(0xFFB2FF59), // Electric Lime
+    themeId = "marathon"
 )
 
 val DefaultAchatShapes = AchatShapes(
@@ -99,6 +126,12 @@ val WashiAchatShapes = AchatShapes(
     bubbleMe = RoundedCornerShape(12.dp, 4.dp, 12.dp, 12.dp),
     bubbleAi = RoundedCornerShape(4.dp, 12.dp, 12.dp, 12.dp),
     card = RoundedCornerShape(12.dp)
+)
+
+val MarathonAchatShapes = AchatShapes(
+    bubbleMe = RoundedCornerShape(2.dp),
+    bubbleAi = RoundedCornerShape(2.dp),
+    card = RectangleShape
 )
 
 val DefaultAchatTypography = AchatTypography(
@@ -128,9 +161,20 @@ val WashiAchatTypography = AchatTypography(
     mono = FontFamily(Font(R.font.homemadeapple_regular))
 )
 
+val MarathonAchatTypography = AchatTypography(
+    title = FontFamily(
+        Font(R.font.oswald_bold, weight = FontWeight.Bold)
+    ),
+    body = FontFamily(
+        Font(R.font.noto_sans_sc, weight = FontWeight.Normal)
+    ),
+    mono = FontFamily(Font(R.font.space_mono_regular))
+)
+
 val LocalAchatColors = staticCompositionLocalOf { DefaultAchatColors }
 val LocalAchatShapes = staticCompositionLocalOf { DefaultAchatShapes }
 val LocalAchatTypography = staticCompositionLocalOf { DefaultAchatTypography }
+val LocalDesignTokens = staticCompositionLocalOf { DesignTokens() }
 
 object AchatTheme {
     val colors: AchatColors
@@ -147,4 +191,9 @@ object AchatTheme {
         @Composable
         @ReadOnlyComposable
         get() = LocalAchatTypography.current
+
+    val tokens: DesignTokens
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalDesignTokens.current
 }
