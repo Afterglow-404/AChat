@@ -51,11 +51,11 @@ class OpenAiService(context: Context) : AiService {
                 }
                 val usage = json.optJSONObject("usage")
                 if (usage != null) {
-                    prefs.edit().putInt("last_tokens_in", usage.optInt("prompt_tokens", 0)).apply()
-                    prefs.edit().putInt("last_tokens_out", usage.optInt("completion_tokens", 0)).apply()
+                    prefs.edit().putInt("last_tokens_in", usage.optInt("prompt_tokens", 0)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + usage.optInt("prompt_tokens", 0)).apply()
+                    prefs.edit().putInt("last_tokens_out", usage.optInt("completion_tokens", 0)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + usage.optInt("completion_tokens", 0)).apply()
                 } else {
-                    prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).apply()
-                    prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()
+                    prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + (body.toString().length / 4)).apply()
+                    prefs.edit().putInt("last_tokens_out", (reply.length / 4)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + (reply.length / 4)).apply()
                 }
                 reply
             } else null

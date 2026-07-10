@@ -50,8 +50,8 @@ class ClaudeAiService(context: Context) : AiService {
                 reply = sb.toString().trim()
             }
             if (reply.isNotBlank()) {
-                prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).apply()
-                prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()
+                prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + (body.toString().length / 4)).apply()
+                prefs.edit().putInt("last_tokens_out", (reply.length / 4)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + (reply.length / 4)).apply()
                 reply.trim()
             } else null
             }
