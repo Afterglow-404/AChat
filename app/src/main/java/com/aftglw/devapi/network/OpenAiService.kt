@@ -177,10 +177,18 @@ class OpenAiService(context: Context) : AiService {
             put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
         }
         val ctxWindow = prefs.getInt("context_window", 0)
-        val windowSize = if (ctxWindow > 0) ctxWindow else if (prefs.getBoolean("long_context_mode", true)) 20 else 10
-        val recent = history.takeLast(windowSize)
+        val maxTokens = if (ctxWindow > 0) ctxWindow else if (prefs.getBoolean("long_context_mode", true)) 4096 else 2048
+        val recent = mutableListOf<ChatMessage>()
+        var tokCount = estimateTokenCount(systemPrompt) + estimateTokenCount(userMessage) + 10
+        for (msg in history.reversed()) {
+            val t = estimateTokenCount(msg.content) + 4
+            if (tokCount + t > maxTokens) break
+            tokCount += t
+            recent.add(0, msg)
+        }
         for ((i, msg) in recent.withIndex()) {
-            if (ctxWindow <= 0 && !prefs.getBoolean("long_context_mode", true) && i > 0 && i % 10 == 0 && systemPrompt.isNotBlank()) {
+            val needReinject = ctxWindow <= 0 && !prefs.getBoolean("long_context_mode", true) && systemPrompt.isNotBlank()
+            if (needReinject && i > 0 && i % 10 == 0) {
                 put(JSONObject().apply { put("role", "system"); put("content", "【人设提醒】$systemPrompt") })
             }
             put(JSONObject().apply { put("role", msg.role); put("content", msg.content) })

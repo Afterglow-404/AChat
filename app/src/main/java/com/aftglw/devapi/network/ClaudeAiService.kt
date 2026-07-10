@@ -147,8 +147,16 @@ class ClaudeAiService(context: Context) : AiService {
         model: String, streaming: Boolean
     ): JSONObject {
         val messages = JSONArray().apply {
-            val longContext = prefs.getBoolean("long_context_mode", true)
-            val recent = history.takeLast(if (longContext) 20 else 10)
+            val ctxWindow = prefs.getInt("context_window", 0)
+            val maxTokens = if (ctxWindow > 0) ctxWindow else if (prefs.getBoolean("long_context_mode", true)) 4096 else 2048
+            val recent = mutableListOf<ChatMessage>()
+            var tokCount = estimateTokenCount(systemPrompt) + estimateTokenCount(userMessage) + 10
+            for (msg in history.reversed()) {
+                val t = estimateTokenCount(msg.content) + 4
+                if (tokCount + t > maxTokens) break
+                tokCount += t
+                recent.add(0, msg)
+            }
             for (msg in recent) { put(JSONObject().apply { put("role", msg.role); put("content", msg.content) }) }
             put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
         }
