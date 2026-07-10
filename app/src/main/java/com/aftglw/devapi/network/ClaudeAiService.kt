@@ -12,7 +12,7 @@ class ClaudeAiService(context: Context) : AiService {
 
     private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String): String? {
+    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
@@ -30,7 +30,23 @@ class ClaudeAiService(context: Context) : AiService {
             val response = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
             val json = JSONObject(response)
-            val reply = json.optJSONArray("content")?.optJSONObject(0)?.optString("text", "") ?: ""
+            val contentArr = json.optJSONArray("content")
+            var reply = ""
+            if (contentArr != null) {
+                val sb = StringBuilder()
+                for (i in 0 until contentArr.length()) {
+                    val block = contentArr.getJSONObject(i)
+                    val type = block.optString("type", "")
+                    if (type == "text") {
+                        sb.append(block.optString("text", ""))
+                    } else if (type == "tool_use") {
+                        val name = block.getString("name")
+                        val args = block.optJSONObject("input")?.toString() ?: "{}"
+                        sb.append("【tool:${name} ${args}】")
+                    }
+                }
+                reply = sb.toString().trim()
+            }
             if (reply.isNotBlank()) {
                 prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).apply()
                 prefs.edit().putInt("last_tokens_out", (reply.length / 4)).apply()
@@ -44,7 +60,8 @@ class ClaudeAiService(context: Context) : AiService {
 
     override fun sendMessageStream(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String,
-        onChunk: (String) -> Unit, onDone: (String) -> Unit
+        onChunk: (String) -> Unit, onDone: (String) -> Unit,
+        onError: ((String) -> Unit)?
     ) {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
@@ -58,7 +75,7 @@ class ClaudeAiService(context: Context) : AiService {
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("x-api-key", apiKey)
             conn.setRequestProperty("anthropic-version", "2023-06-01")
-            conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 0
+            conn.doOutput = true; conn.connectTimeout = 30_000; conn.readTimeout = 60_000
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
             val reader = conn.inputStream.bufferedReader()
             var line: String?

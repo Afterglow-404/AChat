@@ -42,7 +42,8 @@ class LocalAiService(private val ctx: Context) : AiService {
     override fun sendMessage(
         history: List<ChatMessage>,
         userMessage: String,
-        systemPrompt: String
+        systemPrompt: String,
+        onError: ((String) -> Unit)?
     ): String? {
         if (!ensureModel() || tokenizer == null || engine == null) return null
 

@@ -15,7 +15,7 @@ class MockAiService(private val context: Context? = null) : AiService {
         "明白了，谢谢。", "你说得对。"
     )
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String): String {
+    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?): String {
         val prefs = context?.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val custom = prefs?.getString("mock_replies", "")?.takeIf { it.isNotBlank() }
         val replies = if (custom != null) custom.split("|").filter { it.isNotBlank() }.toTypedArray()
@@ -29,7 +29,8 @@ class MockAiService(private val context: Context? = null) : AiService {
 
     override fun sendMessageStream(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String,
-        onChunk: (String) -> Unit, onDone: (String) -> Unit
+        onChunk: (String) -> Unit, onDone: (String) -> Unit,
+        onError: ((String) -> Unit)?
     ) {
         val reply = sendMessage(history, userMessage, systemPrompt)
         CoroutineScope(Dispatchers.Default).launch {

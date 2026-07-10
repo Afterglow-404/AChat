@@ -3,7 +3,10 @@ package com.aftglw.devapi.network
 import com.aftglw.devapi.model.ChatMessage
 
 interface AiService {
-    fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String = ""): String?
+    fun sendMessage(
+        history: List<ChatMessage>, userMessage: String, systemPrompt: String = "",
+        onError: ((String) -> Unit)? = null
+    ): String?
 
     /**
      * SSE 流式接口。
@@ -14,7 +17,8 @@ interface AiService {
         userMessage: String,
         systemPrompt: String = "",
         onChunk: (String) -> Unit,
-        onDone: (String) -> Unit
+        onDone: (String) -> Unit,
+        onError: ((String) -> Unit)? = null
     ) {
         val reply = sendMessage(history, userMessage, systemPrompt) ?: ""
         if (reply.isNotEmpty()) onChunk(reply)

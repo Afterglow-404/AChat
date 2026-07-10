@@ -6,8 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import java.io.File
-import com.aftglw.devapi.CharacterImporter
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -105,6 +103,11 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var aiTopP by remember { mutableStateOf(prefs.getString("ai_top_p", "") ?: "") }
     var aiMaxTokens by remember { mutableStateOf(prefs.getString("ai_max_tokens", "") ?: "") }
     var aiSeed by remember { mutableStateOf(prefs.getInt("ai_seed", -1).let { if (it < 0) "" else it.toString() }) }
+    var aiFrequencyPenalty by remember { mutableStateOf(prefs.getString("ai_frequency_penalty", "") ?: "") }
+    var aiPresencePenalty by remember { mutableStateOf(prefs.getString("ai_presence_penalty", "") ?: "") }
+    var aiStopSequences by remember { mutableStateOf(prefs.getString("ai_stop_sequences", "") ?: "") }
+    var aiResponseFormat by remember { mutableStateOf(prefs.getString("ai_response_format", "") ?: "") }
+    var aiClaudeThinking by remember { mutableStateOf(prefs.getBoolean("ai_claude_thinking", false)) }
     var newChatName by remember { mutableStateOf("") }
     var newChatPersona by remember { mutableStateOf("") }
     var newChatAvatarUri by remember { mutableStateOf("") }
@@ -197,7 +200,12 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         aiTemperature, { aiTemperature = it; prefs.edit().putString("ai_temperature", it).apply() },
                         aiTopP, { aiTopP = it; prefs.edit().putString("ai_top_p", it).apply() },
                         aiMaxTokens, { aiMaxTokens = it; prefs.edit().putString("ai_max_tokens", it).apply() },
-                        aiSeed, { aiSeed = it; prefs.edit().putInt("ai_seed", it.toIntOrNull() ?: -1).apply() }
+                        aiSeed, { aiSeed = it; prefs.edit().putInt("ai_seed", it.toIntOrNull() ?: -1).apply() },
+                        aiFrequencyPenalty, { aiFrequencyPenalty = it; prefs.edit().putString("ai_frequency_penalty", it).apply() },
+                        aiPresencePenalty, { aiPresencePenalty = it; prefs.edit().putString("ai_presence_penalty", it).apply() },
+                        aiStopSequences, { aiStopSequences = it; prefs.edit().putString("ai_stop_sequences", it).apply() },
+                        aiResponseFormat, { aiResponseFormat = it; prefs.edit().putString("ai_response_format", it).apply() },
+                        aiClaudeThinking, { aiClaudeThinking = it; prefs.edit().putBoolean("ai_claude_thinking", it).apply() }
                     )
                     is SettingsPage.ManageRoles -> ManageRolesPage(
                         onBack = goBack,
@@ -393,7 +401,12 @@ private fun AiApiPage(
     aiTemperature: String, onAiTemperatureChange: (String) -> Unit,
     aiTopP: String, onAiTopPChange: (String) -> Unit,
     aiMaxTokens: String, onAiMaxTokensChange: (String) -> Unit,
-    aiSeed: String, onAiSeedChange: (String) -> Unit
+    aiSeed: String, onAiSeedChange: (String) -> Unit,
+    aiFrequencyPenalty: String, onAiFrequencyPenaltyChange: (String) -> Unit,
+    aiPresencePenalty: String, onAiPresencePenaltyChange: (String) -> Unit,
+    aiStopSequences: String, onAiStopSequencesChange: (String) -> Unit,
+    aiResponseFormat: String, onAiResponseFormatChange: (String) -> Unit,
+    aiClaudeThinking: Boolean, onAiClaudeThinkingChange: (Boolean) -> Unit
 ) {
     SubPageScaffold("AI 接口", onBack) {
         Spacer(Modifier.height(8.dp))
@@ -404,6 +417,11 @@ private fun AiApiPage(
         TextFieldRow("采样 (top_p)", "留空使用默认, 如 0.9", aiTopP, onAiTopPChange)
         TextFieldRow("最大 tokens", "留空使用默认, 如 4096", aiMaxTokens, onAiMaxTokensChange)
         TextFieldRow("随机种子 (seed)", "留空随机, >0 整数可复现", aiSeed, onAiSeedChange)
+        TextFieldRow("频率惩罚 (frequency_penalty)", "留空使用默认, -2.0 ~ 2.0", aiFrequencyPenalty, onAiFrequencyPenaltyChange)
+        TextFieldRow("存在惩罚 (presence_penalty)", "留空使用默认, -2.0 ~ 2.0", aiPresencePenalty, onAiPresencePenaltyChange)
+        TextFieldRow("停止序列 (stop)", "逗号分隔, 如 再见,bye", aiStopSequences, onAiStopSequencesChange)
+        TextFieldRow("输出格式", "留空=text, 或填 json_object", aiResponseFormat, onAiResponseFormatChange)
+        ToggleRow("Claude Extended Thinking", "仅 Claude 模型, 开启后温度/采样会忽略", aiClaudeThinking, onAiClaudeThinkingChange)
         ToggleRow("长上下文模式", "DeepSeek/GPT 等长上下文模型无需重注入提示，关闭可节省小模型 tokens", longContext, onLongContextChange)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SettingsMainHeader("离线回复（未接入 API 时生效）")
@@ -473,36 +491,6 @@ private fun ManageRolesPage(
                 Text("导入 Skill（从 ex-skill 文件）", fontSize = 13.sp, color = Color(0xFF888888))
             }
             Spacer(Modifier.height(4.dp))
-            // LingChat 角色 ZIP 导入
-            val importCharLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument()
-            ) { uri ->
-                uri?.let {
-                    try {
-                        val input = ctx.contentResolver.openInputStream(it)
-                        val tmpFile = File(ctx.cacheDir, "import_char_${System.currentTimeMillis()}.zip")
-                        input?.use { src -> tmpFile.outputStream().use { dst -> src.copyTo(dst) } }
-                        val result = CharacterImporter.importFromZip(ctx, tmpFile.absolutePath)
-                        tmpFile.delete()
-                        result.onSuccess { name ->
-                            // 自动填入人设
-                            val settings = CharacterImporter.loadSettings(ctx, name)
-                            val prompt = settings?.get("system_prompt") as? String ?: ""
-                            val aiName = settings?.get("ai_name") as? String ?: name
-                            onNewChatNameChange(aiName)
-                            if (prompt.isNotBlank()) onNewChatPersonaChange(prompt)
-                            android.widget.Toast.makeText(ctx, "角色「$aiName」导入成功！", Toast.LENGTH_LONG).show()
-                        }.onFailure { e ->
-                            android.widget.Toast.makeText(ctx, "导入失败：${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    } catch (_: Exception) {
-                        android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            TextButton(onClick = { importCharLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
-                Text("导入角色（从 LingChat ZIP）", fontSize = 13.sp, color = Color(0xFF07C160))
-            }
             Spacer(Modifier.height(8.dp))
             Button(onClick = onCreateChat, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = CircleShape) { Text("创建角色") }
         }
