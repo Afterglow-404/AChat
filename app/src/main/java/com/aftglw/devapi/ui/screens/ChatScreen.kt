@@ -301,11 +301,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val service = AiServiceFactory.getService()
                             val fullReply = StringBuilder()
                             val doneLatch = kotlinx.coroutines.CompletableDeferred<String?>()
+                            var lastError: String? = null
 
                             service.sendMessageStream(
                                 history.toList(), text, moodPersona,
                                 onChunk = { chunk -> fullReply.append(chunk) },
-                                onDone = { full -> doneLatch.complete(full.ifEmpty { null }) }
+                                onDone = { full -> doneLatch.complete(full.ifEmpty { null }) },
+                                onError = { err -> lastError = err }
                             )
 
                             val reply = doneLatch.await()
@@ -361,7 +363,17 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                 }
                             } else {
                                 withContext(Dispatchers.Main) {
-                                    android.widget.Toast.makeText(ctx, "AI 回复失败，请检查 API 配置和网络连接", android.widget.Toast.LENGTH_SHORT).show()
+                                    val errMsg = when {
+                                        lastError?.contains("401") == true -> "API Key 无效"
+                                        lastError?.contains("429") == true -> "请求频率超限，请稍后重试"
+                                        lastError?.contains("502") == true || lastError?.contains("503") == true || lastError?.contains("504") == true -> "AI 服务器暂时不可用，已自动重试"
+                                        lastError?.contains("timeout") == true || lastError?.contains("Timeout") == true -> "请求超时，已自动重试"
+                                        lastError?.contains("connection") == true || lastError?.contains("Connection") == true || lastError?.contains("refused") == true -> "无法连接到 AI 服务器，请检查网络"
+                                        lastError?.contains("5") == true && lastError?.length!! < 20 -> "AI 服务器错误"
+                                        lastError != null -> "AI 回复失败: ${lastError!!.take(60)}"
+                                        else -> "AI 回复失败，请检查 API 配置和网络连接"
+                                    }
+                                    android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_SHORT).show()
                                     waiting = false
                                 }
                             }
