@@ -14,12 +14,31 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = '0.0.1'
+
+        // llama.cpp NDK 构建配置
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+                // 发布版优化
+                arguments "-DCMAKE_BUILD_TYPE=Release"
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled = false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file('CMakeLists.txt')
+            version = '3.22.1'
         }
     }
 
