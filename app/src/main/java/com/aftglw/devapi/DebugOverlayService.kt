@@ -1,4 +1,8 @@
 package com.aftglw.devapi
+import com.aftglw.devapi.core.memory.MemoryStore
+import com.aftglw.devapi.core.time.ProactiveScheduler
+import com.aftglw.devapi.core.mood.AffinityManager
+import com.aftglw.devapi.core.mood.MoodDetector
 
 import android.app.Service
 import android.content.Intent
@@ -152,7 +156,7 @@ class DebugOverlayService : Service() {
         val hint = MoodDetector.lastHint
         val src = MoodDetector.lastSource
         val activeChat = prefs.getString("last_active_chat", "") ?: ""
-        val aiEmo = if (activeChat.isNotEmpty()) com.aftglw.devapi.MemoryStore.search(this, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: "" else ""
+        val aiEmo = if (activeChat.isNotEmpty()) com.aftglw.devapi.core.memory.MemoryStore.search(this, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: "" else ""
         tvEmoResult.text = when {
             !emoEnabled -> "off"
             MoodDetector.feedCount == 0 -> "not triggered"

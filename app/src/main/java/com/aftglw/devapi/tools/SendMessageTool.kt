@@ -1,10 +1,10 @@
 package com.aftglw.devapi.tools
+import com.aftglw.devapi.core.storage.ChatHistory
 
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import com.aftglw.devapi.ChatHistory
 import com.aftglw.devapi.MainActivity
 import org.json.JSONArray
 import org.json.JSONObject

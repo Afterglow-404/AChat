@@ -1,4 +1,6 @@
 package com.aftglw.devapi
+import com.aftglw.devapi.core.time.ProactiveScheduler
+import com.aftglw.devapi.feature.settings.SettingsActivity
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

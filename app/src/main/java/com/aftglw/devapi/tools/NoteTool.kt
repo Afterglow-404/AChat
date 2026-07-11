@@ -1,7 +1,7 @@
 package com.aftglw.devapi.tools
+import com.aftglw.devapi.core.memory.MemoryStore
 
 import android.content.Context
-import com.aftglw.devapi.MemoryStore
 import org.json.JSONArray
 import org.json.JSONObject
 

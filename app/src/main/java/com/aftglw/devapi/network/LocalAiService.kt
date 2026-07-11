@@ -1,4 +1,6 @@
 package com.aftglw.devapi.network
+import com.aftglw.devapi.core.mood.AffinityManager
+import com.aftglw.devapi.core.mood.MoodDetector
 
 import android.content.Context
 import com.aftglw.devapi.model.ChatMessage
