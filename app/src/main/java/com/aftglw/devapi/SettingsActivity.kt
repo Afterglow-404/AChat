@@ -122,6 +122,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var moodEnabled by remember { mutableStateOf(prefs.getBoolean("mood_enabled", false)) }
     var affinityEnabled by remember { mutableStateOf(prefs.getBoolean("affinity_enabled", false)) }
     var localMode by remember { mutableStateOf(prefs.getBoolean("local_mode", false)) }
+    var openBookMode by remember { mutableStateOf(prefs.getBoolean("open_book_mode", false)) }
     LaunchedEffect(customFont) { typography.value = if (customFont) buildCustomTypography() else Typography() }
 
     var profileName by remember { mutableStateOf(prefs.getString("profile_name", "User") ?: "User") }
@@ -253,7 +254,8 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         },
                         moodEnabled, { moodEnabled = it; prefs.edit().putBoolean("mood_enabled", it).apply() },
                         affinityEnabled, { affinityEnabled = it; prefs.edit().putBoolean("affinity_enabled", it).apply() },
-                        localMode, { localMode = it; prefs.edit().putBoolean("local_mode", it).apply(); if (!it) com.aftglw.devapi.network.AiServiceFactory.unloadLocal() }
+                        localMode, { localMode = it; prefs.edit().putBoolean("local_mode", it).apply(); if (!it) com.aftglw.devapi.network.AiServiceFactory.unloadLocal() },
+                        openBookMode, { openBookMode = it; prefs.edit().putBoolean("open_book_mode", it).apply() }
                     )
                     is SettingsPage.About -> AboutPage(onBack = goBack)
                     is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
@@ -608,7 +610,8 @@ private fun DebugPage(
     debug: Boolean, onDebugChange: (Boolean) -> Unit,
     moodEnabled: Boolean, onMoodEnabledChange: (Boolean) -> Unit,
     affinityEnabled: Boolean, onAffinityEnabledChange: (Boolean) -> Unit,
-    localMode: Boolean, onLocalModeChange: (Boolean) -> Unit
+    localMode: Boolean, onLocalModeChange: (Boolean) -> Unit,
+    openBookMode: Boolean, onOpenBookModeChange: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
     SubPageScaffold("调试", onBack) {
@@ -640,6 +643,12 @@ private fun DebugPage(
         ToggleRow("情绪感知", "使用模型本地分析对话情绪(待完善)", moodEnabled, onMoodEnabledChange)
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("模型已集成", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(8.dp))
+        ToggleRow("🔓 开诚布公", "允许 AI 访问位置、通知、应用使用统计", openBookMode, onOpenBookModeChange)
+        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("AI 调用前会先询问你的许可，数据仅当前对话内存中有效", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(8.dp))
