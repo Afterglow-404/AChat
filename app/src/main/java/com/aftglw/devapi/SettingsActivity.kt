@@ -275,6 +275,17 @@ private fun savePickedImage(ctx: android.content.Context, uri: Uri, fileName: St
     } catch (_: Exception) {}
 }
 
+private fun addChat(ctx: android.content.Context, name: String, persona: String, avatarUri: String) {
+    val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+    val chats = org.json.JSONArray(prefs.getString("chats", "[]") ?: "[]")
+    val newChat = org.json.JSONObject().apply {
+        put("name", name); put("persona", persona); put("avatarUri", avatarUri)
+        put("pinned", false); put("id", java.util.UUID.randomUUID().toString())
+    }
+    chats.put(newChat)
+    prefs.edit().putString("chats", chats.toString()).apply()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) {
@@ -311,38 +322,6 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
             }
             Spacer(Modifier.height(24.dp))
         }
-    }
-}
-
-@Composable
-private fun SettingsEntry(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(AchatTheme.colors.surface).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, color = AchatTheme.colors.onSurface)
-            Text(subtitle, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-        }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
-    }
-    HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SubPageScaffold(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text(title, color = AchatTheme.colors.onSurface) },
-                navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AchatTheme.colors.surface)
-            )
-        },
-        containerColor = AchatTheme.colors.background
-    ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).background(AchatTheme.colors.background).verticalScroll(rememberScrollState()), content = content)
     }
 }
 
@@ -518,15 +497,6 @@ private fun BackgroundsPage(
 }
 
 @Composable
-private fun BgRow(label: String, uri: String, onPick: () -> Unit, onReset: () -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = 14.sp)
-        TextButton(onClick = onPick) { Text(if (uri.isNotEmpty()) "更换" else "选择图片", color = Color(0xFF07C160)) }
-        if (uri.isNotEmpty()) TextButton(onClick = onReset) { Text("重置", color = Color.Gray) }
-    }
-}
-
-@Composable
 private fun AppearancePage(
     onBack: () -> Unit,
     glassTransparent: Boolean, onGlassTransparentChange: (Boolean) -> Unit,
@@ -603,290 +573,4 @@ private fun AppearancePage(
         }
     }
 }
-
-@Composable
-private fun DebugPage(
-    onBack: () -> Unit,
-    debug: Boolean, onDebugChange: (Boolean) -> Unit,
-    moodEnabled: Boolean, onMoodEnabledChange: (Boolean) -> Unit,
-    affinityEnabled: Boolean, onAffinityEnabledChange: (Boolean) -> Unit,
-    localMode: Boolean, onLocalModeChange: (Boolean) -> Unit,
-    openBookMode: Boolean, onOpenBookModeChange: (Boolean) -> Unit
-) {
-    val ctx = LocalContext.current
-    SubPageScaffold("调试", onBack) {
-        Spacer(Modifier.height(8.dp))
-        ToggleRow("Debug 窗", "显示调试信息(待完善)", debug, onDebugChange)
-
-        val sysPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-        var sysEnter by remember { mutableStateOf(sysPrefs.getBoolean("sysmsg_enter", true)) }
-        var sysTimer by remember { mutableStateOf(sysPrefs.getBoolean("sysmsg_timer", true)) }
-        var sysHotline by remember { mutableStateOf(sysPrefs.getBoolean("sysmsg_hotline", true)) }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("系统消息", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Switch(checked = sysEnter || sysTimer || sysHotline, onCheckedChange = { v -> sysEnter = v; sysTimer = v; sysHotline = v; sysPrefs.edit().putBoolean("sysmsg_enter", v).putBoolean("sysmsg_timer", v).putBoolean("sysmsg_hotline", v).apply() })
-        }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("进入提示", Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF888888))
-            Switch(checked = sysEnter, onCheckedChange = { v -> sysEnter = v; sysPrefs.edit().putBoolean("sysmsg_enter", v).apply() })
-        }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("2小时提醒", Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF888888))
-            Switch(checked = sysTimer, onCheckedChange = { v -> sysTimer = v; sysPrefs.edit().putBoolean("sysmsg_timer", v).apply() })
-        }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("求助热线", Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF888888))
-            Switch(checked = sysHotline, onCheckedChange = { v -> sysHotline = v; sysPrefs.edit().putBoolean("sysmsg_hotline", v).apply() })
-        }
-
-        Spacer(Modifier.height(8.dp))
-        ToggleRow("情绪感知", "使用模型本地分析对话情绪(待完善)", moodEnabled, onMoodEnabledChange)
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("模型已集成", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-        }
-
-        Spacer(Modifier.height(8.dp))
-        ToggleRow("🔓 开诚布公", "允许 AI 访问位置、通知、应用使用统计", openBookMode, onOpenBookModeChange)
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("AI 调用前会先询问你的许可，数据仅当前对话内存中有效", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-        }
-
-        Spacer(Modifier.height(8.dp))
-        ToggleRow("好感度系统", "AI 语气随相处变化(待完善)", affinityEnabled, onAffinityEnabledChange)
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("开关控制各对话详情页中的好感度调节", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-        }
-
-        ToggleRow("本地模式", "用本地 Qwen 模型处理对话（需提前放置模型文件）", localMode, onLocalModeChange)
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("关闭后恢复使用云端 API", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            val dbPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-            Text("历史消息数", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.width(80.dp))
-            val ctxw = dbPrefs.getInt("context_window", 0)
-            val cwOptions = listOf(0 to "自动", 10 to "10条", 20 to "20条", 30 to "30条", 50 to "50条", 80 to "80条", 100 to "100条")
-            val cwExpanded = remember { mutableStateOf(false) }
-            Box { val cwLabel = cwOptions.find { it.first == ctxw }?.second ?: "自动"
-                Text(cwLabel, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { cwExpanded.value = true })
-                DropdownMenu(expanded = cwExpanded.value, onDismissRequest = { cwExpanded.value = false }) {
-                    cwOptions.forEach { (v, label) ->
-                        DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = {
-                            dbPrefs.edit().putInt("context_window", v).apply()
-                            cwExpanded.value = false
-                        })
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        val logExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> } // 替换为分享
-        val shareLog: () -> Unit = {
-                try {
-                    val sb = StringBuilder()
-                    sb.appendLine("=== Wisp Debug Log ===")
-                    sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
-                    sb.appendLine("Device: ${android.os.Build.MODEL} (API ${android.os.Build.VERSION.SDK_INT})")
-                    sb.appendLine()
-                    val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                    sb.appendLine("=== Settings ===")
-                    sb.appendLine("API URL: ${prefs.getString("ai_api_url", "")?.take(60)}")
-                    sb.appendLine("Model: ${prefs.getString("ai_model", "")}")
-                    sb.appendLine("Embedding Model: detected from URL")
-                    sb.appendLine("Long Context: ${prefs.getBoolean("long_context_mode", false)}")
-                    sb.appendLine("Mood Detection: ${prefs.getBoolean("mood_enabled", false)}")
-                    sb.appendLine("Affinity: ${prefs.getBoolean("affinity_enabled", false)}")
-                    sb.appendLine("Local Mode: ${prefs.getBoolean("local_mode", false)}")
-                    sb.appendLine("Timezone: ${prefs.getString("timezone_id", java.util.TimeZone.getDefault().id)}")
-                    sb.appendLine("Glass Effect: ${prefs.getBoolean("glass_transparent", false)}")
-                    sb.appendLine("Context Window: ${prefs.getInt("context_window", 0)} (0=auto)")
-                    sb.appendLine("Custom Font: ${prefs.getBoolean("custom_font", false)}")
-                    sb.appendLine("Notification Sound: ${prefs.getBoolean("notification_sound", true)}")
-                    sb.appendLine("Notification Vibrate: ${prefs.getBoolean("notification_vibrate", true)}")
-                    sb.appendLine("Show Timestamps: ${prefs.getBoolean("show_timestamps", true)}")
-                    sb.appendLine("Debug Overlay: ${prefs.getBoolean("debug_overlay", false)}")
-                    sb.appendLine("Physics Enabled: ${prefs.getBoolean("physics_enabled", true)}")
-                    sb.appendLine("Protocol: ${com.aftglw.devapi.network.AiServiceFactory.getProtocolName()}")
-                    sb.appendLine()
-                    sb.appendLine("=== All Chats ===")
-                    val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
-                    for (i in 0 until chats.length()) {
-                        val o = chats.getJSONObject(i)
-                        val chatName = o.getString("name")
-                        val msgCount = com.aftglw.devapi.ChatHistory.load(ctx, chatName).size
-                        val affVal = com.aftglw.devapi.AffinityManager.getAffinity(prefs, chatName).toInt()
-                        val affMode = if (com.aftglw.devapi.AffinityManager.isAutoMode(prefs, chatName)) "auto" else "locked"
-                        val lastMood = prefs.getString("last_mood_$chatName", "") ?: ""
-                        val hasPersona = o.optString("persona", "").isNotBlank()
-                        val pEnable = prefs.getBoolean("proactive_enabled_$chatName", false)
-                        val pMode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
-                        val pLong = prefs.getBoolean("proactive_long_history_$chatName", false)
-                        val pLimit = prefs.getInt("proactive_daily_limit_$chatName", 3)
-                        val pTriggers = prefs.getString("proactive_triggers_$chatName", "1,2,3,4,5,6") ?: "?"
-                        val pIdle = prefs.getInt("proactive_idle_hours_$chatName", 0)
-                        val pCheck = prefs.getString("proactive_check_mode_$chatName", "random") ?: "?"
-                        val archive = prefs.getBoolean("auto_archive_$chatName", true)
-                        val diagOpt = prefs.getBoolean("dialogue_optimization_$chatName", false)
-                        val refl = prefs.getBoolean("reflection_$chatName", false)
-                        val moodVis = prefs.getBoolean("mood_visualization", false)
-                        sb.appendLine("  $chatName | msg=$msgCount | aff=$affVal($affMode) | mood=$lastMood | persona=${if (hasPersona) "yes" else "no"} | arch=$archive | opt=$diagOpt | refl=$refl | pro=$pEnable($pMode) | longH=$pLong | vis=$moodVis | limit=$pLimit | idle=${pIdle}h | check=$pCheck | trigs=$pTriggers")
-                    }
-                    sb.appendLine()
-                    sb.appendLine("=== Emotion Detection ===")
-                    sb.appendLine("Last Mood: ${com.aftglw.devapi.MoodDetector.lastMood ?: "N/A"}")
-                    sb.appendLine("Last Hint: ${com.aftglw.devapi.MoodDetector.lastHint ?: "N/A"}")
-                    sb.appendLine("Source: ${com.aftglw.devapi.MoodDetector.lastSource}")
-                    sb.appendLine("Feed Count: ${com.aftglw.devapi.MoodDetector.feedCount}")
-                    sb.appendLine("Model Error: N/A (ONNX removed)")
-                    sb.appendLine("AI Emotion Memory: active (via reflection)")
-                    sb.appendLine()
-                    sb.appendLine("=== Usage ===")
-                    sb.appendLine("Last Tokens In: ${prefs.getInt("last_tokens_in", 0)}")
-                    sb.appendLine("Last Tokens Out: ${prefs.getInt("last_tokens_out", 0)}")
-                    sb.appendLine("Proactive Daily Count: ${prefs.getInt("proactive_count_${com.aftglw.devapi.MoodDetector.lastMood ?: "unknown"}_" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault()).format(java.util.Date()), 0)}")
-                    sb.appendLine()
-                    sb.appendLine("=== NTP Sync ===")
-                    sb.appendLine("TimeService Active: true")
-                    sb.appendLine("Formatted: ${com.aftglw.devapi.TimeService.getFormattedTime(ctx)}")
-                    // 写入 log 目录后分享
-                    val logDir = java.io.File(ctx.cacheDir, "log")
-                    logDir.mkdirs()
-                    val logFile = java.io.File(logDir, "Wisp_debug_log.txt")
-                    logFile.writeText(sb.toString())
-                    val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_STREAM, androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", logFile))
-                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    ctx.startActivity(android.content.Intent.createChooser(shareIntent, "分享调试日志"))
-                } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
-            }
-        androidx.compose.material3.OutlinedButton(
-            onClick = { shareLog() },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF888888))
-        ) { Text("导出调试日志", fontSize = 13.sp) }
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("时区", fontSize = 14.sp, color = Color(0xFF888888), modifier = Modifier.weight(0.3f))
-            Spacer(Modifier.width(8.dp))
-            val tzPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-            val tzId = tzPrefs.getString("timezone_id", java.util.TimeZone.getDefault().id) ?: java.util.TimeZone.getDefault().id
-            val tzExpanded = remember { mutableStateOf(false) }
-            Box {
-                Text(tzId, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { tzExpanded.value = true })
-                DropdownMenu(expanded = tzExpanded.value, onDismissRequest = { tzExpanded.value = false }) {
-                    com.aftglw.devapi.TimeService.getAvailableTimezones().forEach { (id, label) ->
-                        DropdownMenuItem(text = { Text("$id  $label", fontSize = 13.sp) }, onClick = {
-                            com.aftglw.devapi.TimeService.setTimezone(ctx, id)
-                            tzExpanded.value = false
-                        })
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AboutPage(onBack: () -> Unit) {
-    SubPageScaffold("关于", onBack) {
-        Spacer(Modifier.height(8.dp))
-        Column(Modifier.fillMaxWidth().background(Color.White).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Wisp", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
-            Spacer(Modifier.height(4.dp))
-            Text("Preview Version", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Normal)
-            Text("Pre-Alpha (Dev)", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-            Spacer(Modifier.height(12.dp))
-            Text("WeChat 的拙劣模仿品，你能在「Wisp」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
-            Text("支持 OpenAI 兼容 API 对话，支持自定义对话人设。", fontSize = 12.sp, color = Color(0xFF888888))
-            Spacer(Modifier.height(8.dp))
-            Text("💗 爱来自 AFTGLW 与 Deepseek-Reasonix 💗", fontSize = 11.sp, color = Color(0xFFBBBBBB))
-            Text("感谢 Kyant0 的 AndroidLiquidGlass 库", fontSize = 11.sp, color = Color(0xFFBBBBBB))
-            Text("感谢 一言API 素颜API TheCatAPI BoredAPI LeetCodeAPI", fontSize = 11.sp, color = Color(0xFFBBBBBB))
-            Text("感谢 chinese-roberta-wwm-ext ", fontSize = 11.sp, color = Color(0xFFBBBBBB))
-            Text("感谢 sepidmnorozy 的 Chinese_sentiment 数据，感谢 t1annnnn 的 Chinese_sentimentAnalyze 数据", fontSize = 11.sp, color = Color(0xFFBBBBBB))
-        }
-    }
-}
-
-@Composable
-private fun SettingsMainHeader(title: String) {
-    Text(title, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-}
-
-@Composable
-private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, color = AchatTheme.colors.onSurface)
-            Text(subtitle, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-        }
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AchatTheme.colors.primary))
-    }
-}
-
-@Composable
-private fun TextFieldRow(label: String, placeholder: String, value: String, onChange: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-        Spacer(Modifier.height(6.dp))
-        OutlinedTextField(value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), placeholder = { Text(placeholder, fontSize = 14.sp) },
-            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
-    }
-}
-
-@Composable
-private fun PasswordRow(label: String, placeholder: String, value: String, onChange: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(label, fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-        Spacer(Modifier.height(6.dp))
-        OutlinedTextField(value, onChange, Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), placeholder = { Text(placeholder, fontSize = 14.sp) },
-            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            visualTransformation = PasswordVisualTransformation(),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
-    }
-}
-
-private fun generateChatId(): String {
-    val chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    return (1..8).map { chars.random() }.joinToString("")
-}
-
-private fun addChat(ctx: android.content.Context, name: String, persona: String = "", avatarUri: String = "") {
-    val prefs = ctx.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
-    val json = prefs.getString("chats", "[]") ?: "[]"
-    val arr = JSONArray(json)
-    val colors = listOf("#1A7DC0", "#E8512B", "#07C160", "#A020F0", "#FF9500", "#E91E63", "#607D8B", "#795548", "#009688", "#FF5722", "#3F51B5", "#00BCD4")
-    val obj = JSONObject().apply {
-        put("id", generateChatId())
-        put("name", name)
-        put("lastMessage", "")
-        put("time", "")
-        put("unreadCount", 0)
-        put("avatarColor", colors[(name.hashCode() and Int.MAX_VALUE) % colors.size])
-        put("pinned", false)
-        put("persona", persona)
-        put("avatarUri", avatarUri)
-    }
-    arr.put(obj)
-    prefs.edit().putString("chats", arr.toString()).apply()
-    // 迁移已有对话：补齐 id
-    for (i in 0 until arr.length()) {
-        val o = arr.getJSONObject(i)
-        if (!o.has("id") || o.getString("id").isEmpty()) {
-            o.put("id", generateChatId())
-        }
-    }
-    prefs.edit().putString("chats", arr.toString()).apply()
-}
-
-@Preview(showBackground = true)
-@Composable
-fun SettingsMainPreview() {
-    MaterialTheme { SettingsMainPage(onBack = {}, onNav = {}) }
-}
+
