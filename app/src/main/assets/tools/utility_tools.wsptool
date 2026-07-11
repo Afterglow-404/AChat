@@ -1,0 +1,65 @@
+{
+    "name": "utility_tools",
+    "display_name": {
+        "zh": "实用工具",
+        "en": "Utility Tools"
+    },
+    "description": "日常实用工具集 — 汇率查询、UUID 生成、Base64 编解码",
+    "author": ["Wisp Team"],
+    "category": "Utility",
+    "tools": [
+        {
+            "name": "exchange_rate",
+            "description": "获取指定货币对的最新汇率，例如 USD/CNY。数据来自开放的汇率 API。",
+            "parameters": [
+                {
+                    "name": "from",
+                    "description": "源货币代码，如 USD",
+                    "type": "string",
+                    "required": true
+                },
+                {
+                    "name": "to",
+                    "description": "目标货币代码，如 CNY",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "impl": {
+                "type": "http",
+                "method": "GET",
+                "url": "https://api.exchangerate-api.com/v4/latest/{from}",
+                "response": {
+                    "format": "json",
+                    "extract": "$.rates.{to}",
+                    "template": "1 {from} = {result} {to}"
+                }
+            }
+        },
+        {
+            "name": "generate_uuid",
+            "description": "生成一个 UUID v4 随机字符串。可用于标识符、会话 ID 等。",
+            "parameters": [],
+            "impl": {
+                "type": "kotlin",
+                "className": "com.aftglw.devapi.core.tools.UuidTool"
+            }
+        },
+        {
+            "name": "encode_base64",
+            "description": "将文本编码为 Base64 格式",
+            "parameters": [
+                {
+                    "name": "text",
+                    "description": "要编码的文本",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "impl": {
+                "type": "kotlin",
+                "className": "com.aftglw.devapi.core.tools.Base64Tool"
+            }
+        }
+    ]
+}
