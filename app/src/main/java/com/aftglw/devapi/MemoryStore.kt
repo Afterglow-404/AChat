@@ -4,12 +4,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.aftglw.devapi.network.HttpClient
 import kotlin.math.sqrt
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.ByteBuffer
 
 data class MemoryItem(
@@ -43,13 +42,15 @@ object MemoryStore {
             else -> prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
         }
         return try {
-            val conn = URL("$baseUrl/embeddings").openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"; conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.doOutput = true; conn.connectTimeout = 10000; conn.readTimeout = 10000
             val body = """{"model":"$embedModel","input":${JSONObject.quote(text)}}"""
-            OutputStreamWriter(conn.outputStream).use { it.write(body) }
-            val resp = conn.inputStream.bufferedReader().use { it.readText() }; conn.disconnect()
+            val request = okhttp3.Request.Builder()
+                .url("$baseUrl/embeddings")
+                .header("Authorization", "Bearer $apiKey")
+                .post(body.toRequestBody(HttpClient.JSON_MEDIA_TYPE))
+                .build()
+            val response = HttpClient.client.newCall(request).execute()
+            val resp = response.body?.string() ?: "{}"
+            response.close()
             val arr = JSONObject(resp).optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")
             if (arr != null) FloatArray(arr.length()) { arr.optDouble(it, 0.0).toFloat() } else null
         } catch (_: Exception) { null }

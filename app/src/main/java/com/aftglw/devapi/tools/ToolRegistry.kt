@@ -95,5 +95,8 @@ object ToolRegistry {
         register(LocationTool())
         register(ReadNotificationsTool())
         register(ReadAppUsageTool())
+        register(BatteryTool())
+        register(ScreenTool())
+        register(CalculatorTool())
     }
 }
