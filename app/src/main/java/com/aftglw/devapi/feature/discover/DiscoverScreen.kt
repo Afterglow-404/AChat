@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -1051,7 +1050,7 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
     var banSelfAware by remember { mutableStateOf(true) }
     var showPreview by remember { mutableStateOf(false) }
     @Suppress("DEPRECATION")
-    val clipboard = LocalClipboardManager.current
+    val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
 
     val pageBgModifier = when(AchatTheme.colors.themeId) {
         "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
@@ -1146,7 +1145,7 @@ private fun PromptBuilderPage(onBack: () -> Unit) {
                 ) { Text(if (showPreview) "隐藏预览" else "预览", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }
                 Button(
                     onClick = {
-                        clipboard.setText(AnnotatedString(generatedPrompt))
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("prompt", generatedPrompt))
                         Toast.makeText(ctx, "已复制到剪贴板喵~", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AchatTheme.colors.primary),
