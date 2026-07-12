@@ -2,7 +2,6 @@ package com.aftglw.devapi.feature.chat
 import com.aftglw.devapi.core.mood.MoodInfo
 import com.aftglw.devapi.core.ai.PromptBuilder
 import com.aftglw.devapi.core.mood.PostLLMProcessor
-import com.aftglw.devapi.core.memory.MemoryRetriever
 import com.aftglw.devapi.core.storage.ChatHistory
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.mood.MoodDetector
@@ -56,8 +55,6 @@ import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.model.ChatMessage
 import com.aftglw.devapi.network.AiServiceFactory
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,7 +64,7 @@ import kotlinx.coroutines.withContext
 private val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 private fun now() = timeFormat.format(java.util.Date())
 
-data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "")
+data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null)
 
 private sealed class ChatSubPage {
     data object Chat : ChatSubPage()
@@ -106,6 +103,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         MemoryStore.init(ctx)
         MoodDetector.init(ctx, name)
         com.aftglw.devapi.tools.ToolRegistry.init(ctx)
+        com.aftglw.devapi.core.sticker.StickerEngine.init(ctx)
         // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.load(ctx, chatKey)
         bubbles.clear()
@@ -173,7 +171,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 } catch (_: Exception) {} /* 非关键 */
             }
         }
-        ChatHistory.save(ctx, chatKey, bubbles.filter { it.label != "system" }.map { Triple(it.text, it.isMe, it.time) })
+        ChatHistory.save(ctx, chatKey, bubbles.filter { it.label != "system" && it.label != "sticker" }.map { Triple(it.text, it.isMe, it.time) })
     }
 
         // 长时记忆 + 人设浓缩：每 10 轮提取
@@ -219,19 +217,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     }
 
     
-    var memoryContext by remember { mutableStateOf("") }
-    LaunchedEffect(bubbles.size / 5) {
-        memoryContext = withContext(Dispatchers.IO) {
-            MemoryRetriever.retrieve(ctx, name, bubbles.lastOrNull()?.text ?: "")
-        }
-    }
+    // 记忆检索已改为按需 Agentic Search（通过 recall 工具），不再自动注入
 
-    
     val optimized = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_optimized_$name", "") ?: ""
     val traits = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("persona_dialogue_traits_$name", "") ?: ""
-    val enhancedPersona = PromptBuilder.build(ctx, name, persona, memoryContext, optimized, traits)
+    val enhancedPersona = PromptBuilder.build(ctx, name, persona, "", optimized, traits)
 
     BackHandler(enabled = currentSubPage != ChatSubPage.Chat) {
         currentSubPage = when (currentSubPage) {
@@ -298,64 +290,65 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             val historyText = bubbles.takeLast(8).joinToString("\n") { "${if (it.isMe) "我" else "AI"}：${it.text}" }
                             val mood = if (moodEnabled) { MoodDetector.feed(text, listOf(historyText)) } else MoodInfo(null, null)
                             val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
-                            // 收集流式完整文本（不逐字显示）
                             val service = AiServiceFactory.getService()
-                            val fullReply = StringBuilder()
-                            val doneLatch = kotlinx.coroutines.CompletableDeferred<String?>()
-                            var lastError: String? = null
 
-                            service.sendMessageStream(
-                                history.toList(), text, moodPersona,
-                                onChunk = { chunk -> fullReply.append(chunk) },
-                                onDone = { full -> doneLatch.complete(full.ifEmpty { null }) },
-                                onError = { err -> lastError = err }
+                            // === Agent Loop（委托给 Agent runtime）===
+                            val agent = com.aftglw.devapi.core.ai.Agent(ctx)
+                            val result = agent.prompt(
+                                history = history.toList(),
+                                userMessage = text,
+                                systemPrompt = moodPersona,
                             )
+                            val finalReply = result.text.takeIf { it.isNotBlank() }
+                            val lastError = result.error
 
-                            val reply = doneLatch.await()
-
-                            if (reply != null) {
-                                PostLLMProcessor.process(ctx, name, text, reply)
-
-                                // 提取并执行 【tool:xxx】 调用
-                                val toolResult = withContext(Dispatchers.IO) {
-                                    val m = Regex("""【tool:(\w+)\s*(.*?)】""").find(reply)
-                                    if (m != null) {
-                                        val toolName = m.groupValues[1]
-                                        val rawArgs = m.groupValues[2].trim()
-                                        val tool = com.aftglw.devapi.tools.ToolRegistry.get(toolName)
-                                        if (tool != null) {
-                                            val args = tool.parseTextArgs(rawArgs)
-                                            tool.execute(ctx, args)
-                                        } else null
-                                    } else null
-                                }
-                                val cleanReply = reply.replace(Regex("""【tool:\w+\s*.*?】"""), "").trim()
-
-                                ChatHistory.save(ctx, chatKey, bubbles.map { Triple(it.text, it.isMe, it.time) } + Triple(cleanReply.ifEmpty { reply }, false, now()))
+                            if (finalReply != null) {
+                                PostLLMProcessor.process(ctx, name, text, finalReply)
+                                val saveText = finalReply.replace(Regex("【sticker:[^】]+:[^】]+】"), "").trim()
+                                val historyText = saveText.ifEmpty { "[表情]" }
+                                ChatHistory.save(ctx, chatKey, bubbles.filter { it.label != "sticker" }.map { Triple(it.text, it.isMe, it.time) } + Triple(historyText, false, now()))
 
                                 withContext(Dispatchers.Main) {
-                                    // 拆句：按 \n\n 或 【顿】 分段，动态延迟弹出
-                                    if (cleanReply.isNotBlank()) {
-                                        val parts = cleanReply.split(Regex("【顿】|\\n\\n"))
+                                    // 拆句：按 \n\n、【顿】或 【sticker:】 分段，动态延迟弹出
+                                    if (finalReply.isNotBlank()) {
+                                        val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
+                                        val parts = finalReply.split(Regex("【顿】|\\n\\n"))
+                                            .flatMap { seg -> seg.split(Regex("(?=【sticker:)")) }
                                             .map { it.trim() }.filter { it.isNotBlank() }
-                                        if (parts.size > 1) {
-                                            bubbles.add(Bubble(parts[0], false))
+                                        val showParts = parts.filter {
+                                            val sm = stickerRegex.find(it)
+                                            sm == null || com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2]) != null
+                                        }
+                                        if (showParts.size > 1) {
+                                            val firstMatch = stickerRegex.find(showParts[0])
+                                            if (firstMatch != null) {
+                                                bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(firstMatch.groupValues[1], firstMatch.groupValues[2])))
+                                            } else {
+                                                bubbles.add(Bubble(showParts[0], false))
+                                            }
                                             kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
-                                                for (i in 1 until parts.size) {
-                                                    val len = parts[i].length
+                                                for (i in 1 until showParts.size) {
+                                                    val len = showParts[i].length
                                                     val delayMs = (len * 50L).coerceIn(200L, 1500L)
                                                     delay(delayMs)
-                                                    bubbles.add(Bubble(parts[i], false))
+                                                    val sm = stickerRegex.find(showParts[i])
+                                                    if (sm != null) {
+                                                        bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])))
+                                                    } else {
+                                                        bubbles.add(Bubble(showParts[i], false))
+                                                    }
                                                 }
                                             }
                                         } else {
-                                            bubbles.add(Bubble(cleanReply, false))
+                                            val sm = stickerRegex.find(showParts[0])
+                                            if (sm != null) {
+                                                bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])))
+                                            } else {
+                                                bubbles.add(Bubble(finalReply, false))
+                                            }
                                         }
                                     }
-                                    if (toolResult != null) {
-                                        bubbles.add(Bubble("—— ${toolResult} ——", false, "", label = "system"))
-                                    }
-                                    history.add(ChatMessage("assistant", cleanReply.ifEmpty { reply }))
+                                    history.add(com.aftglw.devapi.model.ChatMessage("assistant", finalReply))
                                     val hotline = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).getBoolean("sysmsg_hotline", true)
                                     if (hotline && com.aftglw.devapi.core.mood.MoodDetector.lastMood in listOf("悲伤", "愤怒", "害怕", "厌恶")) {
                                         bubbles.add(Bubble("—— 如果您需要帮助，可拨打心理援助热线：12355 ——", false, "", label = "system"))
@@ -422,8 +415,7 @@ fun ChatContent(
     val localInput = remember(input) { mutableStateOf(input) }
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-    @Suppress("DEPRECATION")
-    val clipboard = LocalClipboardManager.current
+    val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     Box(Modifier.fillMaxSize()) {
         if (chatBgBitmap != null) {
             Image(chatBgBitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -518,6 +510,29 @@ fun ChatContent(
                             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                                 Text(b.text, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), lineHeight = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
+                        } else if (b.label == "sticker" && b.stickerPath != null) {
+                            // 贴纸消息：AI 侧图片气泡
+                            Box {
+                                Box(
+                                    Modifier.background(
+                                        AchatTheme.colors.chatBubbleAi,
+                                        AchatTheme.shapes.bubbleAi
+                                    ).then(
+                                        if (AchatTheme.colors.themeId == "newspaper") Modifier.printRule(all = true) else Modifier
+                                    ).then(
+                                        if (AchatTheme.colors.themeId == "washi") Modifier.sumiBorder(AchatTheme.colors.divider, idx) else Modifier
+                                    ).padding(8.dp)
+                                ) {
+                                    coil.compose.AsyncImage(
+                                        model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                            .data("file:///android_asset/${b.stickerPath}")
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "贴纸",
+                                        modifier = Modifier.size(120.dp)
+                                    )
+                                }
+                            }
                         } else {
                         Box {
                             Box(
@@ -565,7 +580,7 @@ fun ChatContent(
                                 DropdownMenuItem(
                                     text = { Text("复制") },
                                     onClick = {
-                                        clipboard.setText(AnnotatedString(b.text))
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("chat", b.text))
                                         menuExpanded = false
                                     }
                                 )
