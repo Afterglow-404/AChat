@@ -11,7 +11,7 @@ set(LLAMACPP_DIR "${CMAKE_SOURCE_DIR}/llama.cpp")
 
 # 在没有 llama.cpp 源码时，仅编译桩代码用于验证项目结构
 add_library(llamawisp SHARED
-    llama_wisp.cpp
+    src/main/cpp/llama_wisp.cpp
 )
 
 # 需要启用 C++17
