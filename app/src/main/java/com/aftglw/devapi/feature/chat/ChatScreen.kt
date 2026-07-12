@@ -310,42 +310,35 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
 
                                 withContext(Dispatchers.Main) {
                                     // 拆句：按 \n\n、【顿】或 【sticker:】 分段，动态延迟弹出
+                                    fun addSegment(part: String) {
+                                        val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
+                                        val sm = stickerRegex.find(part)
+                                        if (sm != null) {
+                                            val path = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])
+                                            bubbles.add(Bubble("", false, label = "sticker", stickerPath = path))
+                                        } else {
+                                            bubbles.add(Bubble(part, false))
+                                        }
+                                    }
                                     if (finalReply.isNotBlank()) {
                                         val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
                                         val parts = finalReply.split(Regex("【顿】|\\n\\n"))
                                             .flatMap { seg -> seg.split(Regex("(?=【sticker:)")) }
                                             .map { it.trim() }.filter { it.isNotBlank() }
-                                        val showParts = parts.filter {
-                                            val sm = stickerRegex.find(it)
-                                            sm == null || com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2]) != null
-                                        }
-                                        if (showParts.size > 1) {
-                                            val firstMatch = stickerRegex.find(showParts[0])
-                                            if (firstMatch != null) {
-                                                bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(firstMatch.groupValues[1], firstMatch.groupValues[2])))
-                                            } else {
-                                                bubbles.add(Bubble(showParts[0], false))
+                                            .filter {
+                                                val sm = stickerRegex.find(it)
+                                                sm == null || com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2]) != null
                                             }
+                                        if (parts.size > 1) {
+                                            addSegment(parts[0])
                                             kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
-                                                for (i in 1 until showParts.size) {
-                                                    val len = showParts[i].length
-                                                    val delayMs = (len * 50L).coerceIn(200L, 1500L)
-                                                    delay(delayMs)
-                                                    val sm = stickerRegex.find(showParts[i])
-                                                    if (sm != null) {
-                                                        bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])))
-                                                    } else {
-                                                        bubbles.add(Bubble(showParts[i], false))
-                                                    }
+                                                for (i in 1 until parts.size) {
+                                                    delay((parts[i].length * 50L).coerceIn(200L, 1500L))
+                                                    addSegment(parts[i])
                                                 }
                                             }
                                         } else {
-                                            val sm = stickerRegex.find(showParts[0])
-                                            if (sm != null) {
-                                                bubbles.add(Bubble("", false, label = "sticker", stickerPath = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])))
-                                            } else {
-                                                bubbles.add(Bubble(finalReply, false))
-                                            }
+                                            addSegment(parts[0])
                                         }
                                     }
                                     history.add(com.aftglw.devapi.model.ChatMessage("assistant", finalReply))
