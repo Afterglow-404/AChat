@@ -17,7 +17,7 @@ class ClaudeAiService(context: Context) : AiService {
 
         return try {
             HttpRetry.retry("Claude") {
-            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false)
+            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false, tools = buildToolsArray())
             val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
                 "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
             val response = HttpClient.execute(request)
@@ -63,7 +63,7 @@ class ClaudeAiService(context: Context) : AiService {
 
         try {
             val result = HttpRetry.retry("Claude") {
-            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true)
+            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true, tools = buildToolsArray())
             val httpReq = HttpClient.postJson("$baseUrl/messages", body.toString(),
                 "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
             val httpResp = HttpClient.client.newCall(httpReq).execute()
@@ -135,7 +135,8 @@ class ClaudeAiService(context: Context) : AiService {
 
     private fun buildRequestBody(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String,
-        model: String, streaming: Boolean
+        model: String, streaming: Boolean,
+        tools: org.json.JSONArray? = null
     ): JSONObject {
         val messages = JSONArray().apply {
             val ctxWindow = prefs.getInt("context_window", 0)
@@ -162,10 +163,26 @@ class ClaudeAiService(context: Context) : AiService {
             put("messages", messages)
             put("max_tokens", maxTokens)
             if (streaming) put("stream", true)
+            if (tools != null) put("tools", tools)
             // 可选生成参数
             prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
             prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
             prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
+        }
+    }
+
+    /** 将 ToolRegistry 中的工具转为 Claude 原生 tool_use 格式 (input_schema 蛇形命名) */
+    private fun buildToolsArray(): org.json.JSONArray? {
+        val allTools = com.aftglw.devapi.tools.ToolRegistry.getAll()
+        if (allTools.isEmpty()) return null
+        return org.json.JSONArray().apply {
+            for (tool in allTools) {
+                put(org.json.JSONObject().apply {
+                    put("name", tool.name)
+                    put("description", tool.description)
+                    put("input_schema", tool.inputSchema)
+                })
+            }
         }
     }
 }

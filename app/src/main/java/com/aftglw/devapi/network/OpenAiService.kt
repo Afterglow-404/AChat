@@ -19,7 +19,7 @@ class OpenAiService(context: Context) : AiService {
         return try {
             HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
-            val body = buildRequestBody(model, messages, streaming = false)
+            val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
             val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
                 "Authorization" to "Bearer $apiKey")
             val response = HttpClient.execute(request)
@@ -72,7 +72,7 @@ class OpenAiService(context: Context) : AiService {
         try {
             val result = HttpRetry.retry("OpenAi") {
             val messages = buildMessages(history, userMessage, systemPrompt)
-            val body = buildRequestBody(model, messages, streaming = true)
+            val body = buildRequestBody(model, messages, streaming = true, tools = buildToolsArray())
             val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
                 "Authorization" to "Bearer $apiKey")
             val httpResp = HttpClient.client.newCall(httpReq).execute()
@@ -156,6 +156,24 @@ class OpenAiService(context: Context) : AiService {
             if (fmt == "json_object") put("response_format", org.json.JSONObject().apply { put("type", "json_object") })
         }
         if (tools != null) put("tools", tools)
+    }
+
+    /** 将 ToolRegistry 中的工具转为 OpenAI 原生 function calling 格式 */
+    private fun buildToolsArray(): org.json.JSONArray? {
+        val allTools = com.aftglw.devapi.tools.ToolRegistry.getAll()
+        if (allTools.isEmpty()) return null
+        return org.json.JSONArray().apply {
+            for (tool in allTools) {
+                put(org.json.JSONObject().apply {
+                    put("type", "function")
+                    put("function", org.json.JSONObject().apply {
+                        put("name", tool.name)
+                        put("description", tool.description)
+                        put("parameters", tool.inputSchema)
+                    })
+                })
+            }
+        }
     }
 
     private fun buildMessages(
