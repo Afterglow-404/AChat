@@ -1,10 +1,9 @@
 package com.aftglw.devapi.tools
 
 import android.content.Context
+import com.aftglw.devapi.network.HttpClient
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -58,12 +57,12 @@ class WebSearchTool : AiTool {
      */
     private fun searchDuckDuckGo(query: String): String? = try {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = URL("https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1")
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        val raw = conn.inputStream.bufferedReader().use { it.readText() }
-        conn.disconnect()
+        val request = okhttp3.Request.Builder()
+            .url("https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1")
+            .build()
+        val response = HttpClient.client.newCall(request).execute()
+        val raw = response.body?.string() ?: "{}"
+        response.close()
 
         val json = JSONObject(raw)
         val abstractText = json.optString("AbstractText", "")
@@ -100,13 +99,13 @@ class WebSearchTool : AiTool {
      */
     private fun searchDuckDuckGoHtml(query: String, count: Int): String? = try {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = URL("https://lite.duckduckgo.com/lite/?q=$encoded")
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-        val html = conn.inputStream.bufferedReader().use { it.readText() }
-        conn.disconnect()
+        val request = okhttp3.Request.Builder()
+            .url("https://lite.duckduckgo.com/lite/?q=$encoded")
+            .header("User-Agent", "Mozilla/5.0")
+            .build()
+        val response = HttpClient.client.newCall(request).execute()
+        val html = response.body?.string() ?: ""
+        response.close()
 
         // 用正则提取结果标题和摘要（简单解析，不含 HTML parser）
         val resultRegex = Regex("""<a[^>]*href="([^"]*)"[^>]*class="result-link"[^>]*>([^<]*)</a>""",
@@ -146,13 +145,14 @@ class WebSearchTool : AiTool {
                 .replace("{q}", encoded)
                 .replace("{count}", count.toString())
                 .replace("{key}", apiKey)
-            val conn = URL(finalUrl).openConnection() as HttpURLConnection
-            conn.connectTimeout = 10000
-            conn.readTimeout = 15000
-            if (apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.setRequestProperty("User-Agent", "AChat/1.0")
-            val raw = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
+            val request = okhttp3.Request.Builder()
+                .url(finalUrl)
+                .header("User-Agent", "Wisp/1.0")
+                .apply { if (apiKey.isNotBlank()) header("Authorization", "Bearer $apiKey") }
+                .build()
+            val response = HttpClient.client.newCall(request).execute()
+            val raw = response.body?.string() ?: ""
+            response.close()
             raw.take(1000) // 限制长度，防止 AI context 爆炸
         } catch (_: Exception) { null }
     }

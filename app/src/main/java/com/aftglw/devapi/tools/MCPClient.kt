@@ -1,12 +1,9 @@
 package com.aftglw.devapi.tools
 
+import com.aftglw.devapi.network.HttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * MCP JSON-RPC 2.0 客户端。
@@ -65,20 +62,14 @@ class MCPClient(val baseUrl: String) {
             put("params", params)
         }
 
-        val conn = URL(baseUrl).openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doOutput = true
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 30_000
-
-        try {
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            val response = conn.inputStream.bufferedReader().use { it.readText() }
-            return JSONObject(response)
-        } finally {
-            conn.disconnect()
-        }
+        val request = okhttp3.Request.Builder()
+            .url(baseUrl)
+            .post(body.toString().toRequestBody(HttpClient.JSON_MEDIA_TYPE))
+            .build()
+        val response = HttpClient.client.newCall(request).execute()
+        val respBody = response.body?.string() ?: "{}"
+        response.close()
+        return JSONObject(respBody)
     }
 
     companion object {

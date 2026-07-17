@@ -1,0 +1,48 @@
+{
+    "name": "network_tools",
+    "display_name": {
+        "zh": "网络工具",
+        "en": "Network Tools"
+    },
+    "description": "常用网络诊断和信息查询工具包",
+    "author": ["Wisp Team"],
+    "category": "NETWORK",
+    "tools": [
+        {
+            "name": "check_ip",
+            "description": "获取当前设备的公网 IP 地址。不需要任何权限。",
+            "parameters": [],
+            "impl": {
+                "type": "http",
+                "method": "GET",
+                "url": "https://httpbin.org/ip",
+                "response": {
+                    "format": "json",
+                    "extract": "$.origin",
+                    "template": "当前公网 IP: {result}"
+                }
+            }
+        },
+        {
+            "name": "check_http",
+            "description": "测试指定 URL 的 HTTP 状态码。用于网站可用性检测。",
+            "parameters": [
+                {
+                    "name": "url",
+                    "description": "要检测的网址",
+                    "type": "string",
+                    "required": true
+                }
+            ],
+            "impl": {
+                "type": "http",
+                "method": "GET",
+                "url": "{url}",
+                "response": {
+                    "format": "text",
+                    "template": "已请求 {url}，请检查返回结果"
+                }
+            }
+        }
+    ]
+}

@@ -9,6 +9,10 @@ local.properties
 *.log
 *.data
 *.jsonl
+app/.cxx/
+scripts/
+_explore_data.py
+_read_one.py
 # app/src/main/assets/model.onnx — tracked via Git LFS
 emotion_model_cpu/
 emotion_model_7class/

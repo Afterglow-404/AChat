@@ -6,7 +6,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * MCP Bridge：连接外部 MCP Server 到 AChat 的工具系统。
+ * MCP Bridge：连接外部 MCP Server 到 Wisp 的工具系统。
  *
  * 1. 从配置读取 MCP Server URL 列表
  * 2. 每个 Server 调用 tools/list 获取可用工具

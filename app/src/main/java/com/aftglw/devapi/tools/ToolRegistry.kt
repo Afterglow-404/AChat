@@ -92,5 +92,13 @@ object ToolRegistry {
         register(RecallTool())
         register(SendMessageTool())
         register(WebSearchTool())
+        register(LocationTool())
+        register(ReadNotificationsTool())
+        register(ReadAppUsageTool())
+        register(BatteryTool())
+        register(ScreenTool())
+        register(CalculatorTool())
+        // 扫描并注册动态工具（.wsptool 描述文件）
+        com.aftglw.devapi.core.tools.ToolScanner.scan(ctx)
     }
 }
