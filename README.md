@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="AChat Logo"/>
+  <img src="docs/logo.png" width="128" alt="Wisp Logo"/>
 </p>
 <p align="center"><strong>Wisp (原AChat)</strong><br/>一个 AI 聊天应用</p>
 

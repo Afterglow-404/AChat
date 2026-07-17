@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import java.io.File
+import com.aftglw.devapi.CharacterImporter
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -117,7 +119,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     LaunchedEffect(customFont) { typography.value = if (customFont) buildCustomTypography() else Typography() }
 
     var profileName by remember { mutableStateOf(prefs.getString("profile_name", "User") ?: "User") }
-    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "个人签名: Hello AChat") ?: "个人签名: Hello AChat") }
+    var profileWechatId by remember { mutableStateOf(prefs.getString("profile_wechat_id", "个人签名: Hello Wisp") ?: "个人签名: Hello Wisp") }
     var profileAvatarUri by remember { mutableStateOf(prefs.getString("profile_avatar_uri", "") ?: "") }
 
     var mainBgUri by remember { mutableStateOf(prefs.getString("main_bg_uri", "") ?: "") }
@@ -267,7 +269,7 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
         Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
         Triple("界面设置", "通透效果、液态动效、字体、主题", SettingsPage.Appearance),
         Triple("调试", "开发用功能", SettingsPage.Debug),
-        Triple("关于", "AChat 信息", SettingsPage.About),
+        Triple("关于", "Wisp 信息", SettingsPage.About),
         Triple("MCP 服务", "管理外部 MCP Server 连接", SettingsPage.McpServers)
     )
 
@@ -353,7 +355,7 @@ private fun ProfilePage(
         }
         HorizontalDivider(Modifier.padding(start = 16.dp), color = AchatTheme.colors.divider)
         TextFieldRow("昵称", "User", profileName, onProfileNameChange)
-        TextFieldRow("个人签名", "Hello AChat", profileWechatId, onProfileWechatIdChange)
+        TextFieldRow("个人签名", "Hello Wisp", profileWechatId, onProfileWechatIdChange)
     }
 }
 
@@ -453,6 +455,37 @@ private fun ManageRolesPage(
             }
             TextButton(onClick = { importSkillLauncher.launch(arrayOf("text/*")) }, modifier = Modifier.fillMaxWidth()) {
                 Text("导入 Skill（从 ex-skill 文件）", fontSize = 13.sp, color = Color(0xFF888888))
+            }
+            Spacer(Modifier.height(4.dp))
+            // LingChat 角色 ZIP 导入
+            val importCharLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                uri?.let {
+                    try {
+                        val input = ctx.contentResolver.openInputStream(it)
+                        val tmpFile = File(ctx.cacheDir, "import_char_${System.currentTimeMillis()}.zip")
+                        input?.use { src -> tmpFile.outputStream().use { dst -> src.copyTo(dst) } }
+                        val result = CharacterImporter.importFromZip(ctx, tmpFile.absolutePath)
+                        tmpFile.delete()
+                        result.onSuccess { name ->
+                            // 自动填入人设
+                            val settings = CharacterImporter.loadSettings(ctx, name)
+                            val prompt = settings?.get("system_prompt") as? String ?: ""
+                            val aiName = settings?.get("ai_name") as? String ?: name
+                            onNewChatNameChange(aiName)
+                            if (prompt.isNotBlank()) onNewChatPersonaChange(prompt)
+                            android.widget.Toast.makeText(ctx, "角色「$aiName」导入成功！", Toast.LENGTH_LONG).show()
+                        }.onFailure { e ->
+                            android.widget.Toast.makeText(ctx, "导入失败：${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) {
+                        android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            TextButton(onClick = { importCharLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
+                Text("导入角色（从 LingChat ZIP）", fontSize = 13.sp, color = Color(0xFF07C160))
             }
             Spacer(Modifier.height(8.dp))
             Button(onClick = onCreateChat, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)), shape = CircleShape) { Text("创建角色") }
@@ -637,7 +670,7 @@ private fun DebugPage(
         val shareLog: () -> Unit = {
                 try {
                     val sb = StringBuilder()
-                    sb.appendLine("=== AChat Debug Log ===")
+                    sb.appendLine("=== Wisp Debug Log ===")
                     sb.appendLine("Time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
                     sb.appendLine("Device: ${android.os.Build.MODEL} (API ${android.os.Build.VERSION.SDK_INT})")
                     sb.appendLine()
@@ -705,7 +738,7 @@ private fun DebugPage(
                     // 写入 log 目录后分享
                     val logDir = java.io.File(ctx.cacheDir, "log")
                     logDir.mkdirs()
-                    val logFile = java.io.File(logDir, "AChat_debug_log.txt")
+                    val logFile = java.io.File(logDir, "Wisp_debug_log.txt")
                     logFile.writeText(sb.toString())
                     val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                         type = "text/plain"
@@ -747,12 +780,12 @@ private fun AboutPage(onBack: () -> Unit) {
     SubPageScaffold("关于", onBack) {
         Spacer(Modifier.height(8.dp))
         Column(Modifier.fillMaxWidth().background(Color.White).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("AChat", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+            Text("Wisp", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
             Spacer(Modifier.height(4.dp))
             Text("Preview Version", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Normal)
             Text("Pre-Alpha (Dev)", fontSize = 13.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             Spacer(Modifier.height(12.dp))
-            Text("WeChat 的拙劣模仿品，你能在「AChat」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
+            Text("WeChat 的拙劣模仿品，你能在「Wisp」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
             Text("支持 OpenAI 兼容 API 对话，支持自定义对话人设。", fontSize = 12.sp, color = Color(0xFF888888))
             Spacer(Modifier.height(8.dp))
             Text("💗 爱来自 AFTGLW 与 Deepseek-Reasonix 💗", fontSize = 11.sp, color = Color(0xFFBBBBBB))
