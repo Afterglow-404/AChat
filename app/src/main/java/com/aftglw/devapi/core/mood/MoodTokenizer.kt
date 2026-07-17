@@ -18,7 +18,7 @@ object MoodTokenizer {
     private var reverseVocab: Map<Int, String> = emptyMap()
     private var isReady = false
 
-    const val MAX_LEN = 64
+    const val MAX_LEN = 72
     private const val CLS = "[CLS]"
     private const val SEP = "[SEP]"
     private const val PAD = "[PAD]"
