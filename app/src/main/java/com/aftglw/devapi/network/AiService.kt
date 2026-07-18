@@ -4,9 +4,6 @@ import com.aftglw.devapi.model.ChatMessage
 
 /**
  * 粗略估算一段文本的 token 数量。
- * 英文约 4 字符/token，CJK 约 1.5 字符/token，混合取加权。
- */
-/**
  * 粗略估算一段文本的 token 数量，会根据模型类型调整中文系数。
  *
  * 模型 tokenizer 差异：

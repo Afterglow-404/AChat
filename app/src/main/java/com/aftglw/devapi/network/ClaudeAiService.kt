@@ -34,14 +34,23 @@ class ClaudeAiService(context: Context) : AiService {
                     } else if (type == "tool_use") {
                         val name = block.getString("name")
                         val args = block.optJSONObject("input")?.toString() ?: "{}"
-                        sb.append("【tool:${name} ${args}】")
+                        if (toolCallsOut != null) {
+                            toolCallsOut.add(ToolCall(name, args, ""))
+                        } else {
+                            sb.append("【tool:${name} ${args}】")
+                        }
                     }
                 }
                 reply = sb.toString().trim()
             }
             if (reply.isNotBlank()) {
-                prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + (body.toString().length / 4)).apply()
-                prefs.edit().putInt("last_tokens_out", (reply.length / 4)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + (reply.length / 4)).apply()
+                val estIn = estimateTokenCount(systemPrompt, model) + messagesLength(body) + estimateTokenCount(userMessage, model)
+                prefs.edit()
+                    .putInt("last_tokens_in", estIn)
+                    .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
+                    .putInt("last_tokens_out", reply.length / 4)
+                    .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + reply.length / 4)
+                    .apply()
                 reply.trim()
             } else null
             }
@@ -114,7 +123,11 @@ class ClaudeAiService(context: Context) : AiService {
                                 }
                                 "content_block_stop" -> {
                                     if (toolName.isNotEmpty()) {
-                                        full.append("tool:" + toolName + " " + toolArgs.toString() + "")
+                                        if (toolCallsOut != null) {
+                                            toolCallsOut.add(ToolCall(toolName, toolArgs.toString(), ""))
+                                        } else {
+                                            full.append("【tool:" + toolName + " " + toolArgs.toString() + "】")
+                                        }
                                         toolName = ""
                                         toolArgs.setLength(0)
                                     }
@@ -155,7 +168,6 @@ class ClaudeAiService(context: Context) : AiService {
             put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
         }
 
-        // 从 SharedPreferences 读取 max_tokens（默认 4096）
         val maxTokens = prefs.getString("ai_max_tokens", null)?.toIntOrNull() ?: 4096
 
         return JSONObject().apply {
@@ -165,14 +177,12 @@ class ClaudeAiService(context: Context) : AiService {
             put("max_tokens", maxTokens)
             if (streaming) put("stream", true)
             if (tools != null) put("tools", tools)
-            // 可选生成参数
             prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
             prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
             prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
         }
     }
 
-    /** 将 ToolRegistry 中的工具转为 Claude 原生 tool_use 格式 (input_schema 蛇形命名) */
     private fun buildToolsArray(): org.json.JSONArray? {
         val allTools = com.aftglw.devapi.tools.ToolRegistry.getAll()
         if (allTools.isEmpty()) return null
@@ -187,3 +197,5 @@ class ClaudeAiService(context: Context) : AiService {
         }
     }
 }
+
+private fun messagesLength(body: JSONObject) = body.optJSONArray("messages")?.length() ?: 0 * 4

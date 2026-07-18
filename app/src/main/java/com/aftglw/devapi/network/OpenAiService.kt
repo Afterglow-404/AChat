@@ -55,7 +55,6 @@ class OpenAiService(context: Context) : AiService {
                             ))
                         }
                     } else {
-                        // 兼容：旧调用方没传收集器，回退到文本标记
                         val sb = StringBuilder(reply)
                         for (j in 0 until toolCalls.length()) {
                             val func = toolCalls.getJSONObject(j).getJSONObject("function")
@@ -75,13 +74,14 @@ class OpenAiService(context: Context) : AiService {
                         .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
                         .apply()
                 } else {
-                    val pt = body.toString().length / 4
-                    val ct = reply.length / 4
+                    val estIn = estimateTokenCount(systemPrompt, model) + messages.length() * 4 +
+                        estimateTokenCount(userMessage, model)
+                    val estOut = reply.length / 4
                     prefs.edit()
-                        .putInt("last_tokens_in", pt)
-                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
-                        .putInt("last_tokens_out", ct)
-                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
+                        .putInt("last_tokens_in", estIn)
+                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
+                        .putInt("last_tokens_out", estOut)
+                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + estOut)
                         .apply()
                 }
                 reply
@@ -125,7 +125,7 @@ class OpenAiService(context: Context) : AiService {
             var line: String?
             val full = StringBuilder()
             val toolCallAccum = mutableMapOf<Int, StringBuilder>()
-            var thinkingActive = false  // DeepSeek Thinking Mode: 是否正在输出思维链
+            var thinkingActive = false
             try {
                 while (reader.readLine().also { line = it } != null) {
                     val text = line ?: continue
@@ -159,14 +159,24 @@ class OpenAiService(context: Context) : AiService {
                 }
             } finally { reader.close(); httpResp.close() }
             if (toolCallAccum.isNotEmpty()) {
-                val sb = StringBuilder(full.toString().trim())
-                for ((_, acc) in toolCallAccum) {
-                    val parts = acc.toString().split("\n", limit = 2)
-                    val tName = parts.getOrElse(0) { "unknown" }
-                    val tArgs = parts.getOrElse(1) { "{}" }
-                    sb.append("tool:" + tName + " " + tArgs + "")
+                if (toolCallsOut != null) {
+                    for ((_, acc) in toolCallAccum) {
+                        val parts = acc.toString().split("\n", limit = 2)
+                        val tName = parts.getOrElse(0) { "unknown" }
+                        val tArgs = parts.getOrElse(1) { "{}" }
+                        toolCallsOut.add(com.aftglw.devapi.network.ToolCall(tName, tArgs, ""))
+                    }
+                    full.toString()
+                } else {
+                    val sb = StringBuilder(full.toString().trim())
+                    for ((_, acc) in toolCallAccum) {
+                        val parts = acc.toString().split("\n", limit = 2)
+                        val tName = parts.getOrElse(0) { "unknown" }
+                        val tArgs = parts.getOrElse(1) { "{}" }
+                        sb.append("【tool:" + tName + " " + tArgs + "】")
+                    }
+                    sb.toString().trim()
                 }
-                sb.toString().trim()
             } else {
                 full.toString()
             }
@@ -189,7 +199,6 @@ class OpenAiService(context: Context) : AiService {
         val thinkingMode = isDeepSeekThinking()
 
         if (thinkingMode) {
-            // DeepSeek Thinking Mode: extra_body 激活，不兼容 temperature/top_p 等采样参数
             put("extra_body", JSONObject().apply {
                 put("thinking", JSONObject().apply { put("type", "enabled") })
             })
@@ -200,7 +209,6 @@ class OpenAiService(context: Context) : AiService {
                 }
             )
         } else {
-            // 非 Thinking 模式：正常设置采样参数
             prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
             prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
             prefs.getString("ai_frequency_penalty", null)?.toFloatOrNull()?.let { put("frequency_penalty", it) }
@@ -220,7 +228,6 @@ class OpenAiService(context: Context) : AiService {
         if (tools != null) put("tools", tools)
     }
 
-    /** 将 ToolRegistry 中的工具转为 OpenAI 原生 function calling 格式 */
     private fun buildToolsArray(): org.json.JSONArray? {
         val allTools = com.aftglw.devapi.tools.ToolRegistry.getAll()
         if (allTools.isEmpty()) return null

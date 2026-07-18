@@ -9,6 +9,7 @@ import com.aftglw.devapi.tools.ToolRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 /**
  * 独立的 Agent runtime，封装多轮 tool-use 推理循环。
@@ -87,7 +88,14 @@ class Agent(
                     val tool = ToolRegistry.get(tc.name)
                     if (tool != null) {
                         onToolStart?.invoke(tc.name, tc.arguments)
-                        val args = withContext(Dispatchers.IO) { tool.parseTextArgs(tc.arguments) }
+                        // 原生 tool_call 参数是 JSON，直接解析
+                        val args = try {
+                            if (tc.arguments.trimStart().startsWith("{")) {
+                                JSONObject(tc.arguments)
+                            } else {
+                                withContext(Dispatchers.IO) { tool.parseTextArgs(tc.arguments) }
+                            }
+                        } catch (_: Exception) { org.json.JSONObject() }
                         val result = withContext(Dispatchers.IO) { tool.execute(ctx, args) }
                         results.add("【${tc.name}】$result")
                         toolCalls.add(ToolCallInfo(tc.name, tc.arguments, result))

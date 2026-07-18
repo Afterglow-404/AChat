@@ -27,7 +27,7 @@ lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel
 navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "compose-ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "compose-ui" }
-compose-runtime-livedata = { module = "androidx.compose.runtime:runtime-livedata" }
+compose-runtime-livedata = { module = "androidx.compose.runtime:runtime-livedata", version.ref = "compose-ui" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 tensorflow-lite-task-text = { module = "org.tensorflow:tensorflow-lite-task-text", version.ref = "tensorflow-lite" }
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
