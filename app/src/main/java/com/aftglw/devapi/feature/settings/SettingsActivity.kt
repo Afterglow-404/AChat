@@ -109,6 +109,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var aiResponseFormat by remember { mutableStateOf(prefs.getString("ai_response_format", "") ?: "") }
     var aiClaudeThinking by remember { mutableStateOf(prefs.getBoolean("ai_claude_thinking", false)) }
     var aiDeepSeekThinking by remember { mutableStateOf(prefs.getBoolean("ai_deepseek_thinking", false)) }
+    var aiProtocol by remember { mutableStateOf(prefs.getString("ai_protocol", "auto") ?: "auto") }
     var newChatName by remember { mutableStateOf("") }
     var newChatPersona by remember { mutableStateOf("") }
     var newChatAvatarUri by remember { mutableStateOf("") }
@@ -208,7 +209,8 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         aiStopSequences, { aiStopSequences = it; prefs.edit().putString("ai_stop_sequences", it).apply() },
                         aiResponseFormat, { aiResponseFormat = it; prefs.edit().putString("ai_response_format", it).apply() },
                         aiClaudeThinking, { aiClaudeThinking = it; prefs.edit().putBoolean("ai_claude_thinking", it).apply() },
-                        aiDeepSeekThinking, { aiDeepSeekThinking = it; prefs.edit().putBoolean("ai_deepseek_thinking", it).apply() }
+                        aiDeepSeekThinking, { aiDeepSeekThinking = it; prefs.edit().putBoolean("ai_deepseek_thinking", it).apply() },
+                        aiProtocol, { aiProtocol = it; prefs.edit().putString("ai_protocol", it).apply() }
                     )
                     is SettingsPage.ManageRoles -> ManageRolesPage(
                         onBack = goBack,
