@@ -22,7 +22,7 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.aftglw.devapi.network.AiServiceFactory
 import com.aftglw.devapi.feature.chat.ChatScreen
 import com.aftglw.devapi.feature.chat.ChatsScreen
-import com.aftglw.devapi.feature.discover.DiscoverScreen
+import com.aftglw.devapi.ui.screens.DiscoverScreen
 import com.aftglw.devapi.feature.profile.MeScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -148,7 +148,7 @@ fun WeChatApp() {
                     }
                 )
             },
-            discoverScreen = { DiscoverScreen() },
+            discoverScreen = { DiscoverScreen(emptyList(), onSubPageChange = { hideNavBar = it }) },
             meScreen = { MeScreen() },
             chatScreen = { page ->
                 ChatScreen(

@@ -1,6 +1,5 @@
 package com.aftglw.devapi.feature.settings
 import com.aftglw.devapi.DebugOverlayService
-import com.aftglw.devapi.feature.discover.WeChatScreenWithData
 import com.aftglw.devapi.feature.tools.ToolMarketPage
 
 import android.content.Intent
@@ -63,7 +62,6 @@ private sealed class SettingsPage {
     data object Appearance : SettingsPage()
     data object Debug : SettingsPage()
     data object About : SettingsPage()
-    data object WCPreview : SettingsPage()
     data object McpServers : SettingsPage()
     data object ToolMarket : SettingsPage()
 }
@@ -242,8 +240,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         customFont, { customFont = it; prefs.edit().putBoolean("custom_font", it).apply() },
                         showTimestamps, { showTimestamps = it; prefs.edit().putBoolean("show_timestamps", it).apply() },
                         hitokotoType, { hitokotoType = it; prefs.edit().putString("hitokoto_type", it).apply() },
-                        currentThemeId, { currentThemeId = it; prefs.edit().putString("current_theme", it).apply() },
-                        onNavToWC = { nav(SettingsPage.WCPreview) }
+                        currentThemeId, { currentThemeId = it; prefs.edit().putString("current_theme", it).apply() }
                     )
                     is SettingsPage.Debug -> DebugPage(
                         onBack = goBack,
@@ -263,7 +260,6 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         openBookMode, { openBookMode = it; prefs.edit().putBoolean("open_book_mode", it).apply() }
                     )
                     is SettingsPage.About -> AboutPage(onBack = goBack)
-                    is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
                     is SettingsPage.McpServers -> McpServersPage(onBack = goBack)
                     is SettingsPage.ToolMarket -> ToolMarketPage(onBack = goBack)
                 }
