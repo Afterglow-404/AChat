@@ -35,7 +35,9 @@ fun estimateTokenCount(text: String, modelHint: String = ""): Int {
 interface AiService {
     fun sendMessage(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String = "",
-        onError: ((String) -> Unit)? = null
+        onError: ((String) -> Unit)? = null,
+        /** 输出参数：原生 tool_calls 收集器（为 null 时兼容旧调用方） */
+        toolCallsOut: MutableList<ToolCall>? = null
     ): String?
 
     /**
@@ -48,10 +50,18 @@ interface AiService {
         systemPrompt: String = "",
         onChunk: (String) -> Unit,
         onDone: (String) -> Unit,
-        onError: ((String) -> Unit)? = null
+        onError: ((String) -> Unit)? = null,
+        toolCallsOut: MutableList<ToolCall>? = null
     ) {
-        val reply = sendMessage(history, userMessage, systemPrompt) ?: ""
+        val reply = sendMessage(history, userMessage, systemPrompt, onError, toolCallsOut) ?: ""
         if (reply.isNotEmpty()) onChunk(reply)
         onDone(reply)
     }
 }
+
+/** 原生 tool_call 结构（与 Agent.regex 解耦） */
+data class ToolCall(
+    val name: String,
+    val arguments: String,
+    val id: String = "",
+)

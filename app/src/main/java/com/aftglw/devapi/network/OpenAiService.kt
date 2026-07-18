@@ -17,7 +17,7 @@ class OpenAiService(context: Context) : AiService {
     private fun isDeepSeekThinking(): Boolean =
         isDeepSeek() && prefs.getBoolean("ai_deepseek_thinking", false)
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?): String? {
+    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
@@ -43,12 +43,26 @@ class OpenAiService(context: Context) : AiService {
                 var reply = msgObj.optString("content", "").trim()
                 val toolCalls = msgObj.optJSONArray("tool_calls")
                 if (toolCalls != null && toolCalls.length() > 0) {
-                    val sb = StringBuilder(reply)
-                    for (j in 0 until toolCalls.length()) {
-                        val func = toolCalls.getJSONObject(j).getJSONObject("function")
-                        sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
+                    if (toolCallsOut != null) {
+                        for (j in 0 until toolCalls.length()) {
+                            val tc = toolCalls.getJSONObject(j)
+                            val func = tc.getJSONObject("function")
+                            val id = tc.optString("id", "")
+                            toolCallsOut.add(com.aftglw.devapi.network.ToolCall(
+                                name = func.getString("name"),
+                                arguments = func.optString("arguments", "{}"),
+                                id = id
+                            ))
+                        }
+                    } else {
+                        // 兼容：旧调用方没传收集器，回退到文本标记
+                        val sb = StringBuilder(reply)
+                        for (j in 0 until toolCalls.length()) {
+                            val func = toolCalls.getJSONObject(j).getJSONObject("function")
+                            sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
+                        }
+                        reply = sb.toString().trim()
                     }
-                    reply = sb.toString().trim()
                 }
                 val usage = json.optJSONObject("usage")
                 if (usage != null) {
@@ -84,8 +98,9 @@ class OpenAiService(context: Context) : AiService {
         userMessage: String,
         systemPrompt: String,
         onChunk: (String) -> Unit,
-        onDone: (String) -> Unit,
-        onError: ((String) -> Unit)?
+        onDone: (String) -> Unit,
+        onError: ((String) -> Unit)?,
+        toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ) {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""

@@ -26,6 +26,9 @@ object ToolRegistry {
     /** 获取所有已注册工具 */
     fun getAll(): List<AiTool> = tools.values.toList()
 
+    /** 测试用：清空所有注册的工具 */
+    fun resetForTest() { tools.clear() }
+
     /** 输出 MCP tools/list 格式的 JSON 数组 */
     fun listToolsJson(): JSONArray = JSONArray().apply {
         for (tool in tools.values) {

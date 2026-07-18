@@ -65,4 +65,10 @@ object AiServiceFactory {
         localService?.unload()
         localService = null
     }
+
+    /** 测试用：重置所有缓存状态 */
+    fun resetForTest() {
+        cachedService = null; cachedConfigHash = 0
+        unloadLocal()
+    }
 }

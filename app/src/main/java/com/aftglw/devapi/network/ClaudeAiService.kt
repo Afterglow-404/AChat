@@ -9,7 +9,7 @@ class ClaudeAiService(context: Context) : AiService {
 
     private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?): String? {
+    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
@@ -53,8 +53,9 @@ class ClaudeAiService(context: Context) : AiService {
 
     override fun sendMessageStream(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String,
-        onChunk: (String) -> Unit, onDone: (String) -> Unit,
-        onError: ((String) -> Unit)?
+        onChunk: (String) -> Unit, onDone: (String) -> Unit,
+        onError: ((String) -> Unit)?,
+        toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ) {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""

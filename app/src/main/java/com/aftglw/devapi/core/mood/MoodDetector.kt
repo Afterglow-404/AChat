@@ -20,6 +20,12 @@ object MoodDetector {
     var feedCount = 0
     private var currentChatName = ""
 
+    /** 测试/重置用：清除所有状态 */
+    fun resetForTest() {
+        lastMood = null; lastHint = null; lastSource = "none"
+        feedCount = 0; currentChatName = ""
+    }
+
     private val apiLabels = listOf(
         "开心", "悲伤", "愤怒", "害怕",
         "惊讶", "厌恶", "中性"
