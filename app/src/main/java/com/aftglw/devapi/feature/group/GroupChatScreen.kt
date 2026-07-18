@@ -134,6 +134,9 @@ fun GroupChatScreen(
                     }
                 } catch (e: Exception) {
                     android.util.Log.w("GroupChat", "Member $name reply failed", e)
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(ctx, "$name 回复失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                     return null
                 } finally {
                     typingMember = null

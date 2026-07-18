@@ -114,7 +114,8 @@ fun ChatsScreenContent(
             shape = CircleShape,
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 90.dp)) {
+        Box(Modifier.weight(1f)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 80.dp)) {
             // 群聊条目
             itemsIndexed(groups, key = { _, g -> "group_${g.id}" }) { index, g ->
                 var menuExpanded by remember { mutableStateOf(false) }
@@ -239,17 +240,14 @@ fun ChatsScreenContent(
             }
         }
 
-        // 创建群聊按钮
-        Box(Modifier.fillMaxWidth().padding(16.dp)) {
-            OutlinedButton(
+            // FAB 创建群聊
+            FloatingActionButton(
                 onClick = { showCreateGroup = true },
-                modifier = Modifier.fillMaxWidth().height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AchatTheme.colors.primary.copy(alpha = 0.5f))
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                    .size(52.dp),
+                containerColor = AchatTheme.colors.primary
             ) {
-                Icon(Icons.Filled.Add, null, Modifier.size(16.dp), tint = AchatTheme.colors.primary)
-                Spacer(Modifier.width(6.dp))
-                Text("创建群聊", color = AchatTheme.colors.primary, fontWeight = FontWeight.Medium)
+                Icon(Icons.Filled.Add, "创建群聊", tint = Color.White, modifier = Modifier.size(24.dp))
             }
         }
     }
@@ -316,19 +314,30 @@ private fun CreateGroupDialog(
                 if (members.isEmpty()) {
                     Text("暂无可用角色，请先在设置中添加对话。", fontSize = 13.sp, color = Color.Gray)
                 } else {
-                    members.forEach { (name, _) ->
+                    members.forEach { (name, persona) ->
                         val isSel = name in selected
-                        Row(
+                        Column(
                             Modifier.fillMaxWidth().clickable {
                                 selected = if (isSel) selected - name else selected + name
-                            }.padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            }.padding(vertical = 4.dp)
                         ) {
-                            Checkbox(checked = isSel, onCheckedChange = {
-                                selected = if (it) selected + name else selected - name
-                            })
-                            Spacer(Modifier.width(8.dp))
-                            Text(name, fontSize = 14.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isSel, onCheckedChange = {
+                                    selected = if (it) selected + name else selected - name
+                                })
+                                Spacer(Modifier.width(8.dp))
+                                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            }
+                            if (persona.isNotBlank()) {
+                                Text(
+                                    persona.take(40) + if (persona.length > 40) "…" else "",
+                                    fontSize = 11.sp,
+                                    color = AchatTheme.colors.onSurface.copy(alpha = 0.4f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(start = 44.dp)
+                                )
+                            }
                         }
                     }
                 }
