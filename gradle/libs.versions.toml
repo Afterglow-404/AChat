@@ -1,0 +1,41 @@
+[versions]
+agp = "9.2.1"
+kotlin = "2.4.0"
+compose-multiplatform = "1.11.1"
+compose-ui = "1.11.1"
+activity-compose = "1.13.0"
+lifecycle = "2.10.0"
+navigation = "2.9.8"
+material = "1.14.0"
+coil = "2.7.0"
+onnx = "1.20.0"
+tensorflow-lite = "0.4.4"
+work = "2.10.0"
+snakeyaml = "2.3"
+junit = "4.13.2"
+mockk = "1.13.12"
+backdrop = "2.0.0"
+shapes = "1.2.0"
+
+[libraries]
+backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+shapes = { module = "io.github.kyant0:shapes", version.ref = "shapes" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnx" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "compose-ui" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "compose-ui" }
+compose-runtime-livedata = { module = "androidx.compose.runtime:runtime-livedata" }
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+tensorflow-lite-task-text = { module = "org.tensorflow:tensorflow-lite-task-text", version.ref = "tensorflow-lite" }
+work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+junit = { module = "junit:junit", version.ref = "junit" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }

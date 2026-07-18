@@ -1,7 +1,7 @@
 plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.plugin.compose'
-    id 'org.jetbrains.compose'
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.compose)
 }
 
 android {
@@ -36,26 +36,28 @@ android {
 }
 
 dependencies {
-    // JetBrains Compose Multiplatform 1.11.1
+    // JetBrains Compose Multiplatform
     implementation(compose.foundation)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(compose.ui)
-    implementation "androidx.compose.ui:ui-tooling-preview:1.11.1"
-    debugImplementation "androidx.compose.ui:ui-tooling:1.11.1"
+    implementation libs.compose.ui.tooling.preview
+    debugImplementation libs.compose.ui.tooling
 
-    // LiquidGlass backdrop library
-    implementation("io.github.kyant0:backdrop:2.0.0")
-    implementation("io.github.kyant0:shapes:1.2.0")
+    // LiquidGlass
+    implementation libs.backdrop
+    implementation libs.shapes
 
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
-    implementation 'com.google.android.material:material:1.14.0'
-    implementation 'androidx.activity:activity-compose:1.13.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
-    implementation 'androidx.navigation:navigation-compose:2.9.8'
-    implementation 'androidx.compose.runtime:runtime-livedata'
-    implementation 'io.coil-kt:coil-compose:2.7.0'
-    implementation 'org.tensorflow:tensorflow-lite-task-text:0.4.4'
-    implementation 'androidx.work:work-runtime-ktx:2.10.0'
-    implementation 'org.yaml:snakeyaml:2.3'
+    implementation libs.onnxruntime.android
+    implementation libs.material
+    implementation libs.activity.compose
+    implementation libs.lifecycle.viewmodel.compose
+    implementation libs.navigation.compose
+    implementation libs.compose.runtime.livedata
+    implementation libs.coil.compose
+    implementation libs.tensorflow.lite.task.text
+    implementation libs.work.runtime.ktx
+    implementation libs.snakeyaml
+    testImplementation libs.junit
+    testImplementation libs.mockk
 }

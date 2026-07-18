@@ -167,8 +167,7 @@ object GroupChatManager {
         }
     }
 
-    private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
-    fun now(): String = timeFmt.format(Date())
+    fun now(): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(Date())
 }
 
 /**

@@ -61,8 +61,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-private fun now() = timeFormat.format(java.util.Date())
+private fun now() = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
 
 data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null)
 
