@@ -32,6 +32,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.aftglw.devapi.feature.group.GroupChatScreen
+import com.aftglw.devapi.feature.group.GroupChatManager
+import com.aftglw.devapi.model.GroupChat
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.theme.*
 
@@ -48,6 +51,7 @@ private val tabTitles = listOf("对话", "发现", "我的")
 private sealed class AppPage {
     data object Tabs : AppPage()
     data class Chat(val name: String, val persona: String, val avatarUri: String, val id: String = "") : AppPage()
+    data class GroupChat(val group: com.aftglw.devapi.model.GroupChat) : AppPage()
 }
 
 @Composable
@@ -135,11 +139,16 @@ fun WeChatApp() {
             onTabSelected = { selectedTab = it },
             backdrop = backdrop,
             chatsScreen = {
-                ChatsScreen(onChatClick = { name, persona, avatarUri, id ->
-                    currentPage = AppPage.Chat(name, persona, avatarUri, id)
-                })
+                ChatsScreen(
+                    onChatClick = { name, persona, avatarUri, id ->
+                        currentPage = AppPage.Chat(name, persona, avatarUri, id)
+                    },
+                    onGroupClick = { group ->
+                        currentPage = AppPage.GroupChat(group)
+                    }
+                )
             },
-            discoverScreen = { DiscoverScreen(onSubPageChange = { hideNavBar = it }) },
+            discoverScreen = { DiscoverScreen() },
             meScreen = { MeScreen() },
             chatScreen = { page ->
                 ChatScreen(
@@ -148,6 +157,11 @@ fun WeChatApp() {
                     avatarUri = page.avatarUri,
                     id = page.id,
                     showTimestamps = showTimestamps,
+                    onBack = { currentPage = AppPage.Tabs })
+            },
+            groupChatScreen = { page ->
+                GroupChatScreen(
+                    group = page.group,
                     onBack = { currentPage = AppPage.Tabs })
             }
         )
@@ -168,7 +182,8 @@ private fun WeChatAppContent(
     chatsScreen: @Composable () -> Unit,
     discoverScreen: @Composable () -> Unit,
     meScreen: @Composable () -> Unit,
-    chatScreen: @Composable (AppPage.Chat) -> Unit
+    chatScreen: @Composable (AppPage.Chat) -> Unit,
+    groupChatScreen: @Composable (AppPage.GroupChat) -> Unit
 ) {
     val themeTypography = Typography(
         headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontFamily = AchatTheme.typography.title),
@@ -254,9 +269,8 @@ private fun WeChatAppContent(
                                 }
                             }
                         }
-                        is AppPage.Chat -> {
-                            chatScreen(page)
-                        }
+                        is AppPage.Chat -> chatScreen(page)
+                        is AppPage.GroupChat -> groupChatScreen(page)
                     }
                 }
             }
@@ -300,6 +314,7 @@ fun WeChatAppPreview() {
         chatsScreen = { Text("Chats List Placeholder", Modifier.padding(16.dp)) },
         discoverScreen = { Text("Discover Placeholder", Modifier.padding(16.dp)) },
         meScreen = { Text("Me Placeholder", Modifier.padding(16.dp)) },
-        chatScreen = { Text("Chat with ${it.name}", Modifier.padding(16.dp)) }
+        chatScreen = { Text("Chat with ${it.name}", Modifier.padding(16.dp)) },
+        groupChatScreen = { Text("Group: ${it.group.name}", Modifier.padding(16.dp)) }
     )
 }

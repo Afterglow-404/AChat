@@ -17,18 +17,23 @@ object HttpRetry {
     private const val MAX_RETRIES = 3
     private const val INITIAL_DELAY_MS = 1000L
 
+    /** 从 [checkResponse] 抛出的异常消息中提取 HTTP 状态码 */
+    private val HTTP_STATUS_REGEX = Regex("^HTTP (\\d+)")
+
     /** 判断一个异常是否值得重试 */
     private fun isRetryable(e: Exception): Boolean {
         // 网络层异常
         if (e is ConnectException || e is SocketException || e is SocketTimeoutException) return true
-        if (e is IOException) return true
-
-        // HTTP 状态码检查（通过 HttpURLConnection 传入的异常消息解析，或直接传入状态码）
-        val msg = e.message ?: ""
-        when {
-            msg.contains("HTTP 429") || msg.contains("429") -> return true
-            msg.contains("HTTP 5") || msg.contains("HTTP 50") -> return true
-            msg.contains("502") || msg.contains("503") || msg.contains("504") -> return true
+        if (e is IOException) {
+            val msg = e.message ?: ""
+            // checkResponse() 格式: "HTTP <code> - ..."
+            val code = HTTP_STATUS_REGEX.find(msg)?.groupValues?.get(1)?.toIntOrNull()
+            if (code != null) {
+                // 429 限流 或 5xx 服务端错误 → 可重试
+                return code == 429 || code in 500..599
+            }
+            // 没有状态码的 IOException（纯网络问题）→ 可重试
+            return true
         }
         return false
     }

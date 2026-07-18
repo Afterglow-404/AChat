@@ -52,7 +52,8 @@ fun AiApiPage(
     aiPresencePenalty: String, onAiPresencePenaltyChange: (String) -> Unit,
     aiStopSequences: String, onAiStopSequencesChange: (String) -> Unit,
     aiResponseFormat: String, onAiResponseFormatChange: (String) -> Unit,
-    aiClaudeThinking: Boolean, onAiClaudeThinkingChange: (Boolean) -> Unit
+    aiClaudeThinking: Boolean, onAiClaudeThinkingChange: (Boolean) -> Unit,
+    aiDeepSeekThinking: Boolean, onAiDeepSeekThinkingChange: (Boolean) -> Unit
 ) {
     SubPageScaffold("AI 接口", onBack) {
         Spacer(Modifier.height(8.dp))
@@ -73,6 +74,7 @@ fun AiApiPage(
         Spacer(Modifier.height(8.dp))
         SettingsMainHeader("特殊功能")
         ToggleRow("Claude Extended Thinking", "仅 Claude 模型, 开启后温度/采样会忽略", aiClaudeThinking, onAiClaudeThinkingChange)
+        ToggleRow("DeepSeek Thinking", "DeepSeek V4 推理模式, 开启后温度/采样会忽略", aiDeepSeekThinking, onAiDeepSeekThinkingChange)
         ToggleRow("长上下文模式", "DeepSeek/GPT 等长上下文模型无需重注入提示，关闭可节省小模型 tokens", longContext, onLongContextChange)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SettingsMainHeader("离线回复（未接入 API 时生效）")

@@ -9,6 +9,14 @@ class OpenAiService(context: Context) : AiService {
 
     private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
 
+    /** 检测当前配置是否指向 DeepSeek API */
+    private fun isDeepSeek(): Boolean =
+        prefs.getString("ai_api_url", "")?.contains("deepseek", ignoreCase = true) == true
+
+    /** 是否启用 DeepSeek Thinking Mode */
+    private fun isDeepSeekThinking(): Boolean =
+        isDeepSeek() && prefs.getBoolean("ai_deepseek_thinking", false)
+
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = prefs.getString("ai_api_key", "") ?: ""
@@ -28,6 +36,10 @@ class OpenAiService(context: Context) : AiService {
             val choices = json.getJSONArray("choices")
             if (choices.length() > 0) {
                 val msgObj = choices.getJSONObject(0).getJSONObject("message")
+                val reasoningContent = msgObj.optString("reasoning_content", "")
+                if (reasoningContent.isNotEmpty()) {
+                    android.util.Log.d("OpenAi", "DeepSeek reasoning (${reasoningContent.length} chars)")
+                }
                 var reply = msgObj.optString("content", "").trim()
                 val toolCalls = msgObj.optJSONArray("tool_calls")
                 if (toolCalls != null && toolCalls.length() > 0) {
@@ -40,11 +52,23 @@ class OpenAiService(context: Context) : AiService {
                 }
                 val usage = json.optJSONObject("usage")
                 if (usage != null) {
-                    prefs.edit().putInt("last_tokens_in", usage.optInt("prompt_tokens", 0)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + usage.optInt("prompt_tokens", 0)).apply()
-                    prefs.edit().putInt("last_tokens_out", usage.optInt("completion_tokens", 0)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + usage.optInt("completion_tokens", 0)).apply()
+                    val pt = usage.optInt("prompt_tokens", 0)
+                    val ct = usage.optInt("completion_tokens", 0)
+                    prefs.edit()
+                        .putInt("last_tokens_in", pt)
+                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
+                        .putInt("last_tokens_out", ct)
+                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
+                        .apply()
                 } else {
-                    prefs.edit().putInt("last_tokens_in", (body.toString().length / 4)).putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + (body.toString().length / 4)).apply()
-                    prefs.edit().putInt("last_tokens_out", (reply.length / 4)).putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + (reply.length / 4)).apply()
+                    val pt = body.toString().length / 4
+                    val ct = reply.length / 4
+                    prefs.edit()
+                        .putInt("last_tokens_in", pt)
+                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
+                        .putInt("last_tokens_out", ct)
+                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
+                        .apply()
                 }
                 reply
             } else null
@@ -86,6 +110,7 @@ class OpenAiService(context: Context) : AiService {
             var line: String?
             val full = StringBuilder()
             val toolCallAccum = mutableMapOf<Int, StringBuilder>()
+            var thinkingActive = false  // DeepSeek Thinking Mode: 是否正在输出思维链
             try {
                 while (reader.readLine().also { line = it } != null) {
                     val text = line ?: continue
@@ -96,6 +121,11 @@ class OpenAiService(context: Context) : AiService {
                         val choices = JSONObject(data).optJSONArray("choices")
                         val delta = choices?.optJSONObject(0)?.optJSONObject("delta") ?: continue
                         val content = delta.optString("content", "")
+                        val rContent = delta.optString("reasoning_content", "")
+                        if (rContent.isNotEmpty() && !thinkingActive) {
+                            thinkingActive = true
+                            android.util.Log.d("OpenAi", "DeepSeek thinking started")
+                        }
                         if (content.isNotEmpty()) { full.append(content); onChunk(content) }
                         val tcArray = delta.optJSONArray("tool_calls")
                         if (tcArray != null) {
@@ -140,13 +170,30 @@ class OpenAiService(context: Context) : AiService {
         put("model", model)
         put("messages", messages)
         put("stream", streaming)
-        // 从 SharedPreferences 读取可选生成参数（UI 设置后可动态生效）
-        prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
-        prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
+
+        val thinkingMode = isDeepSeekThinking()
+
+        if (thinkingMode) {
+            // DeepSeek Thinking Mode: extra_body 激活，不兼容 temperature/top_p 等采样参数
+            put("extra_body", JSONObject().apply {
+                put("thinking", JSONObject().apply { put("type", "enabled") })
+            })
+            put("reasoning_effort",
+                when (prefs.getString("ai_deepseek_reasoning_effort", "high")) {
+                    "max" -> "max"
+                    else -> "high"
+                }
+            )
+        } else {
+            // 非 Thinking 模式：正常设置采样参数
+            prefs.getString("ai_temperature", null)?.toFloatOrNull()?.let { put("temperature", it) }
+            prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
+            prefs.getString("ai_frequency_penalty", null)?.toFloatOrNull()?.let { put("frequency_penalty", it) }
+            prefs.getString("ai_presence_penalty", null)?.toFloatOrNull()?.let { put("presence_penalty", it) }
+        }
+
         prefs.getString("ai_max_tokens", null)?.toIntOrNull()?.let { put("max_completion_tokens", it) }
         prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
-        prefs.getString("ai_frequency_penalty", null)?.toFloatOrNull()?.let { put("frequency_penalty", it) }
-        prefs.getString("ai_presence_penalty", null)?.toFloatOrNull()?.let { put("presence_penalty", it) }
         prefs.getString("ai_stop_sequences", null)?.takeIf { it.isNotBlank() }
             ?.split(",")
             ?.map { it.trim() }

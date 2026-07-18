@@ -75,17 +75,8 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
-import com.aftglw.devapi.LingChatScript
-import com.aftglw.devapi.ui.screens.ScriptPage
-import com.aftglw.devapi.ui.screens.ScriptBrowserPage
-import com.aftglw.devapi.feature.script.LingChatScript
-import com.aftglw.devapi.feature.script.ScriptPage
-import com.aftglw.devapi.feature.script.ScriptBrowserPage
-import com.aftglw.devapi.feature.script.ScriptManagerPage
-import com.aftglw.devapi.feature.script.ScriptLoader
-import com.aftglw.devapi.feature.script.ScriptProgress
-import com.aftglw.devapi.ui.screens.ScriptManagerPage
-fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit = {}) {
+@Composable
+fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Boolean) -> Unit = {}) {
     val ctx = LocalContext.current
     var hitokoto by remember { mutableStateOf("") }
     var from by remember { mutableStateOf("") }
@@ -100,17 +91,6 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
     val todoBackdrop = rememberLayerBackdrop(onDraw = { drawRect(Color.Transparent); drawContent() })
 
     var showChallenge by remember { mutableStateOf(false) }
-    var showScript by remember { mutableStateOf(false) }
-    var showScriptBrowser by remember { mutableStateOf(false) }
-    var showScriptManager by remember { mutableStateOf(false) }
-    var demoScript by remember { mutableStateOf<LingChatScript?>(null) }
-    var scriptCharacterPrompt by remember { mutableStateOf("") }
-    var scriptCharacterFolder by remember { mutableStateOf("") }
-    var availableScripts by remember { mutableStateOf<List<ScriptLoader.ScriptInfo>>(emptyList()) }
-    LaunchedEffect(showScriptBrowser) {
-        if (showScriptBrowser)
-            availableScripts = ScriptLoader.loadFromAssets(ctx).filter { ScriptProgress.isScriptUnlocked(ctx, it.unlockConditions) }
-    }
     var challengeText by remember { mutableStateOf("") }
     var challengeDone by remember { mutableStateOf(false) }
     var challengeLoading by remember { mutableStateOf(false) }
@@ -288,13 +268,13 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
         }
     }
 
-    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder || showScript || showScriptBrowser || showScriptManager
+    val subPageOpen = showCatPage || showChallenge || showTodo || showPromptBuilder
     LaunchedEffect(subPageOpen) { onSubPageChange(subPageOpen) }
 
     LaunchedEffect(Unit) { fetchHitokoto() }
 
     AnimatedContent(
-        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else if (showScript) 6 else if (showScriptBrowser) 5 else if (showScriptManager) 7 else 0,
+        targetState = if (showCatPage) 1 else if (showChallenge) 2 else if (showTodo) 3 else if (showPromptBuilder) 4 else 0,
         transitionSpec = {
             AnimationUtils.slideHorizontal(forward = targetState > initialState)
         },
@@ -317,48 +297,17 @@ fun DiscoverScreen(items: List<DiscoverItem>, onSubPageChange: (Boolean) -> Unit
             )
             3 -> TodoPage(onBack = { showTodo = false }, cnFont = cnFont, enFont = enFont, fortuneText = fortuneText, backdrop = todoBackdrop)
             4 -> PromptBuilderPage(onBack = { showPromptBuilder = false })
-            5 -> ScriptBrowserPage(
-                scripts = availableScripts,
-                onPlay = { info ->
-                    val loaded = ScriptLoader.loadScriptFromAssets(ctx, info.id)
-                    if (loaded != null) {
-                        demoScript = loaded
-                        scriptCharacterPrompt = info.characterPrompt
-                        showScript = true
-                    } else {
-                        android.widget.Toast.makeText(ctx, "剧本加载失败", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onBack = { showScriptBrowser = false },
-                onManage = { showScriptManager = true }
-            )
-            6 -> if (demoScript != null) ScriptPage(script = demoScript!!, characterPrompt = scriptCharacterPrompt, characterFolder = scriptCharacterFolder, onBack = { showScript = false; showScriptBrowser = true })
-                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("剧本加载失败") }
-            7 -> ScriptManagerPage(
-                scripts = ScriptLoader.loadFromAssets(ctx),
-                onPlay = { info ->
-                    val loaded = ScriptLoader.loadScriptFromAssets(ctx, info.id)
-                    if (loaded != null) {
-                        demoScript = loaded
-                        scriptCharacterPrompt = info.characterPrompt
-                        showScriptManager = false
-                        showScript = true
-                    }
-                },
-                onBack = { showScriptManager = false }
-            )
             else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
                 onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
                 onTodoClick = { showTodo = true },
-                onPromptBuilderClick = { showPromptBuilder = true },
-                onScriptClick = { showScriptBrowser = true })
+                onPromptBuilderClick = { showPromptBuilder = true })
         }
     }
 }
 
 @Composable
-fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from: String = "", loading: Boolean = false, onRefresh: () -> Unit = {}, cnFont: FontFamily = FontFamily.Default, enFont: FontFamily = FontFamily.Default, onCatClick: () -> Unit = {}, onChallengeClick: () -> Unit = {}, onTodoClick: () -> Unit = {}, onPromptBuilderClick: () -> Unit = {}, onScriptClick: () -> Unit = {}) {
+fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from: String = "", loading: Boolean = false, onRefresh: () -> Unit = {}, cnFont: FontFamily = FontFamily.Default, enFont: FontFamily = FontFamily.Default, onCatClick: () -> Unit = {}, onChallengeClick: () -> Unit = {}, onTodoClick: () -> Unit = {}, onPromptBuilderClick: () -> Unit = {}) {
     val scrollState = rememberLazyListState()
     val collapseFraction by remember {
         derivedStateOf {
@@ -514,7 +463,6 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                     "4" -> onTodoClick()
                                     "5" -> {}
                                     "6" -> {}
-                                    "7" -> onScriptClick()
                                     "8" -> onPromptBuilderClick()
                                 }
                             }.padding(horizontal = 16.dp, vertical = 12.dp),
