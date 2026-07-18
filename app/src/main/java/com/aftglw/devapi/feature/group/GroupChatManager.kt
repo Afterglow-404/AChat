@@ -19,6 +19,7 @@ import java.util.Locale
  */
 object GroupChatManager {
 
+    private const val TAG = "GroupChatManager"
     private const val GROUP_PREFS = "group_chats"
     private const val GROUP_KEY = "groups"
     private const val HIST_PREFS = "group_histories"
@@ -79,11 +80,12 @@ object GroupChatManager {
     fun saveGroup(ctx: Context, group: GroupChat) {
         val groups = loadGroups(ctx).toMutableList()
         val idx = groups.indexOfFirst { it.id == group.id }
-        if (idx >= 0) groups[idx] = group else groups.add(group)
+        if (idx >= 0) groups[idx] = group else { groups.add(group); android.util.Log.i(TAG, "Created group: id=${group.id}, name=${group.name}, members=${group.members}") }
         saveGroups(ctx, groups)
     }
 
     fun deleteGroup(ctx: Context, groupId: String) {
+        android.util.Log.i(TAG, "Deleting group: $groupId")
         val groups = loadGroups(ctx).filter { it.id != groupId }
         saveGroups(ctx, groups)
         ctx.getSharedPreferences(HIST_PREFS, Context.MODE_PRIVATE)
@@ -209,12 +211,14 @@ object NextSpeakerJudge {
         }
 
         return try {
+            val t = System.currentTimeMillis()
             val result = com.aftglw.devapi.network.AiServiceFactory.getService().sendMessage(
                 history = emptyList(),
                 userMessage = prompt,
                 systemPrompt = "你是群聊对话分析器。只回复一个成员名或 none，不多说。"
             )
             val name = result?.trim()?.take(20) ?: ""
+            android.util.Log.d("NextSpeakerJudge", "Decided: $name (${unreplied.size} unreplied, ${System.currentTimeMillis() - t}ms)")
             if (name.equals("none", ignoreCase = true)) null
             else memberNames.firstOrNull { it.equals(name, ignoreCase = true) || it.contains(name, ignoreCase = true) }
         } catch (_: Exception) { null }

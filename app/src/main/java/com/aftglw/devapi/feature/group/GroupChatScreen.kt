@@ -65,6 +65,10 @@ fun GroupChatScreen(
     var sending by remember { mutableStateOf(false) }
     /** 非空时表示某个成员正在打字（链式接话过程中显示） */
     var typingMember by remember { mutableStateOf<String?>(null) }
+    /** debug 面板开关 */
+    var showDebug by remember { mutableStateOf(false) }
+    /** 最近一次判断结果 */
+    var lastJudgeResult by remember { mutableStateOf("") }
 
     // 加载成员头像
     val memberAvatars = remember(group.members) {
@@ -85,6 +89,7 @@ fun GroupChatScreen(
     fun sendMessage(text: String) {
         if (text.isBlank() || sending) return
         sending = true
+        val t0 = System.currentTimeMillis()
 
         val userMsg = GroupChatMessage(text = text, from = "user", time = GroupChatManager.now(), isMe = true)
         messages = messages + userMsg
@@ -92,12 +97,14 @@ fun GroupChatScreen(
         inputText = ""
 
         scope.launch {
-            // 首轮：按轮次选成员回复
             val startIdx = roundRobinIndex.value % group.members.size
             val firstSpeaker = group.members[startIdx]
             val replied = mutableSetOf<String>()
             var lastSpeaker = firstSpeaker
             var lastReply: String? = null
+            var totalAutoRounds = 0
+
+            android.util.Log.d("GroupChat", "Turn start: firstSpeaker=$firstSpeaker, members=${group.members}, roundIdx=${roundRobinIndex.value}")
 
             fun history(): List<ChatMessage> = messages.map { m ->
                 val displayName = if (m.isMe) "你" else m.from
@@ -123,6 +130,8 @@ fun GroupChatScreen(
             }
 
             suspend fun callMember(name: String, userInput: String): String? {
+                val t = System.currentTimeMillis()
+                android.util.Log.d("GroupChat", "callMember: $name, inputLen=${userInput.length}, historySize=${messages.size}")
                 typingMember = name
                 try {
                     return withContext(Dispatchers.IO) {
@@ -131,9 +140,11 @@ fun GroupChatScreen(
                             userMessage = userInput,
                             systemPrompt = memberSystemPrompt(name)
                         )
+                    }.also { reply ->
+                        android.util.Log.d("GroupChat", "callMember result: $name, replyLen=${reply?.length ?: 0}, ${System.currentTimeMillis() - t}ms")
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w("GroupChat", "Member $name reply failed", e)
+                    android.util.Log.w("GroupChat", "Member $name reply failed after ${System.currentTimeMillis() - t}ms", e)
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(ctx, "$name 回复失败", android.widget.Toast.LENGTH_SHORT).show()
                     }
@@ -169,8 +180,12 @@ fun GroupChatScreen(
                             }
                         )
                     }
-                    if (next == null || next == "none" || next !in group.members) break
+                    if (next == null || next == "none" || next !in group.members) { lastJudgeResult = "none"; break }
                     autoRounds++
+                    totalAutoRounds++
+                    lastJudgeResult = next
+
+                    android.util.Log.d("GroupChat", "decideNextSpeaker: auto round=$totalAutoRounds, next=$next, replied=${replied.toList()}")
 
                     // 构建适合该成员的 userMessage（基于最近对话）
                     val contextPrompt = "${group.members.joinToString("、")}正在群聊中交谈。话题是最近的消息。轮到 $next 发言了。请自然接话。"
@@ -194,9 +209,10 @@ fun GroupChatScreen(
                     else "${lastMsg.from}: ${lastMsg.text.take(30)}"
                 GroupChatManager.saveGroup(ctx, group.copy(lastMessage = summary, time = lastMsg.time))
             }
-            // 轮次指针推进
             roundRobinIndex.value = (roundRobinIndex.value + 1) % group.members.size
             sending = false
+            val total = System.currentTimeMillis() - t0
+            android.util.Log.d("GroupChat", "Turn done: replied=${replied.toList()}, autoRounds=$totalAutoRounds, ${total}ms")
         }
     }
 
@@ -223,12 +239,36 @@ fun GroupChatScreen(
                         fontWeight = FontWeight.Bold,
                         color = AchatTheme.colors.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable { showDebug = !showDebug }
                     )
                     Text(
                         "${group.members.size} 人",
                         fontSize = 12.sp,
                         color = AchatTheme.colors.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        }
+
+        // debug 面板（点击群名切换）
+        AnimatedVisibility(visible = showDebug) {
+            Surface(
+                Modifier.fillMaxWidth(),
+                color = AchatTheme.colors.surface.copy(alpha = 0.95f),
+                shadowElevation = 1.dp
+            ) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(
+                        buildString {
+                            append("🔧 round=${roundRobinIndex.value} next=${group.members.getOrNull(roundRobinIndex.value % group.members.size) ?: "?"}")
+                            append(" | judge=$lastJudgeResult")
+                            append(" | msgs=${messages.size}")
+                            append(" | members=${group.members.joinToString(",")}")
+                        },
+                        fontSize = 10.sp,
+                        color = AchatTheme.colors.onSurface.copy(alpha = 0.6f),
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                     )
                 }
             }
