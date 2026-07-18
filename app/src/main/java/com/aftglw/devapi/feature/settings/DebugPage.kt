@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.ui.theme.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DebugPage(
@@ -65,6 +67,106 @@ fun DebugPage(
         Spacer(Modifier.height(8.dp))
         ToggleRow("好感度系统", "AI 语气随相处变化(待完善)", affinityEnabled, onAffinityEnabledChange)
         ToggleRow("本地模式", "用本地 Qwen 模型处理对话（需提前放置模型文件）", localMode, onLocalModeChange)
+        Spacer(Modifier.height(8.dp))
+        // 语音 TTS 设置
+        var ttsEnabled by remember { mutableStateOf(sysPrefs.getBoolean("tts_enabled", false)) }
+        ToggleRow("AI 语音朗读", "在 AI 回复气泡显示朗读按钮", ttsEnabled) { v ->
+            ttsEnabled = v; sysPrefs.edit().putBoolean("tts_enabled", v).apply()
+        }
+        if (ttsEnabled) {
+            // 语速
+            var ttsRate by remember { mutableStateOf(sysPrefs.getFloat("tts_rate", 1.0f)) }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("语速", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                Slider(
+                    value = ttsRate,
+                    onValueChange = { ttsRate = it; sysPrefs.edit().putFloat("tts_rate", it).apply() },
+                    valueRange = 0.5f..2.0f,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("${"%.1f".format(ttsRate)}x", fontSize = 13.sp, color = Color(0xFF1A1A1A), modifier = Modifier.width(36.dp))
+            }
+            // 音调
+            var ttsPitch by remember { mutableStateOf(sysPrefs.getFloat("tts_pitch", 1.0f)) }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("音调", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                Slider(
+                    value = ttsPitch,
+                    onValueChange = { ttsPitch = it; sysPrefs.edit().putFloat("tts_pitch", it).apply() },
+                    valueRange = 0.5f..2.0f,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("${"%.1f".format(ttsPitch)}", fontSize = 13.sp, color = Color(0xFF1A1A1A), modifier = Modifier.width(36.dp))
+            }
+            // 引擎选择（本地 / 云端）
+            var ttsEngine by remember { mutableStateOf(sysPrefs.getString("tts_engine", "local") ?: "local") }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("引擎", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                val engineOptions = listOf("local" to "本地", "cloud" to "云端")
+                val engineExpanded = remember { mutableStateOf(false) }
+                Box(modifier = Modifier.weight(1f)) {
+                    val engineLabel = engineOptions.find { it.first == ttsEngine }?.second ?: "本地"
+                    Text(engineLabel, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { engineExpanded.value = true })
+                    DropdownMenu(expanded = engineExpanded.value, onDismissRequest = { engineExpanded.value = false }) {
+                        engineOptions.forEach { (k, v) ->
+                            DropdownMenuItem(text = { Text(v, fontSize = 13.sp) }, onClick = { ttsEngine = k; sysPrefs.edit().putString("tts_engine", k).apply(); engineExpanded.value = false })
+                        }
+                    }
+                }
+            }
+            // 云端配置
+            if (ttsEngine == "cloud") {
+                // 音色选择
+                var ttsVoice by remember { mutableStateOf(sysPrefs.getString("tts_voice", "alloy") ?: "alloy") }
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("音色", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                    val voiceExpanded = remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.weight(1f)) {
+                        Text(ttsVoice, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { voiceExpanded.value = true })
+                        DropdownMenu(expanded = voiceExpanded.value, onDismissRequest = { voiceExpanded.value = false }) {
+                            com.aftglw.devapi.core.voice.CloudTtsService.AVAILABLE_VOICES.forEach { v ->
+                                DropdownMenuItem(text = { Text(v, fontSize = 13.sp) }, onClick = { ttsVoice = v; sysPrefs.edit().putString("tts_voice", v).apply(); voiceExpanded.value = false })
+                            }
+                        }
+                    }
+                }
+                TextFieldRow("TTS 端点", "留空则用 AI API URL + /v1/audio/speech", sysPrefs.getString("tts_cloud_url", "") ?: "") { v -> sysPrefs.edit().putString("tts_cloud_url", v).apply() }
+                PasswordRow("TTS Key", "留空则复用 AI API Key", sysPrefs.getString("tts_cloud_key", "") ?: "") { v -> sysPrefs.edit().putString("tts_cloud_key", v).apply() }
+                TextFieldRow("TTS 模型", "默认 tts-1", sysPrefs.getString("tts_cloud_model", "tts-1") ?: "tts-1") { v -> sysPrefs.edit().putString("tts_cloud_model", v).apply() }
+            }
+            // 试听按钮
+            val previewScope = rememberCoroutineScope()
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp)) {
+                TextButton(onClick = {
+                    val engine = sysPrefs.getString("tts_engine", "local") ?: "local"
+                    val sentence = "你好呀，我是你的 AI 伙伴。"
+                    if (engine == "cloud") {
+                        val voice = sysPrefs.getString("tts_voice", "alloy") ?: "alloy"
+                        val svc = com.aftglw.devapi.core.voice.CloudTtsService(ctx)
+                        previewScope.launch {
+                            try {
+                                val path = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    svc.synthesize(sentence, voice)
+                                }
+                                com.aftglw.devapi.core.voice.VoicePlayer(ctx).play(path)
+                            } catch (e: Exception) {
+                                Toast.makeText(ctx, "云端 TTS 失败: ${e.message?.take(60)}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } else {
+                        val tts = com.aftglw.devapi.core.voice.VoiceTts(ctx)
+                        if (tts.initSync(2000)) {
+                            tts.updateParams(rate = ttsRate, pitch = ttsPitch)
+                            tts.speak(sentence, "tts_test",
+                                onDone = { tts.shutdown() })
+                        } else {
+                            Toast.makeText(ctx, "TTS 引擎不可用", Toast.LENGTH_SHORT).show()
+                            tts.shutdown()
+                        }
+                    }
+                }) { Text("试听", color = Color(0xFF07C160)) }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             val dbPrefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
