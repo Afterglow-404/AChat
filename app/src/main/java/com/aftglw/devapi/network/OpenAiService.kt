@@ -258,8 +258,10 @@ class OpenAiService(context: Context) : AiService {
         var tokCount = estimateTokenCount(systemPrompt, modelHint) + estimateTokenCount(userMessage, modelHint) + 10
         for (msg in history.reversed()) {
             val t = estimateTokenCount(msg.content, modelHint) + 4
-            if (tokCount + t > maxTokens) break
-            tokCount += t
+            // 图片消息额外估算 token：每张图按 256 计（OpenAI 视觉约 85-1700/张）
+            val imgTok = if (msg.images.isNotEmpty()) msg.images.size * 256 else 0
+            if (tokCount + t + imgTok > maxTokens) break
+            tokCount += t + imgTok
             recent.add(0, msg)
         }
         for ((i, msg) in recent.withIndex()) {
@@ -267,8 +269,44 @@ class OpenAiService(context: Context) : AiService {
             if (needReinject && i > 0 && i % 10 == 0) {
                 put(JSONObject().apply { put("role", "system"); put("content", "【人设提醒】$systemPrompt") })
             }
-            put(JSONObject().apply { put("role", msg.role); put("content", msg.content) })
+            put(JSONObject().apply {
+                put("role", msg.role)
+                put("content", buildMessageContent(msg))
+            })
         }
         put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
+    }
+
+    /**
+     * 构造消息 content：纯文本返回字符串；含图片返回 OpenAI Vision 内容块数组。
+     * 数组格式：[{"type":"text","text":...}, {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,..."}}]
+     */
+    private fun buildMessageContent(msg: ChatMessage): Any = if (msg.images.isEmpty()) {
+        msg.content
+    } else {
+        JSONArray().apply {
+            if (msg.content.isNotBlank()) {
+                put(JSONObject().apply { put("type", "text"); put("text", msg.content) })
+            }
+            for (imgPath in msg.images) {
+                val base64 = encodeImageBase64(imgPath) ?: return@apply
+                put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:image/jpeg;base64,$base64")
+                    })
+                })
+            }
+        }
+    }
+
+    /** 读取图片文件并编码为 base64；失败返回 null */
+    private fun encodeImageBase64(path: String): String? {
+        return try {
+            val file = java.io.File(path)
+            if (!file.exists() || file.length() == 0L) return null
+            val bytes = file.readBytes()
+            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        } catch (_: Exception) { null }
     }
 }

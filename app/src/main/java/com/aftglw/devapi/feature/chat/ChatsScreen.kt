@@ -50,7 +50,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatsScreen(
-    onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit = { _, _, _, _ -> },
+    onChatClick: (name: String, persona: String, avatarUri: String, id: String, characterFolder: String, thinkingMessage: String) -> Unit = { _, _, _, _, _, _ -> },
     onGroupClick: (GroupChat) -> Unit = {},
     vm: ChatsViewModel = viewModel<ChatsViewModel>()
 ) {
@@ -89,7 +89,7 @@ fun ChatsScreen(
 fun ChatsScreenContent(
     chats: List<ChatItem>,
     onSearchQueryChange: (String) -> Unit,
-    onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit,
+    onChatClick: (name: String, persona: String, avatarUri: String, id: String, characterFolder: String, thinkingMessage: String) -> Unit,
     onTogglePin: (String) -> Unit,
     onDeleteChat: (String) -> Unit,
     groups: List<GroupChat> = emptyList(),
@@ -196,7 +196,7 @@ fun ChatsScreenContent(
                         Row(
                             Modifier.fillMaxWidth().height(72.dp)
                                 .combinedClickable(
-                                    onClick = { onChatClick(c.name, c.persona, c.avatarUri, c.id) },
+                                    onClick = { onChatClick(c.name, c.persona, c.avatarUri, c.id, c.characterFolder, c.thinkingMessage) },
                                     onLongClick = { menuExpanded = true }
                                 )
                                 .padding(horizontal = 16.dp),
@@ -264,12 +264,11 @@ fun ChatsScreenContent(
 
 @Composable
 private fun ChatAvatar(avatarUri: String, avatarColor: Int, name: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Box(Modifier.size(48.dp).clip(CircleShape).background(Color(avatarColor)), contentAlignment = Alignment.Center) {
         if (avatarUri.isNotEmpty()) {
             val bmp = remember(avatarUri) {
-                try {
-                    BitmapFactory.decodeFile(avatarUri)?.asImageBitmap()
-                } catch (_: Exception) { null }
+                com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
             }
             if (bmp != null) {
                 Image(bmp, null, Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
@@ -383,7 +382,7 @@ fun ChatsScreenPreview() {
         ChatsScreenContent(
             chats = sampleChats,
             onSearchQueryChange = {},
-            onChatClick = { _, _, _, _ -> },
+            onChatClick = { _, _, _, _, _, _ -> },
             onTogglePin = {},
             onDeleteChat = {}
         )

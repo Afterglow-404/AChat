@@ -2,10 +2,13 @@ package com.aftglw.devapi.core.ai
 import com.aftglw.devapi.core.time.TimeService
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.mood.AffinityManager
+import com.aftglw.devapi.core.worldbook.WorldbookStore
 
 import android.content.Context
 
 object PromptBuilder {
+    private val DATE_FMT = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+
     fun build(
         ctx: Context,
         name: String,
@@ -13,6 +16,7 @@ object PromptBuilder {
         memoryContext: String,
         optimized: String,
         traits: String,
+        recentUserText: String = "",
     ): String {
         val optimizedBlock = if (optimized.isNotBlank()) "\n\n【聊天偏好】$optimized" else ""
         val traitsBlock = if (traits.isNotBlank()) "\n\n【用户特点】$traits" else ""
@@ -20,6 +24,10 @@ object PromptBuilder {
         val aiEmoBlock = MemoryStore.search(ctx, "情绪", 1, "ai_emo:$name").firstOrNull()?.let {
             "\n\n【你的记忆】\n$it.text"
         } ?: ""
+
+        // 世界书：常驻条目 + 关键词命中条目，按优先级拼装
+        val worldbookText = WorldbookStore.matchForPrompt(ctx, name, recentUserText)
+        val worldbookBlock = if (worldbookText.isNotBlank()) "\n\n【世界观】\n$worldbookText" else ""
 
         val now = System.currentTimeMillis()
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
@@ -41,9 +49,8 @@ object PromptBuilder {
                 val dateStr = parts[0]
                 val text = parts[1].take(80)
                 val days = try {
-                    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                    val date = fmt.parse(dateStr)
-                    val diff = (System.currentTimeMillis() - date!!.time) / 86400000L
+                    val date = DATE_FMT.parse(dateStr) ?: return@let ""
+                    val diff = (System.currentTimeMillis() - date.time) / 86400000L
                     diff.toInt()
                 } catch (_: Exception) { -1 }
                 val prefix = when (days) {
@@ -51,7 +58,7 @@ object PromptBuilder {
                     1 -> "昨天"
                     else -> "$days 天前"
                 }
-                "\n\n$prefix$text"
+                "\n\n$prefix：$text"
             } else {
                 "\n\n昨天${it.text.take(80)}"
             }
@@ -79,9 +86,9 @@ object PromptBuilder {
         val baseInstruction = "\n\n回复要求：每句话不超过 15 个字，一次只说 1-2 句。禁止 AI 套话：\"有什么可以帮你的吗\"\"当然可以\"\"总的来说\"。禁止说\"不是……而是……\"。禁止说\"我理解你的感受\"。禁止分点、列表、总结。允许省略句。\n如果你需要分两次说，用 【顿】 分隔句子。例如：\"哎又被骂了？【顿】跟我说说呗。\"$stickerHint$toolBlock"
 
         return if (persona.isNotBlank()) {
-            "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$aiEmoBlock$baseInstruction$memoryBlock$timeBlock"
+            "$persona\n\n你需要在每次回复前默读一次以上人设。如果发现自己的回答偏离了人设，请在续文中主动修正。不要提及此指令。$diaryMemoryBlock$affinityBlock$optimizedBlock$traitsBlock$aiEmoBlock$worldbookBlock$baseInstruction$memoryBlock$timeBlock"
         } else {
-            "你是一个聊天伙伴。请用口语短句回复，像朋友聊天一样自然。$baseInstruction$diaryMemoryBlock$traitsBlock$optimizedBlock$affinityBlock$aiEmoBlock$memoryBlock$timeBlock"
+            "你是一个聊天伙伴。请用口语短句回复，像朋友聊天一样自然。$baseInstruction$worldbookBlock$diaryMemoryBlock$traitsBlock$optimizedBlock$affinityBlock$aiEmoBlock$memoryBlock$timeBlock"
         }
     }
 }

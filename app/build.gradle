@@ -28,6 +28,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            returnDefaultValues = true
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -60,4 +66,5 @@ dependencies {
     implementation libs.snakeyaml
     testImplementation libs.junit
     testImplementation libs.mockk
+    testImplementation libs.org.json
 }

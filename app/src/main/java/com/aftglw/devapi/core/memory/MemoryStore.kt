@@ -33,7 +33,11 @@ class MemoryDB(ctx: Context) : SQLiteOpenHelper(ctx, "memory.db", null, 1) {
 object MemoryStore {
     private var db: SQLiteDatabase? = null
     /** embed 缓存：text.hashCode() -> (timestamp, vector)，线程安全 */
-    private val embedCache = LinkedHashMap<Int, Pair<Long, FloatArray>>(64, 0.75f, true)
+    private val embedCache = object : LinkedHashMap<Int, Pair<Long, FloatArray>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<Long, FloatArray>>): Boolean {
+            return size > EMBED_CACHE_MAX_SIZE
+        }
+    }
     private const val EMBED_CACHE_MAX_SIZE = 500
 
     fun init(context: Context) {
@@ -50,13 +54,15 @@ object MemoryStore {
     fun embed(ctx: Context, text: String): FloatArray? {
         val hash = text.hashCode()
 
-        // 线程安全缓存读 + 过期清理（不持锁做网络请求）
+        // 线程安全缓存读 + 惰性淘汰（只移除单个过期条目，不扫描全表）
         synchronized(embedCache) {
             val cached = embedCache[hash]
-            if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
-                return cached.second  // accessOrder=true 自动更新 LRU 顺序
+            if (cached != null) {
+                if (System.currentTimeMillis() - cached.first < 300_000L) {
+                    return cached.second  // accessOrder=true 自动更新 LRU 顺序
+                }
+                embedCache.remove(hash)  // 惰性淘汰：只移除这一个过期条目
             }
-            embedCache.entries.removeAll { System.currentTimeMillis() - it.value.first > 300_000L }
         }
 
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
@@ -83,17 +89,15 @@ object MemoryStore {
             if (result != null) {
                 synchronized(embedCache) {
                     embedCache[hash] = System.currentTimeMillis() to result
-                    if (embedCache.size > EMBED_CACHE_MAX_SIZE) {
-                        val it = embedCache.entries.iterator()
-                        if (it.hasNext()) { it.next(); it.remove() }
-                    }
+                    // removeEldestEntry 在 put 后自动处理容量上限淘汰
                 }
             }
             result
         } catch (_: Exception) { null }
     }
 
-    private fun cosine(a: FloatArray, b: FloatArray): Float {
+    @androidx.annotation.VisibleForTesting
+    internal fun cosine(a: FloatArray, b: FloatArray): Float {
         var dot = 0f; var na = 0f; var nb = 0f
         for (i in a.indices) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
         return if (na > 0 && nb > 0) dot / (sqrt(na) * sqrt(nb)) else 0f

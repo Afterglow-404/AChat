@@ -1,14 +1,16 @@
 package com.aftglw.devapi.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.aftglw.devapi.core.character.BuiltInCharacterLoader
 import com.aftglw.devapi.model.ChatItem
 import org.json.JSONArray
 class ChatsViewModel(app: Application) : AndroidViewModel(app) {
-    private val _chats = MutableLiveData<List<ChatItem>>(loadChats())
+    private val _chats = MutableLiveData<List<ChatItem>>(loadChatsWithBuiltin())
     val chats: LiveData<List<ChatItem>> = _chats
 
     fun setSearchQuery(query: String) {
@@ -63,7 +65,7 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun togglePin(id: String) {
-        saveChats(loadChats().map { if (it.id == id) ChatItem(it.id, it.name, it.lastMessage, it.time, it.unreadCount, it.avatarColor, !it.pinned, it.persona, it.avatarUri) else it })
+        saveChats(loadChats().map { if (it.id == id) it.copy(pinned = !it.pinned) else it })
         refresh()
     }
 
@@ -81,9 +83,33 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
             obj.put("pinned", c.pinned)
             obj.put("persona", c.persona)
             obj.put("avatarUri", c.avatarUri)
+            obj.put("characterFolder", c.characterFolder)
+            obj.put("thinkingMessage", c.thinkingMessage)
             arr.put(obj)
         }
         prefs.edit().putString("chats", arr.toString()).apply()
+    }
+
+    /**
+     * 启动时加载：首次启动（无已存角色）自动预装内置角色。
+     * 之后用户删除内置角色不再自动加回（prefs 标记 builtin_seeded）。
+     */
+    private fun loadChatsWithBuiltin(): List<ChatItem> {
+        val app = getApplication<Application>()
+        val prefs = app.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE)
+        val existing = loadChats()
+        if (existing.isNotEmpty()) return existing
+        // 首次启动：加载内置角色并持久化
+        val seedFlag = "builtin_seeded"
+        if (prefs.getBoolean(seedFlag, false)) return existing
+        val builtIns = BuiltInCharacterLoader.listAll(app)
+        if (builtIns.isEmpty()) {
+            prefs.edit().putBoolean(seedFlag, true).apply()
+            return existing
+        }
+        saveChats(builtIns)
+        prefs.edit().putBoolean(seedFlag, true).apply()
+        return loadChats()
     }
 
     private fun loadChats(): List<ChatItem> {
@@ -109,7 +135,9 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
                 Color.parseColor(obj.optString("avatarColor", "#07C160")),
                 obj.optBoolean("pinned", false),
                 obj.optString("persona", ""),
-                obj.optString("avatarUri", "")
+                obj.optString("avatarUri", ""),
+                obj.optString("characterFolder", ""),
+                obj.optString("thinkingMessage", "")
             ))
         }
         return result.sortedByDescending { it.pinned }

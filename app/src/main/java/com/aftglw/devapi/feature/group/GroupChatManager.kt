@@ -2,6 +2,7 @@ package com.aftglw.devapi.feature.group
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.aftglw.devapi.core.character.BuiltInCharacterLoader
 import com.aftglw.devapi.model.GroupChat
 import com.aftglw.devapi.model.GroupChatMessage
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +86,42 @@ object GroupChatManager {
             .edit().remove(groupId).apply()
     }
 
+    // ── 群信息编辑 ──
+
+    /** 重命名群聊 */
+    fun renameGroup(ctx: Context, groupId: String, newName: String) {
+        val groups = loadGroups(ctx).toMutableList()
+        val idx = groups.indexOfFirst { it.id == groupId }
+        if (idx >= 0) {
+            groups[idx] = groups[idx].copy(name = newName)
+            saveGroups(ctx, groups)
+        }
+    }
+
+    /** 添加成员；若已在群则返回 false */
+    fun addMember(ctx: Context, groupId: String, memberName: String): Boolean {
+        val groups = loadGroups(ctx).toMutableList()
+        val idx = groups.indexOfFirst { it.id == groupId }
+        if (idx < 0) return false
+        val g = groups[idx]
+        if (g.members.contains(memberName)) return false
+        groups[idx] = g.copy(members = g.members + memberName)
+        saveGroups(ctx, groups)
+        return true
+    }
+
+    /** 移除成员；若不在群则返回 false。成员数 < 2 时建议解散群 */
+    fun removeMember(ctx: Context, groupId: String, memberName: String): Boolean {
+        val groups = loadGroups(ctx).toMutableList()
+        val idx = groups.indexOfFirst { it.id == groupId }
+        if (idx < 0) return false
+        val g = groups[idx]
+        if (!g.members.contains(memberName)) return false
+        groups[idx] = g.copy(members = g.members.filter { it != memberName })
+        saveGroups(ctx, groups)
+        return true
+    }
+
     // ── 历史消息 ──
 
     fun loadMessages(ctx: Context, groupId: String): List<GroupChatMessage> {
@@ -97,7 +134,8 @@ object GroupChatManager {
                 text = obj.optString("text", ""),
                 from = obj.optString("from", ""),
                 time = obj.optString("time", ""),
-                isMe = obj.optBoolean("isMe", false)
+                isMe = obj.optBoolean("isMe", false),
+                imagePath = obj.optString("imagePath", "").ifEmpty { null }
             )
         }
     }
@@ -111,6 +149,7 @@ object GroupChatManager {
                 put("from", m.from)
                 put("time", m.time)
                 put("isMe", m.isMe)
+                if (!m.imagePath.isNullOrEmpty()) put("imagePath", m.imagePath)
             }
             arr.put(obj)
         }
@@ -136,7 +175,7 @@ object GroupChatManager {
 
     // ── 辅助 ──
 
-    /** 从 wechat_chats 读取指定成员的角色人设 */
+    /** 读取指定成员的角色人设；先查 wechat_chats，未命中则查内置角色 */
     fun getMemberPersona(ctx: Context, memberName: String): String {
         val prefs = ctx.getSharedPreferences(MEMBER_PREFS, Context.MODE_PRIVATE)
         val json = prefs.getString("chats", "[]") ?: "[]"
@@ -147,10 +186,13 @@ object GroupChatManager {
                 return obj.optString("persona", "")
             }
         }
-        return ""
+        // 兜底：内置角色
+        return BuiltInCharacterLoader.listAll(ctx)
+            .firstOrNull { it.name == memberName }
+            ?.persona ?: ""
     }
 
-    /** 从 wechat_chats 读取指定成员的头像路径 */
+    /** 读取指定成员的头像路径；先查 wechat_chats，未命中则查内置角色 */
     fun getMemberAvatarUri(ctx: Context, memberName: String): String {
         val prefs = ctx.getSharedPreferences(MEMBER_PREFS, Context.MODE_PRIVATE)
         val json = prefs.getString("chats", "[]") ?: "[]"
@@ -161,20 +203,35 @@ object GroupChatManager {
                 return obj.optString("avatarUri", "")
             }
         }
-        return ""
+        // 兜底：内置角色
+        return BuiltInCharacterLoader.listAll(ctx)
+            .firstOrNull { it.name == memberName }
+            ?.avatarUri ?: ""
     }
 
-    /** 获取所有可用作群成员的单聊角色（有 persona 的） */
+    /** 获取所有可用作群成员的角色（单聊角色 + 内置角色，按 name 去重） */
     fun getAvailableMembers(ctx: Context): List<Pair<String, String>> {
+        val seen = mutableSetOf<String>()
+        val result = mutableListOf<Pair<String, String>>()
+        // 1) wechat_chats 自定义角色
         val prefs = ctx.getSharedPreferences(MEMBER_PREFS, Context.MODE_PRIVATE)
         val json = prefs.getString("chats", "[]") ?: "[]"
         val arr = JSONArray(json)
-        return (0 until arr.length()).mapNotNull { i ->
+        for (i in 0 until arr.length()) {
             val obj = arr.getJSONObject(i)
             val name = obj.optString("name", "")
             val persona = obj.optString("persona", "")
-            if (name.isNotEmpty() && persona.isNotEmpty()) name to persona else null
+            if (name.isNotEmpty() && persona.isNotEmpty() && seen.add(name)) {
+                result.add(name to persona)
+            }
         }
+        // 2) 内置角色
+        for (item in BuiltInCharacterLoader.listAll(ctx)) {
+            if (item.name.isNotEmpty() && item.persona.isNotEmpty() && seen.add(item.name)) {
+                result.add(item.name to item.persona)
+            }
+        }
+        return result
     }
 
     fun now(): String = TIME_FMT.format(Date())

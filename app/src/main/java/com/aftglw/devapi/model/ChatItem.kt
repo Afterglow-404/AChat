@@ -21,7 +21,9 @@ data class GroupChatMessage(
     /** 发言人名字，"user" 表示玩家自己，其他为群成员名 */
     val from: String,
     val time: String = "",
-    val isMe: Boolean = false
+    val isMe: Boolean = false,
+    /** 用户发送的图片本地路径（仅 isMe=true 时可能非空）；持久化到 group_histories */
+    val imagePath: String? = null
 )
 
 class ChatItem(
@@ -33,5 +35,24 @@ class ChatItem(
     val avatarColor: Int,
     val pinned: Boolean = false,
     val persona: String = "",
-    val avatarUri: String = ""
-)
+    val avatarUri: String = "",
+    /** 内置角色文件夹名（非空表示这是内置角色，从 assets 加载） */
+    val characterFolder: String = "",
+    /** 思考文案（如"灵灵正在思考中..."） */
+    val thinkingMessage: String = ""
+) {
+    /** 复制并覆盖部分字段，避免位置参数遗漏 */
+    fun copy(
+        id: String = this.id,
+        name: String = this.name,
+        lastMessage: String = this.lastMessage,
+        time: String = this.time,
+        unreadCount: Int = this.unreadCount,
+        avatarColor: Int = this.avatarColor,
+        pinned: Boolean = this.pinned,
+        persona: String = this.persona,
+        avatarUri: String = this.avatarUri,
+        characterFolder: String = this.characterFolder,
+        thinkingMessage: String = this.thinkingMessage
+    ): ChatItem = ChatItem(id, name, lastMessage, time, unreadCount, avatarColor, pinned, persona, avatarUri, characterFolder, thinkingMessage)
+}

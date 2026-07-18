@@ -53,10 +53,10 @@ object ToolRegistry {
                 val desc = p.optString("description", "")
                 val req = if (key in required) "必填" else "可选"
                 "  ${key}(${type},${req}): ${desc}"
-            }
+            }.toList()
             buildString {
                 appendLine("【tool:${tool.name}】${tool.description}")
-                if (paramLines.any()) {
+                if (paramLines.isNotEmpty()) {
                     paramLines.forEach { appendLine(it) }
                 }
             }.trimEnd()

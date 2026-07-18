@@ -44,7 +44,9 @@ fun ChatInfoPage(
     name: String, persona: String, avatarUri: String, chatKey: String = "",
     msgCount: Int, model: String, onBack: () -> Unit,
     onNavigateToDiary: () -> Unit,
-    onNavigateToMemory: () -> Unit
+    onNavigateToMemory: () -> Unit,
+    onNavigateToEditor: () -> Unit = {},
+    onNavigateToWorldbook: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
@@ -70,29 +72,12 @@ fun ChatInfoPage(
                 }
             }
             InfoRow("对话名称", name)
-            // 人设编辑
-            if (persona.isNotEmpty()) {
-                var showEditPersona by remember { mutableStateOf(false) }
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(horizontal = 16.dp, vertical = 14.dp).clickable { showEditPersona = true }, verticalAlignment = Alignment.CenterVertically) {
-                    Text("角色人设", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), modifier = Modifier.weight(0.3f))
-                    Spacer(Modifier.width(8.dp))
-                    Text(persona, fontSize = 14.sp, color = AchatTheme.colors.onSurface, maxLines = 2, modifier = Modifier.weight(0.6f))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
-                }
-                if (showEditPersona) {
-                    var editP by remember { mutableStateOf(persona) }
-                    AlertDialog(
-                        onDismissRequest = { showEditPersona = false },
-                        title = { Text("编辑角色人设") },
-                        text = { OutlinedTextField(value = editP, onValueChange = { editP = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp), maxLines = 8) },
-                        confirmButton = { TextButton(onClick = {
-                            val chats = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
-                            for (i in 0 until chats.length()) { val cId = chats.getJSONObject(i).optString("id", ""); if (chatKey.isNotEmpty() && cId == chatKey || chats.getJSONObject(i).getString("name") == name) { chats.getJSONObject(i).put("persona", editP); break } }
-                            ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).edit().putString("chats", chats.toString()).apply(); showEditPersona = false
-                        }) { Text("保存") } },
-                        dismissButton = { TextButton(onClick = { showEditPersona = false }) { Text("取消") } }
-                    )
-                }
+            // 人设编辑 — 跳转到字段化编辑器
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).clickable { onNavigateToEditor() }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("角色人设", fontSize = 14.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f), modifier = Modifier.weight(0.3f))
+                Spacer(Modifier.width(8.dp))
+                Text(if (persona.isEmpty()) "点击编辑" else persona, fontSize = 14.sp, color = if (persona.isEmpty()) AchatTheme.colors.onSurface.copy(alpha = 0.3f) else AchatTheme.colors.onSurface, maxLines = 2, modifier = Modifier.weight(0.6f))
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
             }
             // 角色卡导入
             val cardPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -170,6 +155,16 @@ fun ChatInfoPage(
                 }
                 Row(Modifier.fillMaxWidth().clickable { onNavigateToMemory() }, verticalAlignment = Alignment.CenterVertically) {
                     Text("🧠 全部记忆", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
+                }
+            }
+            // 世界书入口
+            Spacer(Modifier.height(8.dp))
+            Text("世界书", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+            val worldbookCount = com.aftglw.devapi.core.worldbook.WorldbookStore.load(ctx, name).size
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).clickable { onNavigateToWorldbook() }.padding(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌍 世界书 ($worldbookCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
                 }
             }

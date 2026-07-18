@@ -160,11 +160,18 @@ class ClaudeAiService(context: Context) : AiService {
             var tokCount = estimateTokenCount(systemPrompt, modelHint) + estimateTokenCount(userMessage, modelHint) + 10
             for (msg in history.reversed()) {
                 val t = estimateTokenCount(msg.content, modelHint) + 4
-                if (tokCount + t > maxTokens) break
-                tokCount += t
+                // 图片消息额外估算 token：每张图按 256 计
+                val imgTok = if (msg.images.isNotEmpty()) msg.images.size * 256 else 0
+                if (tokCount + t + imgTok > maxTokens) break
+                tokCount += t + imgTok
                 recent.add(0, msg)
             }
-            for (msg in recent) { put(JSONObject().apply { put("role", msg.role); put("content", msg.content) }) }
+            for (msg in recent) {
+                put(JSONObject().apply {
+                    put("role", msg.role)
+                    put("content", buildClaudeContent(msg))
+                })
+            }
             put(JSONObject().apply { put("role", "user"); put("content", userMessage) })
         }
 
@@ -181,6 +188,40 @@ class ClaudeAiService(context: Context) : AiService {
             prefs.getString("ai_top_p", null)?.toFloatOrNull()?.let { put("top_p", it) }
             prefs.getInt("ai_seed", -1).takeIf { it >= 0 }?.let { put("seed", it) }
         }
+    }
+
+    /**
+     * 构造 Claude 消息 content：纯文本返回字符串；含图片返回 Claude 内容块数组。
+     * Claude 格式：[{"type":"text","text":...}, {"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"..."}}]
+     */
+    private fun buildClaudeContent(msg: ChatMessage): Any = if (msg.images.isEmpty()) {
+        msg.content
+    } else {
+        JSONArray().apply {
+            if (msg.content.isNotBlank()) {
+                put(JSONObject().apply { put("type", "text"); put("text", msg.content) })
+            }
+            for (imgPath in msg.images) {
+                val base64 = encodeImageBase64(imgPath) ?: continue
+                put(JSONObject().apply {
+                    put("type", "image")
+                    put("source", JSONObject().apply {
+                        put("type", "base64")
+                        put("media_type", "image/jpeg")
+                        put("data", base64)
+                    })
+                })
+            }
+        }
+    }
+
+    private fun encodeImageBase64(path: String): String? {
+        return try {
+            val file = java.io.File(path)
+            if (!file.exists() || file.length() == 0L) return null
+            val bytes = file.readBytes()
+            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        } catch (_: Exception) { null }
     }
 
     private fun buildToolsArray(): org.json.JSONArray? {
