@@ -114,10 +114,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         history.addAll(saved.map { ChatMessage(if (it.second) "user" else "assistant", it.first.replace("【顿】", "").trim()) })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", chatKey).apply()
-        // 异步：模型加载 + 归档检查
+        // 异步：归档检查
         launch(Dispatchers.IO) {
-            if (ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-                    .getBoolean("mood_enabled", false)) 
             // 归档检查：用已加载的 saved，不再重复 load
             if (saved.size >= 5) {
                 val chunkKey = "chunk:$name:${saved.size}"
