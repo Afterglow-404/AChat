@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.aftglw.devapi.model.GroupChat
 import com.aftglw.devapi.model.GroupChatMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -24,12 +26,12 @@ object GroupChatManager {
     private const val GROUP_KEY = "groups"
     private const val HIST_PREFS = "group_histories"
     private const val MEMBER_PREFS = "wechat_chats"
+    private val TIME_FMT = SimpleDateFormat("HH:mm", Locale.getDefault())
 
     // ── 群聊列表 ──
 
     fun loadGroups(ctx: Context): List<GroupChat> {
         val prefs = ctx.getSharedPreferences(GROUP_PREFS, Context.MODE_PRIVATE)
-        val histPrefs = ctx.getSharedPreferences(HIST_PREFS, Context.MODE_PRIVATE)
         val json = prefs.getString(GROUP_KEY, "[]") ?: "[]"
         val arr = JSONArray(json)
         val result = mutableListOf<GroupChat>()
@@ -39,21 +41,11 @@ object GroupChatManager {
             val members = obj.getJSONArray("members").let { arr2 ->
                 (0 until arr2.length()).map { arr2.getString(it) }
             }
-            // 取最后一条消息作为摘要
-            val histJson = histPrefs.getString(id, "[]") ?: "[]"
-            val histArr = JSONArray(histJson)
-            val lastMsg = if (histArr.length() > 0) {
-                val last = histArr.getJSONObject(histArr.length() - 1)
-                val from = last.optString("from", "")
-                val text = last.optString("text", "")
-                if (from.isNotEmpty() && from != "user") "$from: $text" else text
-            } else ""
-
             result.add(GroupChat(
                 id = id,
                 name = obj.optString("name", "群聊"),
                 members = members,
-                lastMessage = lastMsg,
+                lastMessage = obj.optString("lastMessage", ""),
                 time = obj.optString("time", ""),
                 avatarUri = obj.optString("avatarUri", "")
             ))
@@ -69,6 +61,7 @@ object GroupChatManager {
                 put("id", g.id)
                 put("name", g.name)
                 put("members", JSONArray(g.members))
+                put("lastMessage", g.lastMessage)
                 put("time", g.time)
                 put("avatarUri", g.avatarUri)
             }
@@ -122,6 +115,23 @@ object GroupChatManager {
             arr.put(obj)
         }
         prefs.edit().putString(groupId, arr.toString()).apply()
+
+        // 同步更新 groups 中的 lastMessage 和 time，避免 loadGroups 时扫历史
+        val lastMsg = messages.lastOrNull() ?: return
+        val groupPrefs = ctx.getSharedPreferences(GROUP_PREFS, Context.MODE_PRIVATE)
+        val json = groupPrefs.getString(GROUP_KEY, "[]") ?: "[]"
+        val groupsArr = JSONArray(json)
+        for (i in 0 until groupsArr.length()) {
+            val obj = groupsArr.getJSONObject(i)
+            if (obj.getString("id") == groupId) {
+                val displayText = if (lastMsg.from.isNotEmpty() && lastMsg.from != "user")
+                    "${lastMsg.from}: ${lastMsg.text}" else lastMsg.text
+                obj.put("lastMessage", displayText)
+                obj.put("time", lastMsg.time)
+                break
+            }
+        }
+        groupPrefs.edit().putString(GROUP_KEY, groupsArr.toString()).apply()
     }
 
     // ── 辅助 ──
@@ -167,12 +177,12 @@ object GroupChatManager {
         }
     }
 
-    fun now(): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(Date())
+    fun now(): String = TIME_FMT.format(Date())
 }
 
 /**
  * 轻量判断器：在群聊对话中，谁最应该接话。
- * 返回成员名或 null 表示无人需要接话。
+ * 先走快速规则（@提及 > 随机），LLM 兜底。
  */
 object NextSpeakerJudge {
 
@@ -184,7 +194,7 @@ object NextSpeakerJudge {
      * @param conversation  最近对话摘要（每行 "名字: 内容"）
      * @return 应接话的成员名，或 null 表示停止
      */
-    fun decide(
+    suspend fun decide(
         memberNames: List<String>,
         repliedNames: Set<String>,
         lastSpeaker: String,
@@ -194,32 +204,45 @@ object NextSpeakerJudge {
         val unreplied = memberNames.filter { it !in repliedNames }
         if (unreplied.isEmpty()) return null
 
-        val prompt = buildString {
-            appendLine("群聊对话：")
-            appendLine(conversation)
-            appendLine()
-            appendLine("刚才是 $lastSpeaker 说了：「$lastMessage」")
-            appendLine("还未发言的成员：${unreplied.joinToString("、")}")
-            appendLine()
-            appendLine("判：")
-            appendLine("1) $lastSpeaker 的话是否提到了未发言成员中的某个人，或话题明显与某个人的性格/领域相关？")
-            appendLine("2) 如果有，只回复那个成员的名字（一个字不要多说）。")
-            appendLine("3) 如果没有或话题已结束，回复 none。")
-            appendLine()
-            append("回答：")
+        // 快速规则 1：@提及 → 优先让被提及的人接话
+        for (name in unreplied) {
+            if (lastMessage.contains("@$name") || lastMessage.contains("@${name.take(2)}")) {
+                return name
+            }
         }
 
-        return try {
-            val t = System.currentTimeMillis()
-            val result = com.aftglw.devapi.network.AiServiceFactory.getService().sendMessage(
-                history = emptyList(),
-                userMessage = prompt,
-                systemPrompt = "你是群聊对话分析器。只回复一个成员名或 none，不多说。"
-            )
-            val name = result?.trim()?.take(20) ?: ""
-            android.util.Log.d("NextSpeakerJudge", "Decided: $name (${unreplied.size} unreplied, ${System.currentTimeMillis() - t}ms)")
-            if (name.equals("none", ignoreCase = true)) null
-            else memberNames.firstOrNull { it.equals(name, ignoreCase = true) || it.contains(name, ignoreCase = true) }
-        } catch (_: Exception) { null }
+        // 快速规则 2：如果只剩 1 个未发言，直接选
+        if (unreplied.size == 1) return unreplied[0]
+
+        // LLM 兜底：用协程在 IO 线程执行阻塞调用
+        return withContext(Dispatchers.IO) {
+            val prompt = buildString {
+                appendLine("群聊对话：")
+                appendLine(conversation)
+                appendLine()
+                appendLine("刚才是 $lastSpeaker 说了：「$lastMessage」")
+                appendLine("还未发言的成员：${unreplied.joinToString("、")}")
+                appendLine()
+                appendLine("判：")
+                appendLine("1) $lastSpeaker 的话是否提到了未发言成员中的某个人，或话题明显与某个人的性格/领域相关？")
+                appendLine("2) 如果有，只回复那个成员的名字（一个字不要多说）。")
+                appendLine("3) 如果没有或话题已结束，回复 none。")
+                appendLine()
+                append("回答：")
+            }
+
+            try {
+                val t = System.currentTimeMillis()
+                val result = com.aftglw.devapi.network.AiServiceFactory.getService().sendMessage(
+                    history = emptyList(),
+                    userMessage = prompt,
+                    systemPrompt = "你是群聊对话分析器。只回复一个成员名或 none，不多说。"
+                )
+                val name = result?.trim()?.take(20) ?: ""
+                android.util.Log.d("NextSpeakerJudge", "Decided: $name (${unreplied.size} unreplied, ${System.currentTimeMillis() - t}ms)")
+                if (name.equals("none", ignoreCase = true)) null
+                else memberNames.firstOrNull { it.equals(name, ignoreCase = true) || it.contains(name, ignoreCase = true) }
+            } catch (_: Exception) { null }
+        }
     }
 }

@@ -15,7 +15,7 @@ object StickerEngine {
                 val jsonPath = "stickers/$pack/stickers.json"
                 val jsonString = try {
                     ctx.assets.open(jsonPath).bufferedReader().use { it.readText() }
-                } catch (_: Exception) { null } ?: continue
+                } catch (e: Exception) { android.util.Log.w("StickerEngine", "Failed to load $jsonPath", e); null } ?: continue
 
                 val root = JSONObject(jsonString)
                 val stickers = root.optJSONArray("stickers") ?: continue
@@ -37,16 +37,17 @@ object StickerEngine {
                 }
             }
             loaded = true
-        } catch (_: Exception) { }
+        } catch (e: Exception) { android.util.Log.w("StickerEngine", "init failed", e) }
     }
 
     fun match(packName: String, tag: String): String? {
         val pack = tagIndex[packName] ?: return null
         val key = tag.trim().lowercase()
         pack[key]?.let { return it }
-        for ((t, path) in pack) {
-            if (t.contains(key) || key.contains(t)) return path
-        }
+        // 模糊匹配：按 tag 长度排序，较短的 tag 优先（更精确）
+        val candidates = pack.filter { (t, _) -> t.contains(key) || key.contains(t) }
+            .entries.sortedBy { it.key.length }
+        candidates.firstOrNull()?.value?.let { return it }
         return null
     }
 

@@ -36,8 +36,25 @@ object PromptBuilder {
 
         val recentDiary = MemoryStore.search(ctx, "最近", 1, "diary:$name")
         val diaryMemoryBlock = recentDiary.firstOrNull()?.let {
-            val content = it.text.drop(11).take(80)
-            "\n\n昨天$content"
+            val parts = it.text.split(" ", limit = 2)
+            if (parts.size >= 2) {
+                val dateStr = parts[0]
+                val text = parts[1].take(80)
+                val days = try {
+                    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                    val date = fmt.parse(dateStr)
+                    val diff = (System.currentTimeMillis() - date!!.time) / 86400000L
+                    diff.toInt()
+                } catch (_: Exception) { -1 }
+                val prefix = when (days) {
+                    0 -> "今天"
+                    1 -> "昨天"
+                    else -> "$days 天前"
+                }
+                "\n\n$prefix$text"
+            } else {
+                "\n\n昨天${it.text.take(80)}"
+            }
         } ?: ""
 
         val affinityBlock = run {
@@ -54,7 +71,7 @@ object PromptBuilder {
         val toolDescs = com.aftglw.devapi.tools.ToolRegistry.getDescriptions()
         // 设备工具（access_location / read_notifications / read_app_usage）需要用户许可
         val deviceToolNames = setOf("access_location", "read_notifications", "read_app_usage")
-        val hasDeviceTools = deviceToolNames.any { toolDescs.contains(it) }
+        val hasDeviceTools = deviceToolNames.any { com.aftglw.devapi.tools.ToolRegistry.get(it) != null }
         val privacyRule = if (hasDeviceTools) "\n隐私规则：access_location / read_notifications / read_app_usage 涉及个人隐私，调用前必须先用口语询问用户是否同意，得到肯定答复后才能使用。如果用户拒绝，不要使用。" else ""
         val toolBlock = if (toolDescs.isNotBlank()) "\n\n可用工具（需要时用 【tool:工具名 参数】 调用）：\n$toolDescs$privacyRule" else ""
 

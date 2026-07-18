@@ -5,6 +5,9 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.aftglw.devapi.network.HttpClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -22,24 +25,39 @@ class MemoryDB(ctx: Context) : SQLiteOpenHelper(ctx, "memory.db", null, 1) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE memories(id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, topic TEXT, timestamp INTEGER, vec BLOB)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
+        android.util.Log.w("MemoryDB", "Upgrade from $old to $new — no migration defined yet")
+    }
 }
 
 object MemoryStore {
     private var db: SQLiteDatabase? = null
-    /** embed 缓存：text.hashCode() -> (timestamp, vector) */
+    /** embed 缓存：text.hashCode() -> (timestamp, vector)，线程安全 */
     private val embedCache = LinkedHashMap<Int, Pair<Long, FloatArray>>(64, 0.75f, true)
+    private const val EMBED_CACHE_MAX_SIZE = 500
 
-    fun init(context: Context) { if (db == null) db = MemoryDB(context).writableDatabase }
+    fun init(context: Context) {
+        if (db == null) {
+            db = MemoryDB(context).writableDatabase
+            // 预热固定 query 的 embedding，供 PromptBuilder 后续命中缓存
+            CoroutineScope(Dispatchers.IO).launch {
+                embed(context, "情绪")
+                embed(context, "最近")
+            }
+        }
+    }
 
     fun embed(ctx: Context, text: String): FloatArray? {
-        // LRU 缓存：5 分钟有效
         val hash = text.hashCode()
-        val cached = embedCache[hash]
-        if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
-            return cached.second
+
+        // 线程安全缓存读 + 过期清理（不持锁做网络请求）
+        synchronized(embedCache) {
+            val cached = embedCache[hash]
+            if (cached != null && System.currentTimeMillis() - cached.first < 300_000L) {
+                return cached.second  // accessOrder=true 自动更新 LRU 顺序
+            }
+            embedCache.entries.removeAll { System.currentTimeMillis() - it.value.first > 300_000L }
         }
-        embedCache.entries.removeAll { System.currentTimeMillis() - it.value.first > 300_000L }
 
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("ai_api_key", "") ?: return null
@@ -62,7 +80,15 @@ object MemoryStore {
             response.close()
             val arr = JSONObject(resp).optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")
             val result = if (arr != null) FloatArray(arr.length()) { arr.optDouble(it, 0.0).toFloat() } else null
-            if (result != null) embedCache[hash] = System.currentTimeMillis() to result
+            if (result != null) {
+                synchronized(embedCache) {
+                    embedCache[hash] = System.currentTimeMillis() to result
+                    if (embedCache.size > EMBED_CACHE_MAX_SIZE) {
+                        val it = embedCache.entries.iterator()
+                        if (it.hasNext()) { it.next(); it.remove() }
+                    }
+                }
+            }
             result
         } catch (_: Exception) { null }
     }
