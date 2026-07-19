@@ -1284,16 +1284,35 @@ fun ChatContent(
                                                 }
                                                 val duration = recorder.stop()
                                                 if (duration > 0 && file.exists()) {
-                                                    // STT 转写（异步）
+                                                    // STT 转写（异步）+ 超时保护
+                                                    // 某些 ROM 系统 STT 不回调 onResult/onError，会导致永远没有语音气泡
+                                                    // 加 5s 超时：到时仍未回调，强制发送仅音频气泡
+                                                    var sent = false
+                                                    val sttTimeoutJob = scope.launch {
+                                                        delay(5000L)
+                                                        if (!sent) {
+                                                            sent = true
+                                                            onSendVoice("", file.absolutePath, duration)
+                                                            sttHelper.stop()
+                                                            Toast.makeText(ctx, "语音转文字超时，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
                                                     sttHelper.start(
                                                         onResult = { text ->
-                                                            onSendVoice(text, file.absolutePath, duration)
+                                                            sttTimeoutJob.cancel()
+                                                            if (!sent) {
+                                                                sent = true
+                                                                onSendVoice(text, file.absolutePath, duration)
+                                                            }
                                                             sttHelper.stop()
                                                         },
                                                         onError = {
-                                                            // STT 失败也发送空文字（只有音频）
-                                                            onSendVoice("", file.absolutePath, duration)
-                                                            Toast.makeText(ctx, "语音转文字失败，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                            sttTimeoutJob.cancel()
+                                                            if (!sent) {
+                                                                sent = true
+                                                                onSendVoice("", file.absolutePath, duration)
+                                                                Toast.makeText(ctx, "语音转文字失败，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                            }
                                                             sttHelper.stop()
                                                         }
                                                     )
