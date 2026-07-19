@@ -51,7 +51,7 @@ fun ChatInfoPage(
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
-    val hasKey = prefs.getString("ai_api_key", "")?.isNotEmpty() == true
+    val hasKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key").isNotEmpty()
 
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(

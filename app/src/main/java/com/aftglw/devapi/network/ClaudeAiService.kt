@@ -1,60 +1,89 @@
 package com.aftglw.devapi.network
 
 import android.content.Context
+import com.aftglw.devapi.core.security.SecureKeyStore
 import com.aftglw.devapi.model.ChatMessage
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ClaudeAiService(context: Context) : AiService {
 
+    private val appCtx = context.applicationContext
     private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+
+    /** 当前在飞的 OkHttp Call；供 [cancel] 使用 */
+    @Volatile private var currentCall: okhttp3.Call? = null
+
+    override fun cancel() {
+        currentCall?.cancel()
+        currentCall = null
+    }
 
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
-            HttpRetry.retry("Claude") {
-            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false, tools = buildToolsArray())
-            val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
-                "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
-            val response = HttpClient.execute(request)
-            val json = JSONObject(response)
-            val contentArr = json.optJSONArray("content")
-            var reply = ""
-            if (contentArr != null) {
-                val sb = StringBuilder()
-                for (i in 0 until contentArr.length()) {
-                    val block = contentArr.getJSONObject(i)
-                    val type = block.optString("type", "")
-                    if (type == "text") {
-                        sb.append(block.optString("text", ""))
-                    } else if (type == "tool_use") {
-                        val name = block.getString("name")
-                        val args = block.optJSONObject("input")?.toString() ?: "{}"
-                        if (toolCallsOut != null) {
-                            toolCallsOut.add(ToolCall(name, args, ""))
-                        } else {
-                            sb.append("【tool:${name} ${args}】")
-                        }
+            runBlocking {
+                HttpRetry.retrySuspend("Claude") {
+                    val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false, tools = buildToolsArray())
+                    val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
+                        "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+                    val call = HttpClient.client.newCall(request)
+                    currentCall = call
+                    val response = try {
+                        call.execute()
+                    } finally {
+                        currentCall = null
                     }
+                    val respBody = try {
+                        if (!response.isSuccessful) {
+                            val errBody = response.body?.string() ?: ""
+                            throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
+                        }
+                        response.body?.string() ?: ""
+                    } finally {
+                        response.close()
+                    }
+                    val json = JSONObject(respBody)
+                    val contentArr = json.optJSONArray("content")
+                    var reply = ""
+                    if (contentArr != null) {
+                        val sb = StringBuilder()
+                        for (i in 0 until contentArr.length()) {
+                            val block = contentArr.getJSONObject(i)
+                            val type = block.optString("type", "")
+                            if (type == "text") {
+                                sb.append(block.optString("text", ""))
+                            } else if (type == "tool_use") {
+                                val name = block.getString("name")
+                                val args = block.optJSONObject("input")?.toString() ?: "{}"
+                                if (toolCallsOut != null) {
+                                    toolCallsOut.add(ToolCall(name, args, ""))
+                                } else {
+                                    sb.append("【tool:${name} ${args}】")
+                                }
+                            }
+                        }
+                        reply = sb.toString().trim()
+                    }
+                    if (reply.isNotBlank()) {
+                        val estIn = estimateTokenCount(systemPrompt, model) + messagesLength(body) + estimateTokenCount(userMessage, model)
+                        prefs.edit()
+                            .putInt("last_tokens_in", estIn)
+                            .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
+                            .putInt("last_tokens_out", reply.length / 4)
+                            .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + reply.length / 4)
+                            .apply()
+                        reply.trim()
+                    } else null
                 }
-                reply = sb.toString().trim()
-            }
-            if (reply.isNotBlank()) {
-                val estIn = estimateTokenCount(systemPrompt, model) + messagesLength(body) + estimateTokenCount(userMessage, model)
-                prefs.edit()
-                    .putInt("last_tokens_in", estIn)
-                    .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
-                    .putInt("last_tokens_out", reply.length / 4)
-                    .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + reply.length / 4)
-                    .apply()
-                reply.trim()
-            } else null
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             android.util.Log.w("Claude", "sendMessage failed", e)
             null
         }
@@ -67,82 +96,97 @@ class ClaudeAiService(context: Context) : AiService {
         toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ) {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
         if (baseUrl.isEmpty() || apiKey.isEmpty()) { onDone(""); return }
 
         try {
-            val result = HttpRetry.retry("Claude") {
-            val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true, tools = buildToolsArray())
-            val httpReq = HttpClient.postJson("$baseUrl/messages", body.toString(),
-                "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
-            val httpResp = HttpClient.client.newCall(httpReq).execute()
-            if (!httpResp.isSuccessful) {
-                val errBody = httpResp.body?.string() ?: ""
-                httpResp.close()
-                throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
-            }
-            val reader = httpResp.body?.byteStream()?.bufferedReader()
-                ?: throw java.io.IOException("No response body")
-            var line: String?
-            val full = StringBuilder()
-            var pendingEvent = ""
-            var toolName = ""
-            var toolIdx = -1
-            val toolArgs = StringBuilder()
-            try {
-                while (reader.readLine().also { line = it } != null) {
-                    val text = line ?: continue
-                    when {
-                        text.startsWith("event: ") -> pendingEvent = text.removePrefix("event: ").trim()
-                        text.startsWith("data: ") -> {
-                            val data = text.removePrefix("data: ").trim()
-                            when (pendingEvent) {
-                                "content_block_delta" -> {
-                                    val delta = try {
-                                        JSONObject(data).optJSONObject("delta")?.optString("text", "") ?: ""
-                                    } catch (_: Exception) { "" }
-                                    if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
-                                }
-                                "content_block_start" -> {
-                                    try {
-                                        val block = JSONObject(data).optJSONObject("content_block")
-                                        if (block != null && block.optString("type") == "tool_use") {
-                                            toolName = block.optString("name", "")
-                                            toolIdx = JSONObject(data).optInt("index", -1)
-                                            toolArgs.setLength(0)
-                                            val initInput = block.optJSONObject("input")?.toString() ?: ""
-                                            if (initInput.isNotEmpty()) toolArgs.append(initInput)
+            val result = runBlocking {
+                HttpRetry.retrySuspend("Claude") {
+                    val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true, tools = buildToolsArray())
+                    val httpReq = HttpClient.postJson("$baseUrl/messages", body.toString(),
+                        "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+                    val call = HttpClient.client.newCall(httpReq)
+                    currentCall = call
+                    val httpResp = try {
+                        call.execute()
+                    } catch (e: Exception) {
+                        currentCall = null
+                        throw e
+                    }
+                    if (!httpResp.isSuccessful) {
+                        val errBody = httpResp.body?.string() ?: ""
+                        httpResp.close()
+                        currentCall = null
+                        throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
+                    }
+                    val reader = httpResp.body?.byteStream()?.bufferedReader()
+                        ?: run { httpResp.close(); currentCall = null; throw java.io.IOException("No response body") }
+                    var line: String?
+                    val full = StringBuilder()
+                    var pendingEvent = ""
+                    var toolName = ""
+                    var toolIdx = -1
+                    val toolArgs = StringBuilder()
+                    try {
+                        while (reader.readLine().also { line = it } != null) {
+                            val text = line ?: continue
+                            when {
+                                text.startsWith("event: ") -> pendingEvent = text.removePrefix("event: ").trim()
+                                text.startsWith("data: ") -> {
+                                    val data = text.removePrefix("data: ").trim()
+                                    when (pendingEvent) {
+                                        "content_block_delta" -> {
+                                            val delta = try {
+                                                JSONObject(data).optJSONObject("delta")?.optString("text", "") ?: ""
+                                            } catch (_: Exception) { "" }
+                                            if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
                                         }
-                                    } catch (_: Exception) { }
-                                }
-                                "input_json_delta" -> {
-                                    try {
-                                        toolArgs.append(JSONObject(data).optJSONObject("delta")?.optString("partial_json", "") ?: "")
-                                    } catch (_: Exception) { }
-                                }
-                                "content_block_stop" -> {
-                                    if (toolName.isNotEmpty()) {
-                                        if (toolCallsOut != null) {
-                                            toolCallsOut.add(ToolCall(toolName, toolArgs.toString(), ""))
-                                        } else {
-                                            full.append("【tool:" + toolName + " " + toolArgs.toString() + "】")
+                                        "content_block_start" -> {
+                                            try {
+                                                val block = JSONObject(data).optJSONObject("content_block")
+                                                if (block != null && block.optString("type") == "tool_use") {
+                                                    toolName = block.optString("name", "")
+                                                    toolIdx = JSONObject(data).optInt("index", -1)
+                                                    toolArgs.setLength(0)
+                                                    val initInput = block.optJSONObject("input")?.toString() ?: ""
+                                                    if (initInput.isNotEmpty()) toolArgs.append(initInput)
+                                                }
+                                            } catch (_: Exception) { }
                                         }
-                                        toolName = ""
-                                        toolArgs.setLength(0)
+                                        "input_json_delta" -> {
+                                            try {
+                                                toolArgs.append(JSONObject(data).optJSONObject("delta")?.optString("partial_json", "") ?: "")
+                                            } catch (_: Exception) { }
+                                        }
+                                        "content_block_stop" -> {
+                                            if (toolName.isNotEmpty()) {
+                                                if (toolCallsOut != null) {
+                                                    toolCallsOut.add(ToolCall(toolName, toolArgs.toString(), ""))
+                                                } else {
+                                                    full.append("【tool:" + toolName + " " + toolArgs.toString() + "】")
+                                                }
+                                                toolName = ""
+                                                toolArgs.setLength(0)
+                                            }
+                                        }
                                     }
+                                    pendingEvent = ""
                                 }
                             }
-                            pendingEvent = ""
                         }
-                    }
+                    } finally { reader.close(); httpResp.close(); currentCall = null }
+                    full.toString()
                 }
-            } finally { reader.close(); httpResp.close() }
-            full.toString()
             }
             onDone(result)
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) {
+                onDone("")
+                return
+            }
             android.util.Log.w("Claude", "sendMessageStream failed", e)
+            onError?.invoke(e.message ?: "stream failed")
             onDone("")
         }
     }

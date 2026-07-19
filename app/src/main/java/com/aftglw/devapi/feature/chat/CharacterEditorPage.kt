@@ -19,13 +19,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.core.character.CharacterFields
+import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.feature.settings.SubPageScaffold
 import com.aftglw.devapi.ui.theme.AchatTheme
-import org.json.JSONArray
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * 字段化角色编辑器 — 把 persona 拆成 5 个字段分别编辑。
- * 保存时拼装回 persona 字符串，写回 wechat_chats。
+ * 保存时拼装回 persona 字符串，写回 chats 表。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -186,22 +189,12 @@ private fun FieldSection(
     )
 }
 
-/** 把 persona 写回 wechat_chats 中匹配 name 的项，返回是否找到并保存成功 */
-private fun savePersona(ctx: Context, chatName: String, persona: String): Boolean {
-    val prefs = ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE)
-    val json = prefs.getString("chats", "[]") ?: "[]"
-    val arr = JSONArray(json)
-    var found = false
-    for (i in 0 until arr.length()) {
-        val obj = arr.getJSONObject(i)
-        if (obj.getString("name") == chatName) {
-            obj.put("persona", persona)
-            found = true
-            break
-        }
+/** 把 persona 写回 chats 表中匹配 name 的项，返回是否找到并保存成功 */
+private fun savePersona(ctx: Context, chatName: String, persona: String): Boolean = runBlocking {
+    withContext(Dispatchers.IO) {
+        val dao = AppDatabase.get(ctx).chatDao()
+        val e = dao.getAll().firstOrNull { it.name == chatName } ?: return@withContext false
+        dao.upsert(e.copy(persona = persona))
+        true
     }
-    if (found) {
-        prefs.edit().putString("chats", arr.toString()).apply()
-    }
-    return found
 }

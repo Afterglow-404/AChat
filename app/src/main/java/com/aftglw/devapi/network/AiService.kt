@@ -54,6 +54,18 @@ interface AiService {
         if (reply.isNotEmpty()) onChunk(reply)
         onDone(reply)
     }
+
+    /**
+     * 取消正在进行的请求（如有）。
+     *
+     * 实现侧应：
+     * - 取消当前在飞的 OkHttp Call（如有），让其抛出 IOException("Canceled")
+     * - 清理内部状态，确保下次调用可正常发送
+     *
+     * 默认空实现，给不需要取消语义的 service（如 Mock/Local）使用。
+     * 在 UI 层挂载"停止生成"按钮时调用。
+     */
+    fun cancel() { /* default no-op */ }
 }
 
 /** 原生 tool_call 结构（与 Agent.regex 解耦） */

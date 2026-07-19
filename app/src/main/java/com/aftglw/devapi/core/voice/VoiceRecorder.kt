@@ -54,15 +54,19 @@ class VoiceRecorder(private val ctx: Context) {
     fun stop(): Int {
         val r = recorder ?: return 0
         val elapsed = ((System.currentTimeMillis() - startTimeMs) / 1000).toInt()
+        var stopped = false
         try {
             r.stop()
+            stopped = true
         } catch (_: Exception) {
             // stop 失败通常因为录音时间过短，文件不可用
         } finally {
             r.release()
             recorder = null
         }
-        return elapsed
+        if (!stopped) outputFile?.delete()
+        outputFile = null
+        return if (stopped) elapsed else 0
     }
 
     /** 取消录音，删除文件 */

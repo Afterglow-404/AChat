@@ -1,7 +1,11 @@
 package com.aftglw.devapi.core.character
 import com.aftglw.devapi.core.storage.ChatHistory
+import com.aftglw.devapi.core.storage.room.AppDatabase
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.InputStream
 
@@ -59,19 +63,20 @@ object CharacterCardParser {
     }
 
     fun importToChat(ctx: Context, chatName: String, card: Card, avatarPath: String) {
-        val prefs = ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE)
-        val json = prefs.getString("chats", "[]") ?: "[]"
-        val arr = org.json.JSONArray(json)
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            if (o.getString("name") == chatName) {
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val dao = AppDatabase.get(ctx).chatDao()
+                val e = dao.getAll().firstOrNull { it.name == chatName } ?: return@withContext
                 val persona = buildString {
                     if (card.description.isNotBlank()) appendLine(card.description)
                     if (card.personality.isNotBlank()) appendLine(card.personality)
                     if (card.systemPrompt.isNotBlank()) appendLine(card.systemPrompt)
                 }.trim()
-                if (persona.isNotBlank()) o.put("persona", persona)
-                if (avatarPath.isNotBlank()) o.put("avatar", avatarPath)
+                val updated = e.copy(
+                    persona = if (persona.isNotBlank()) persona else e.persona,
+                    avatarUri = if (avatarPath.isNotBlank()) avatarPath else e.avatarUri
+                )
+                dao.upsert(updated)
                 if (card.firstMes.isNotBlank()) {
                     // 存为首条消息
                     val history = ChatHistory.load(ctx, chatName)
@@ -79,10 +84,8 @@ object CharacterCardParser {
                     newHistory.add(0, Triple(card.firstMes, false, java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())))
                     ChatHistory.save(ctx, chatName, newHistory)
                 }
-                break
             }
         }
-        prefs.edit().putString("chats", arr.toString()).apply()
     }
 
     private fun readInt(buf: ByteArray, offset: Int): Int {

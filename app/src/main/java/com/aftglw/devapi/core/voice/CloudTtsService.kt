@@ -1,6 +1,7 @@
 package com.aftglw.devapi.core.voice
 
 import android.content.Context
+import com.aftglw.devapi.core.security.SecureKeyStore
 import com.aftglw.devapi.network.HttpClient
 import java.io.File
 import java.security.MessageDigest
@@ -44,10 +45,13 @@ class CloudTtsService(private val ctx: Context) {
                 // 回退：基于 ai_api_url 推导
                 val aiUrl = (prefs.getString("ai_api_url", "") ?: "").trimEnd('/')
                 if (aiUrl.isEmpty()) throw java.io.IOException("TTS 端点未配置")
-                "$aiUrl/v1/audio/speech"
+                if (aiUrl.endsWith("/v1")) "$aiUrl/audio/speech"
+                else "$aiUrl/v1/audio/speech"
             }
         }
-        val key = apiKey.ifEmpty { (prefs.getString("tts_cloud_key", "") ?: "").ifEmpty { prefs.getString("ai_api_key", "") ?: "" } }
+        val key = apiKey.ifEmpty {
+            SecureKeyStore.getString(ctx, "tts_cloud_key").ifEmpty { SecureKeyStore.getString(ctx, "ai_api_key") }
+        }
         if (key.isEmpty()) throw java.io.IOException("TTS Key 未配置")
         val mdl = model.ifEmpty { prefs.getString("tts_cloud_model", "tts-1") ?: "tts-1" }
 

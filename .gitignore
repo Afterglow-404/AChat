@@ -20,3 +20,7 @@ tokenizer_out/
 tokenizer_out_7class/
 genmsg.txt
 worker_debug.txt
+# 发布签名 keystore — 永远不应进入版本库
+*.jks
+*.keystore
+keystore.properties

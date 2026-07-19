@@ -1,5 +1,7 @@
 package com.aftglw.devapi.network
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import java.io.IOException
 import java.net.ConnectException
 import java.net.HttpURLConnection
@@ -22,6 +24,8 @@ object HttpRetry {
 
     /** 判断一个异常是否值得重试 */
     private fun isRetryable(e: Exception): Boolean {
+        // OkHttp 主动取消（Call.cancel()）：不重试
+        if (e is IOException && (e.message ?: "").contains("Canceled", ignoreCase = true)) return false
         // 网络层异常
         if (e is ConnectException || e is SocketException || e is SocketTimeoutException) return true
         if (e is IOException) {
@@ -43,12 +47,14 @@ object HttpRetry {
      * - 成功 → 返回 block 的返回值
      * - 不可重试的异常 → 直接抛出
      * - 可重试且超过最大次数 → 抛出最后一次异常
+     *
+     * 注意：此方法同步阻塞，会占用线程；协程环境请使用 [retrySuspend]。
      */
     fun <T> retry(
         tag: String = "HttpRetry",
         block: () -> T
     ): T {
-        var delay = INITIAL_DELAY_MS
+        var delayMs = INITIAL_DELAY_MS
         var lastEx: Exception? = null
 
         for (attempt in 0..MAX_RETRIES) {
@@ -60,9 +66,45 @@ object HttpRetry {
                     android.util.Log.w(tag, "Final failure after $attempt retries: ${e.message}")
                     throw e
                 }
-                android.util.Log.w(tag, "Attempt ${attempt + 1}/$MAX_RETRIES failed, retry in ${delay}ms: ${e.message}")
-                try { Thread.sleep(delay) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw e }
-                delay *= 2
+                android.util.Log.w(tag, "Attempt ${attempt + 1}/$MAX_RETRIES failed, retry in ${delayMs}ms: ${e.message}")
+                try { Thread.sleep(delayMs) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw e }
+                delayMs *= 2
+            }
+        }
+        throw lastEx ?: Exception("retry failed")
+    }
+
+    /**
+     * 协程版指数退避重试，使用 [delay] 而非 Thread.sleep，不阻塞线程。
+     *
+     * - 成功 → 返回 block 的返回值
+     * - 不可重试的异常 → 直接抛出
+     * - 可重试且超过最大次数 → 抛出最后一次异常
+     * - 协程取消（CancellationException）→ 立即抛出，不重试
+     */
+    suspend fun <T> retrySuspend(
+        tag: String = "HttpRetry",
+        maxRetries: Int = MAX_RETRIES,
+        initialDelayMs: Long = INITIAL_DELAY_MS,
+        block: suspend () -> T
+    ): T {
+        var delayMs = initialDelayMs
+        var lastEx: Exception? = null
+
+        for (attempt in 0..maxRetries) {
+            try {
+                return block()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                lastEx = e
+                if (attempt == maxRetries || !isRetryable(e)) {
+                    android.util.Log.w(tag, "Final failure after $attempt retries: ${e.message}")
+                    throw e
+                }
+                android.util.Log.w(tag, "Attempt ${attempt + 1}/$maxRetries failed, retry in ${delayMs}ms: ${e.message}")
+                delay(delayMs)
+                delayMs *= 2
             }
         }
         throw lastEx ?: Exception("retry failed")

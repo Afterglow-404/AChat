@@ -1,5 +1,20 @@
 package com.aftglw.devapi.model
 
+enum class GroupChatMode(
+    val key: String,
+    val title: String,
+    val description: String
+) {
+    ROUND_ROBIN("round_robin", "轮流发言", "每次只由下一位成员回复"),
+    MENTION_ONLY("mention_only", "仅 @ 回复", "只有明确 @ 某位成员时才回复"),
+    FREE("free", "自由讨论", "由系统判断是否让其他成员接话");
+
+    companion object {
+        fun fromKey(key: String?): GroupChatMode =
+            entries.firstOrNull { it.key == key } ?: FREE
+    }
+}
+
 /**
  * 群聊数据模型 — 与 ChatItem 平行，用于群聊列表展示。
  */
@@ -10,7 +25,10 @@ data class GroupChat(
     val members: List<String>,
     val lastMessage: String = "",
     val time: String = "",
-    val avatarUri: String = ""
+    val avatarUri: String = "",
+    val mode: GroupChatMode = GroupChatMode.FREE,
+    /** 群内单个成员是否参与 AI 发言，缺省为 true。 */
+    val memberEnabled: Map<String, Boolean> = emptyMap()
 )
 
 /**
@@ -23,7 +41,10 @@ data class GroupChatMessage(
     val time: String = "",
     val isMe: Boolean = false,
     /** 用户发送的图片本地路径（仅 isMe=true 时可能非空）；持久化到 group_histories */
-    val imagePath: String? = null
+    val imagePath: String? = null,
+    val voicePath: String? = null,
+    val voiceDuration: Int = 0,
+    val voiceTranscript: String? = null
 )
 
 class ChatItem(

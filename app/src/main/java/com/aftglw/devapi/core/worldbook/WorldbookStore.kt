@@ -1,61 +1,94 @@
 package com.aftglw.devapi.core.worldbook
 
 import android.content.Context
-import org.json.JSONArray
+import com.aftglw.devapi.core.storage.room.AppDatabase
+import com.aftglw.devapi.core.storage.room.WorldbookEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * 世界书存储与匹配。
  *
- * 存储：SharedPreferences JSON，key = "worldbook_$chatName"，值为 JSONArray。
- * 仿 wechat_chats 的存储模式，避免 SQLite schema 迁移。
+ * 底层已迁移到 Room 的 worldbook 表（每行一个条目，按 chat_name 索引）。
+ * 公共 API 保持同步签名，内部通过 `runBlocking(Dispatchers.IO)` 切到 IO 线程调用 Room。
  *
  * 匹配：常驻条目（constant=true）始终注入；非常驻条目需要 keywords 中
  * 任一关键词出现在最近用户消息中（大小写不敏感，中文直接包含匹配）。
  */
 object WorldbookStore {
 
-    private const val PREFS_NAME = "wechat_worldbook"
-    private const val KEY_PREFIX = "worldbook_"
-
-    /** SharedPreferences 中存储某角色的全部条目 */
-    fun load(ctx: Context, chatName: String): List<WorldbookEntry> {
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val raw = prefs.getString(KEY_PREFIX + chatName, "[]") ?: "[]"
-        return parseEntries(raw)
+    /** 读取某角色的全部条目（按 original_id 升序） */
+    fun load(ctx: Context, chatName: String): List<WorldbookEntry> = runBlocking {
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).worldbookDao()
+                .getForChat(chatName)
+                .map { it.toEntry() }
+        }
     }
 
     /** 全量保存（覆盖写） */
-    fun save(ctx: Context, chatName: String, entries: List<WorldbookEntry>) {
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val arr = JSONArray()
-        entries.forEach { arr.put(it.toJson()) }
-        prefs.edit().putString(KEY_PREFIX + chatName, arr.toString()).apply()
+    fun save(ctx: Context, chatName: String, entries: List<WorldbookEntry>) = runBlocking {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).worldbookDao()
+            dao.deleteForChat(chatName)
+            if (entries.isNotEmpty()) {
+                dao.insertAll(entries.map { it.toEntity(chatName) })
+            }
+        }
     }
 
     /** 新增条目，返回新列表（id 自动分配） */
-    fun add(ctx: Context, chatName: String, entry: WorldbookEntry): List<WorldbookEntry> {
-        val current = load(ctx, chatName)
-        val newId = (current.maxOfOrNull { it.id } ?: 0L) + 1L
-        val withId = entry.copy(id = newId)
-        val updated = current + withId
-        save(ctx, chatName, updated)
-        return updated
+    fun add(ctx: Context, chatName: String, entry: WorldbookEntry): List<WorldbookEntry> = runBlocking {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).worldbookDao()
+            val maxId = dao.getMaxOriginalId(chatName) ?: 0L
+            val newId = maxId + 1L
+            dao.insert(
+                WorldbookEntity(
+                    chatName = chatName,
+                    originalId = newId,
+                    keywords = entry.keywords.joinToString(","),
+                    content = entry.content,
+                    priority = entry.priority,
+                    constant = entry.constant,
+                    enabled = entry.enabled
+                )
+            )
+            dao.getForChat(chatName).map { it.toEntry() }
+        }
     }
 
     /** 更新指定 id 的条目，返回新列表；未找到则原样返回 */
-    fun update(ctx: Context, chatName: String, entry: WorldbookEntry): List<WorldbookEntry> {
-        val current = load(ctx, chatName)
-        val updated = current.map { if (it.id == entry.id) entry else it }
-        if (updated != current) save(ctx, chatName, updated)
-        return updated
+    fun update(ctx: Context, chatName: String, entry: WorldbookEntry): List<WorldbookEntry> = runBlocking {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).worldbookDao()
+            val existing = dao.getForChat(chatName).firstOrNull { it.originalId == entry.id }
+            if (existing != null) {
+                dao.update(
+                    existing.copy(
+                        keywords = entry.keywords.joinToString(","),
+                        content = entry.content,
+                        priority = entry.priority,
+                        constant = entry.constant,
+                        enabled = entry.enabled
+                    )
+                )
+            }
+            dao.getForChat(chatName).map { it.toEntry() }
+        }
     }
 
     /** 删除指定 id 的条目，返回新列表 */
-    fun delete(ctx: Context, chatName: String, id: Long): List<WorldbookEntry> {
-        val current = load(ctx, chatName)
-        val updated = current.filterNot { it.id == id }
-        if (updated.size != current.size) save(ctx, chatName, updated)
-        return updated
+    fun delete(ctx: Context, chatName: String, id: Long): List<WorldbookEntry> = runBlocking {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).worldbookDao()
+            val existing = dao.getForChat(chatName).firstOrNull { it.originalId == id }
+            if (existing != null) {
+                dao.deleteByRowId(existing.rowId)
+            }
+            dao.getForChat(chatName).map { it.toEntry() }
+        }
     }
 
     /**
@@ -95,16 +128,28 @@ object WorldbookStore {
             }
         }
     }
-
-    /** 解析 JSON 字符串为条目列表 */
-    internal fun parseEntries(raw: String): List<WorldbookEntry> {
-        if (raw.isBlank()) return emptyList()
-        return try {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { arr.getJSONObject(it) }
-                .map { WorldbookEntry.fromJson(it) }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
 }
+
+private fun WorldbookEntity.toEntry(): WorldbookEntry {
+    val kwRaw = keywords
+    val kws = if (kwRaw.isBlank()) emptyList()
+    else kwRaw.split(",", "，", "、").map { it.trim() }.filter { it.isNotEmpty() }
+    return WorldbookEntry(
+        id = originalId,
+        keywords = kws,
+        content = content,
+        priority = priority,
+        constant = constant,
+        enabled = enabled
+    )
+}
+
+private fun WorldbookEntry.toEntity(chatName: String): WorldbookEntity = WorldbookEntity(
+    chatName = chatName,
+    originalId = id,
+    keywords = keywords.joinToString(","),
+    content = content,
+    priority = priority,
+    constant = constant,
+    enabled = enabled
+)

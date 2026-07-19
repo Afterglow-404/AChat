@@ -1,13 +1,24 @@
 package com.aftglw.devapi.network
 
 import android.content.Context
+import com.aftglw.devapi.core.security.SecureKeyStore
 import com.aftglw.devapi.model.ChatMessage
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
 class OpenAiService(context: Context) : AiService {
 
+    private val appCtx = context.applicationContext
     private val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+
+    /** 当前在飞的 OkHttp Call；供 [cancel] 使用 */
+    @Volatile private var currentCall: okhttp3.Call? = null
+
+    override fun cancel() {
+        currentCall?.cancel()
+        currentCall = null
+    }
 
     /** 检测当前配置是否指向 DeepSeek API */
     private fun isDeepSeek(): Boolean =
@@ -19,75 +30,94 @@ class OpenAiService(context: Context) : AiService {
 
     override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
 
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
-            HttpRetry.retry("OpenAi") {
-            val messages = buildMessages(history, userMessage, systemPrompt)
-            val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
-            val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
-                "Authorization" to "Bearer $apiKey")
-            val response = HttpClient.execute(request)
-
-            val json = JSONObject(response)
-            val choices = json.getJSONArray("choices")
-            if (choices.length() > 0) {
-                val msgObj = choices.getJSONObject(0).getJSONObject("message")
-                val reasoningContent = msgObj.optString("reasoning_content", "")
-                if (reasoningContent.isNotEmpty()) {
-                    android.util.Log.d("OpenAi", "DeepSeek reasoning (${reasoningContent.length} chars)")
-                }
-                var reply = msgObj.optString("content", "").trim()
-                val toolCalls = msgObj.optJSONArray("tool_calls")
-                if (toolCalls != null && toolCalls.length() > 0) {
-                    if (toolCallsOut != null) {
-                        for (j in 0 until toolCalls.length()) {
-                            val tc = toolCalls.getJSONObject(j)
-                            val func = tc.getJSONObject("function")
-                            val id = tc.optString("id", "")
-                            toolCallsOut.add(com.aftglw.devapi.network.ToolCall(
-                                name = func.getString("name"),
-                                arguments = func.optString("arguments", "{}"),
-                                id = id
-                            ))
-                        }
-                    } else {
-                        val sb = StringBuilder(reply)
-                        for (j in 0 until toolCalls.length()) {
-                            val func = toolCalls.getJSONObject(j).getJSONObject("function")
-                            sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
-                        }
-                        reply = sb.toString().trim()
+            runBlocking {
+                HttpRetry.retrySuspend("OpenAi") {
+                    val messages = buildMessages(history, userMessage, systemPrompt)
+                    val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
+                    val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
+                        "Authorization" to "Bearer $apiKey")
+                    val call = HttpClient.client.newCall(request)
+                    currentCall = call
+                    val response = try {
+                        call.execute()
+                    } finally {
+                        currentCall = null
                     }
+                    val respBody = try {
+                        if (!response.isSuccessful) {
+                            val errBody = response.body?.string() ?: ""
+                            throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
+                        }
+                        response.body?.string() ?: ""
+                    } finally {
+                        response.close()
+                    }
+
+                    val json = JSONObject(respBody)
+                    val choices = json.getJSONArray("choices")
+                    if (choices.length() > 0) {
+                        val msgObj = choices.getJSONObject(0).getJSONObject("message")
+                        val reasoningContent = msgObj.optString("reasoning_content", "")
+                        if (reasoningContent.isNotEmpty()) {
+                            android.util.Log.d("OpenAi", "DeepSeek reasoning (${reasoningContent.length} chars)")
+                        }
+                        var reply = msgObj.optString("content", "").trim()
+                        val toolCalls = msgObj.optJSONArray("tool_calls")
+                        if (toolCalls != null && toolCalls.length() > 0) {
+                            if (toolCallsOut != null) {
+                                for (j in 0 until toolCalls.length()) {
+                                    val tc = toolCalls.getJSONObject(j)
+                                    val func = tc.getJSONObject("function")
+                                    val id = tc.optString("id", "")
+                                    toolCallsOut.add(com.aftglw.devapi.network.ToolCall(
+                                        name = func.getString("name"),
+                                        arguments = func.optString("arguments", "{}"),
+                                        id = id
+                                    ))
+                                }
+                            } else {
+                                val sb = StringBuilder(reply)
+                                for (j in 0 until toolCalls.length()) {
+                                    val func = toolCalls.getJSONObject(j).getJSONObject("function")
+                                    sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
+                                }
+                                reply = sb.toString().trim()
+                            }
+                        }
+                        val usage = json.optJSONObject("usage")
+                        if (usage != null) {
+                            val pt = usage.optInt("prompt_tokens", 0)
+                            val ct = usage.optInt("completion_tokens", 0)
+                            prefs.edit()
+                                .putInt("last_tokens_in", pt)
+                                .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
+                                .putInt("last_tokens_out", ct)
+                                .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
+                                .apply()
+                        } else {
+                            val estIn = estimateTokenCount(systemPrompt, model) + messages.length() * 4 +
+                                estimateTokenCount(userMessage, model)
+                            val estOut = reply.length / 4
+                            prefs.edit()
+                                .putInt("last_tokens_in", estIn)
+                                .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
+                                .putInt("last_tokens_out", estOut)
+                                .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + estOut)
+                                .apply()
+                        }
+                        reply
+                    } else null
                 }
-                val usage = json.optJSONObject("usage")
-                if (usage != null) {
-                    val pt = usage.optInt("prompt_tokens", 0)
-                    val ct = usage.optInt("completion_tokens", 0)
-                    prefs.edit()
-                        .putInt("last_tokens_in", pt)
-                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
-                        .putInt("last_tokens_out", ct)
-                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
-                        .apply()
-                } else {
-                    val estIn = estimateTokenCount(systemPrompt, model) + messages.length() * 4 +
-                        estimateTokenCount(userMessage, model)
-                    val estOut = reply.length / 4
-                    prefs.edit()
-                        .putInt("last_tokens_in", estIn)
-                        .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
-                        .putInt("last_tokens_out", estOut)
-                        .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + estOut)
-                        .apply()
-                }
-                reply
-            } else null
             }
         } catch (e: Exception) {
+            // 协程取消透传：当外部 cancel 触发 call.cancel() 时，会抛 IOException("Canceled")
+            if (e is kotlinx.coroutines.CancellationException) throw e
             android.util.Log.w("OpenAi", "sendMessage failed", e)
             null
         }
@@ -103,87 +133,103 @@ class OpenAiService(context: Context) : AiService {
         toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ) {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
 
         if (baseUrl.isEmpty() || apiKey.isEmpty()) { onDone(""); return }
 
         try {
-            val result = HttpRetry.retry("OpenAi") {
-            val messages = buildMessages(history, userMessage, systemPrompt)
-            val body = buildRequestBody(model, messages, streaming = true, tools = buildToolsArray())
-            val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
-                "Authorization" to "Bearer $apiKey")
-            val httpResp = HttpClient.client.newCall(httpReq).execute()
-            if (!httpResp.isSuccessful) {
-                val errBody = httpResp.body?.string() ?: ""
-                httpResp.close()
-                throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
-            }
-            val reader = httpResp.body?.byteStream()?.bufferedReader()
-                ?: throw java.io.IOException("No response body")
-            var line: String?
-            val full = StringBuilder()
-            val toolCallAccum = mutableMapOf<Int, StringBuilder>()
-            var thinkingActive = false
-            try {
-                while (reader.readLine().also { line = it } != null) {
-                    val text = line ?: continue
-                    if (!text.startsWith("data: ")) continue
-                    val data = text.removePrefix("data: ").trim()
-                    if (data == "[DONE]") break
+            val result = runBlocking {
+                HttpRetry.retrySuspend("OpenAi") {
+                    val messages = buildMessages(history, userMessage, systemPrompt)
+                    val body = buildRequestBody(model, messages, streaming = true, tools = buildToolsArray())
+                    val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
+                        "Authorization" to "Bearer $apiKey")
+                    val call = HttpClient.client.newCall(httpReq)
+                    currentCall = call
+                    val httpResp = try {
+                        call.execute()
+                    } catch (e: Exception) {
+                        currentCall = null
+                        throw e
+                    }
+                    if (!httpResp.isSuccessful) {
+                        val errBody = httpResp.body?.string() ?: ""
+                        httpResp.close()
+                        currentCall = null
+                        throw java.io.IOException("HTTP ${httpResp.code} - $errBody")
+                    }
+                    val reader = httpResp.body?.byteStream()?.bufferedReader()
+                        ?: run { httpResp.close(); currentCall = null; throw java.io.IOException("No response body") }
+                    var line: String?
+                    val full = StringBuilder()
+                    val toolCallAccum = mutableMapOf<Int, StringBuilder>()
+                    var thinkingActive = false
                     try {
-                        val choices = JSONObject(data).optJSONArray("choices")
-                        val delta = choices?.optJSONObject(0)?.optJSONObject("delta") ?: continue
-                        val content = delta.optString("content", "")
-                        val rContent = delta.optString("reasoning_content", "")
-                        if (rContent.isNotEmpty() && !thinkingActive) {
-                            thinkingActive = true
-                            android.util.Log.d("OpenAi", "DeepSeek thinking started")
-                        }
-                        if (content.isNotEmpty()) { full.append(content); onChunk(content) }
-                        val tcArray = delta.optJSONArray("tool_calls")
-                        if (tcArray != null) {
-                            for (i in 0 until tcArray.length()) {
-                                val tc = tcArray.getJSONObject(i)
-                                val idx = tc.getInt("index")
-                                val acc = toolCallAccum.getOrPut(idx) { StringBuilder() }
-                                tc.optJSONObject("function")?.let { func ->
-                                    val name = func.optString("name", "")
-                                    if (name.isNotEmpty()) acc.append(name).append("\n")
-                                    acc.append(func.optString("arguments", ""))
+                        while (reader.readLine().also { line = it } != null) {
+                            val text = line ?: continue
+                            if (!text.startsWith("data: ")) continue
+                            val data = text.removePrefix("data: ").trim()
+                            if (data == "[DONE]") break
+                            try {
+                                val choices = JSONObject(data).optJSONArray("choices")
+                                val delta = choices?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+                                val content = delta.optString("content", "")
+                                val rContent = delta.optString("reasoning_content", "")
+                                if (rContent.isNotEmpty() && !thinkingActive) {
+                                    thinkingActive = true
+                                    android.util.Log.d("OpenAi", "DeepSeek thinking started")
                                 }
-                            }
+                                if (content.isNotEmpty()) { full.append(content); onChunk(content) }
+                                val tcArray = delta.optJSONArray("tool_calls")
+                                if (tcArray != null) {
+                                    for (i in 0 until tcArray.length()) {
+                                        val tc = tcArray.getJSONObject(i)
+                                        val idx = tc.getInt("index")
+                                        val acc = toolCallAccum.getOrPut(idx) { StringBuilder() }
+                                        tc.optJSONObject("function")?.let { func ->
+                                            val name = func.optString("name", "")
+                                            if (name.isNotEmpty()) acc.append(name).append("\n")
+                                            acc.append(func.optString("arguments", ""))
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) { }
                         }
-                    } catch (_: Exception) { }
-                }
-            } finally { reader.close(); httpResp.close() }
-            if (toolCallAccum.isNotEmpty()) {
-                if (toolCallsOut != null) {
-                    for ((_, acc) in toolCallAccum) {
-                        val parts = acc.toString().split("\n", limit = 2)
-                        val tName = parts.getOrElse(0) { "unknown" }
-                        val tArgs = parts.getOrElse(1) { "{}" }
-                        toolCallsOut.add(com.aftglw.devapi.network.ToolCall(tName, tArgs, ""))
+                    } finally { reader.close(); httpResp.close(); currentCall = null }
+                    if (toolCallAccum.isNotEmpty()) {
+                        if (toolCallsOut != null) {
+                            for ((_, acc) in toolCallAccum) {
+                                val parts = acc.toString().split("\n", limit = 2)
+                                val tName = parts.getOrElse(0) { "unknown" }
+                                val tArgs = parts.getOrElse(1) { "{}" }
+                                toolCallsOut.add(com.aftglw.devapi.network.ToolCall(tName, tArgs, ""))
+                            }
+                            full.toString()
+                        } else {
+                            val sb = StringBuilder(full.toString().trim())
+                            for ((_, acc) in toolCallAccum) {
+                                val parts = acc.toString().split("\n", limit = 2)
+                                val tName = parts.getOrElse(0) { "unknown" }
+                                val tArgs = parts.getOrElse(1) { "{}" }
+                                sb.append("【tool:" + tName + " " + tArgs + "】")
+                            }
+                            sb.toString().trim()
+                        }
+                    } else {
+                        full.toString()
                     }
-                    full.toString()
-                } else {
-                    val sb = StringBuilder(full.toString().trim())
-                    for ((_, acc) in toolCallAccum) {
-                        val parts = acc.toString().split("\n", limit = 2)
-                        val tName = parts.getOrElse(0) { "unknown" }
-                        val tArgs = parts.getOrElse(1) { "{}" }
-                        sb.append("【tool:" + tName + " " + tArgs + "】")
-                    }
-                    sb.toString().trim()
                 }
-            } else {
-                full.toString()
-            }
             }
             onDone(result)
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) {
+                // 用户主动取消：通知上层 onDone 空字符串，不再 onError
+                onDone("")
+                return
+            }
             android.util.Log.w("OpenAi", "sendMessageStream failed", e)
+            onError?.invoke(e.message ?: "stream failed")
             onDone("")
         }
     }

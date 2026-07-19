@@ -1,6 +1,5 @@
 package com.aftglw.devapi.core.worldbook
 
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -130,32 +129,6 @@ class WorldbookStoreTest {
         assertEquals(original.priority, restored.priority)
         assertEquals(original.constant, restored.constant)
         assertEquals(original.enabled, restored.enabled)
-    }
-
-    @Test
-    fun `parseEntries 解析合法 JSONArray`() {
-        val arr = JSONArray()
-        arr.put(entry(1L, listOf("kw1"), "c1").toJson())
-        arr.put(entry(2L, listOf("kw2"), "c2").toJson())
-        val result = WorldbookStore.parseEntries(arr.toString())
-        assertEquals(2, result.size)
-        assertEquals(1L, result[0].id)
-        assertEquals("c2", result[1].content)
-    }
-
-    @Test
-    fun `parseEntries 空字符串返回空列表`() {
-        assertTrue(WorldbookStore.parseEntries("").isEmpty())
-    }
-
-    @Test
-    fun `parseEntries 非法 JSON 返回空列表`() {
-        assertTrue(WorldbookStore.parseEntries("not a json").isEmpty())
-    }
-
-    @Test
-    fun `parseEntries 空 JSONArray 返回空列表`() {
-        assertTrue(WorldbookStore.parseEntries("[]").isEmpty())
     }
 
     @Test

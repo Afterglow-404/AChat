@@ -1,14 +1,17 @@
 package com.aftglw.devapi.viewmodel
 
 import android.app.Application
-import android.content.Context
-import android.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.aftglw.devapi.core.character.BuiltInCharacterLoader
+import com.aftglw.devapi.core.storage.room.AppDatabase
+import com.aftglw.devapi.core.storage.room.ChatEntity
 import com.aftglw.devapi.model.ChatItem
-import org.json.JSONArray
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
 class ChatsViewModel(app: Application) : AndroidViewModel(app) {
     private val _chats = MutableLiveData<List<ChatItem>>(loadChatsWithBuiltin())
     val chats: LiveData<List<ChatItem>> = _chats
@@ -18,16 +21,17 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
         else {
             val q = query.trim().lowercase()
             val app = getApplication<Application>()
-            val histPrefs = app.getSharedPreferences("chat_histories", android.content.Context.MODE_PRIVATE)
-            loadChats().filter { chat ->
+            val all = loadChats()
+            all.filter { chat ->
                 if (chat.name.lowercase().contains(q)) return@filter true
-                val histJson = histPrefs.getString(chat.name, "[]") ?: "[]"
-                val histArr = JSONArray(histJson)
-                for (j in 0 until histArr.length()) {
-                    val text = histArr.getJSONObject(j).optString("text", "")
-                    if (text.lowercase().contains(q)) return@filter true
+                // 扫历史文本匹配
+                val hist = runBlocking {
+                    withContext(Dispatchers.IO) {
+                        AppDatabase.get(app).messageDao()
+                            .getMessages(chat.name, isGroup = false)
+                    }
                 }
-                false
+                hist.any { it.text.lowercase().contains(q) }
             }
         }
     }
@@ -36,58 +40,54 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteChat(id: String) {
         val chats = loadChats()
-        val target = chats.find { it.id == id }
-        if (target != null) {
-            // 清除聊天历史
-            val histPrefs = getApplication<Application>().getSharedPreferences("chat_histories", android.content.Context.MODE_PRIVATE)
-            histPrefs.edit().remove(target.name).apply()
-            // 清除相关设置
-            val settings = getApplication<Application>().getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-            settings.edit().apply {
-                remove("proactive_enabled_${target.name}")
-                remove("proactive_daily_limit_${target.name}")
-                remove("proactive_idle_hours_${target.name}")
-                remove("proactive_last_${target.name}")
-                remove("proactive_silence_${target.name}")
-                remove("proactive_count_${target.name}")
-                remove("proactive_need_care_${target.name}")
-                remove("last_active_${target.name}")
-                remove("last_mood_${target.name}")
-                remove("persona_optimized_${target.name}")
-                remove("affinity_v2_${target.name}")
-                remove("affinity_mode_${target.name}")
-                remove("affinity_lock_${target.name}")
-                apply()
+        val target = chats.find { it.id == id } ?: return
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val db = AppDatabase.get(getApplication())
+                db.runInTransaction {
+                    db.chatDao().deleteById(id)
+                    db.messageDao().deleteForChat(target.name, isGroup = false)
+                }
             }
         }
-        saveChats(chats.filter { it.id != id })
+        // 清除相关设置（proactive/mood/affinity 等仍用 SharedPreferences）
+        val settings = getApplication<Application>().getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+        settings.edit().apply {
+            remove("proactive_enabled_${target.name}")
+            remove("proactive_daily_limit_${target.name}")
+            remove("proactive_idle_hours_${target.name}")
+            remove("proactive_last_${target.name}")
+            remove("proactive_silence_${target.name}")
+            remove("proactive_count_${target.name}")
+            remove("proactive_need_care_${target.name}")
+            remove("last_active_${target.name}")
+            remove("last_mood_${target.name}")
+            remove("persona_optimized_${target.name}")
+            remove("affinity_v2_${target.name}")
+            remove("affinity_mode_${target.name}")
+            remove("affinity_lock_${target.name}")
+            apply()
+        }
         refresh()
     }
 
     fun togglePin(id: String) {
-        saveChats(loadChats().map { if (it.id == id) it.copy(pinned = !it.pinned) else it })
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val dao = AppDatabase.get(getApplication()).chatDao()
+                val e = dao.getById(id) ?: return@withContext
+                dao.upsert(e.copy(pinned = !e.pinned))
+            }
+        }
         refresh()
     }
 
-    private fun saveChats(chats: List<ChatItem>) {
-        val prefs = getApplication<Application>().getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
-        val arr = JSONArray()
-        for (c in chats) {
-            val obj = org.json.JSONObject()
-            obj.put("id", c.id)
-            obj.put("name", c.name)
-            obj.put("lastMessage", c.lastMessage)
-            obj.put("time", c.time)
-            obj.put("unreadCount", c.unreadCount)
-            obj.put("avatarColor", String.format("#%06X", 0xFFFFFF and c.avatarColor))
-            obj.put("pinned", c.pinned)
-            obj.put("persona", c.persona)
-            obj.put("avatarUri", c.avatarUri)
-            obj.put("characterFolder", c.characterFolder)
-            obj.put("thinkingMessage", c.thinkingMessage)
-            arr.put(obj)
+    private fun saveChats(chats: List<ChatItem>) = runBlocking {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(getApplication()).chatDao()
+            dao.deleteAll()
+            if (chats.isNotEmpty()) dao.insertAll(chats.map { it.toEntity() })
         }
-        prefs.edit().putString("chats", arr.toString()).apply()
     }
 
     /**
@@ -96,7 +96,7 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun loadChatsWithBuiltin(): List<ChatItem> {
         val app = getApplication<Application>()
-        val prefs = app.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
         val existing = loadChats()
         if (existing.isNotEmpty()) return existing
         // 首次启动：加载内置角色并持久化
@@ -112,34 +112,43 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
         return loadChats()
     }
 
-    private fun loadChats(): List<ChatItem> {
-        val app = getApplication<Application>()
-        val prefs = app.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
-        val histPrefs = app.getSharedPreferences("chat_histories", android.content.Context.MODE_PRIVATE)
-        val json = prefs.getString("chats", "[]") ?: "[]"
-        val arr = JSONArray(json)
-        val result = mutableListOf<ChatItem>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i)
-            val name = obj.getString("name")
-            val histJson = histPrefs.getString(name, "[]") ?: "[]"
-            val histArr = JSONArray(histJson)
-            var lastMsg = ""
-            if (histArr.length() > 0) {
-                lastMsg = histArr.getJSONObject(histArr.length() - 1).optString("text", "")
-            }
-            result.add(ChatItem(
-                obj.getString("id"), name,
-                lastMsg, obj.optString("time", ""),
-                obj.optInt("unreadCount", 0),
-                Color.parseColor(obj.optString("avatarColor", "#07C160")),
-                obj.optBoolean("pinned", false),
-                obj.optString("persona", ""),
-                obj.optString("avatarUri", ""),
-                obj.optString("characterFolder", ""),
-                obj.optString("thinkingMessage", "")
-            ))
+    private fun loadChats(): List<ChatItem> = runBlocking {
+        withContext(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val db = AppDatabase.get(app)
+            val mDao = db.messageDao()
+            db.chatDao().getAll().map { e ->
+                val lastMsg = mDao.getLastMessageText(e.name, isGroup = false) ?: ""
+                e.toModel(lastMsg)
+            }.sortedByDescending { it.pinned }
         }
-        return result.sortedByDescending { it.pinned }
     }
 }
+
+private fun ChatEntity.toModel(lastMsg: String): ChatItem = ChatItem(
+    id = id,
+    name = name,
+    lastMessage = lastMsg,
+    time = time,
+    unreadCount = unreadCount,
+    avatarColor = avatarColor,
+    pinned = pinned,
+    persona = persona,
+    avatarUri = avatarUri,
+    characterFolder = characterFolder,
+    thinkingMessage = thinkingMessage
+)
+
+private fun ChatItem.toEntity(): ChatEntity = ChatEntity(
+    id = id,
+    name = name,
+    lastMessage = lastMessage,
+    time = time,
+    unreadCount = unreadCount,
+    avatarColor = avatarColor,
+    pinned = pinned,
+    persona = persona,
+    avatarUri = avatarUri,
+    characterFolder = characterFolder,
+    thinkingMessage = thinkingMessage
+)

@@ -109,11 +109,9 @@ class LocalAiService(private val ctx: Context) : AiService {
         return LlamaEngine.findModel(ctx) != null
     }
 
-    /** 获取可用模型信息 */
+    /** 获取可用模型文件（内部 + 外部存储） */
     fun getAvailableModels(): List<File> {
-        val dir = File(ctx.filesDir, "models")
-        if (!dir.exists()) return emptyList()
-        return dir.listFiles { f -> f.extension == "gguf" }?.toList() ?: emptyList()
+        return LlamaEngine.listAvailableModels(ctx)
     }
 }
 

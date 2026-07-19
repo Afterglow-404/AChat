@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.aftglw.devapi.network.AiServiceFactory
+import com.aftglw.devapi.network.NetworkMonitor
 import com.aftglw.devapi.feature.chat.ChatScreen
 import com.aftglw.devapi.feature.chat.ChatsScreen
 import com.aftglw.devapi.ui.screens.DiscoverScreen
@@ -61,6 +62,7 @@ fun WeChatApp() {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) {
         AiServiceFactory.init(ctx)
+        NetworkMonitor.init(ctx)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             (ctx as? androidx.activity.ComponentActivity)?.requestPermissions(
                 arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
