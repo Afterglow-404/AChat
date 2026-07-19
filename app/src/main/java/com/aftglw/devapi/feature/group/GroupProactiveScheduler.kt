@@ -58,14 +58,15 @@ object GroupProactiveScheduler {
     }
 
     /**
-     * 构建主动插话时给 AI 的系统 prompt。
+     * 构建主动插话时给 callMember 的 userMessage 提示。
+     *
+     * 群名 / 成员 / 角色名等信息已在 [com.aftglw.devapi.feature.group.GroupChatScreen.memberSystemPrompt] 中注入，
+     * 这里只返回插话动机提示，避免信息重复。
      */
-    fun buildSpontaneousPrompt(groupName: String, memberName: String, members: List<String>): String {
+    fun buildSpontaneousHint(memberName: String): String {
         return buildString {
-            appendLine("你在群聊「$groupName」中，你的角色名是 $memberName。")
-            appendLine("群成员：${members.joinToString("、")}")
-            appendLine("现在没有人说话，但你突然想起一件事 / 想吐槽 / 想分享点什么。")
-            appendLine("请以 $memberName 的身份自然插话，1-2 句话即可，不要说'作为AI'。")
+            appendLine("（现在群里没有人说话，但你突然想起一件事 / 想吐槽 / 想分享点什么）")
+            appendLine("请以 $memberName 的身份自然插话，1-2 句话即可。")
             appendLine("可以用括号描述动作和表情，例如【叹气】【兴奋】。")
         }
     }

@@ -66,7 +66,8 @@ object MemoryStore {
         }
 
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
-        val apiKey = prefs.getString("ai_api_key", "") ?: return null
+        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
+        if (apiKey.isEmpty()) return null
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: return null
         val embedModel = when {
             baseUrl.contains("deepseek", ignoreCase = true) -> "text-embedding-v2"

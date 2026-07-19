@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.group
 
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +15,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +31,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.core.character.BuiltInCharacterLoader
 import com.aftglw.devapi.model.GroupChat
+import com.aftglw.devapi.model.GroupChatMode
 import com.aftglw.devapi.ui.theme.AchatTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 群信息页 —— 重命名 / 成员管理 / 解散群。
@@ -43,7 +51,18 @@ fun GroupInfoPage(
     onGroupDeleted: () -> Unit
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var currentGroup by remember { mutableStateOf(group) }
+
+    fun commitGroup(updated: GroupChat) {
+        currentGroup = updated
+        onGroupChanged(updated)
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                GroupChatManager.saveGroup(ctx, updated)
+            }
+        }
+    }
 
     // 重命名对话框
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -52,11 +71,13 @@ fun GroupInfoPage(
     // 添加成员对话框
     var showAddDialog by remember { mutableStateOf(false) }
 
+    var showModeDialog by remember { mutableStateOf(false) }
+
     // 解散确认
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     // 当前群成员 + 人设预览（每次 currentGroup 变化时刷新）
-    val memberInfo = remember(currentGroup.members) {
+    val memberInfo = remember(currentGroup.members, currentGroup.memberEnabled) {
         currentGroup.members.map { name ->
             val avatarUri = GroupChatManager.getMemberAvatarUri(ctx, name)
             val avatar = if (avatarUri.isNotEmpty()) {
@@ -114,6 +135,16 @@ fun GroupInfoPage(
                 HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
             }
 
+            item(key = "group_mode") {
+                CardRow(
+                    title = "发言模式",
+                    subtitle = currentGroup.mode.title,
+                    trailingIcon = Icons.Filled.Tune,
+                    onClick = { showModeDialog = true }
+                )
+                HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
+            }
+
             // 成员标题
             item(key = "members_header") {
                 Row(
@@ -136,16 +167,49 @@ fun GroupInfoPage(
 
             // 成员列表
             items(memberInfo, key = { it.first }) { (name, avatar, persona) ->
+                val memberIndex = currentGroup.members.indexOf(name)
+                val enabled = currentGroup.memberEnabled[name] != false
                 MemberRow(
                     name = name,
                     persona = persona,
                     avatar = avatar,
+                    enabled = enabled,
+                    canMoveUp = memberIndex > 0,
+                    canMoveDown = memberIndex in 0 until (currentGroup.members.size - 1),
+                    onToggle = {
+                        val activeCount = currentGroup.members.count { currentGroup.memberEnabled[it] != false }
+                        if (enabled && activeCount <= 1) {
+                            Toast.makeText(ctx, "至少保留一名可发言成员", Toast.LENGTH_SHORT).show()
+                        } else {
+                            commitGroup(currentGroup.copy(
+                                memberEnabled = currentGroup.memberEnabled + (name to !enabled)
+                            ))
+                        }
+                    },
+                    onMoveUp = {
+                        if (memberIndex > 0) {
+                            val reordered = currentGroup.members.toMutableList()
+                            val item = reordered.removeAt(memberIndex)
+                            reordered.add(memberIndex - 1, item)
+                            commitGroup(currentGroup.copy(members = reordered))
+                        }
+                    },
+                    onMoveDown = {
+                        if (memberIndex in 0 until (currentGroup.members.size - 1)) {
+                            val reordered = currentGroup.members.toMutableList()
+                            val item = reordered.removeAt(memberIndex)
+                            reordered.add(memberIndex + 1, item)
+                            commitGroup(currentGroup.copy(members = reordered))
+                        }
+                    },
                     onRemove = {
-                        if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
-                            currentGroup = currentGroup.copy(
-                                members = currentGroup.members.filter { it != name }
-                            )
-                            onGroupChanged(currentGroup)
+                        if (currentGroup.members.size <= 1) {
+                            Toast.makeText(ctx, "至少保留一名群成员", Toast.LENGTH_SHORT).show()
+                        } else if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
+                            commitGroup(currentGroup.copy(
+                                members = currentGroup.members.filter { it != name },
+                                memberEnabled = currentGroup.memberEnabled - name
+                            ))
                         }
                     }
                 )
@@ -220,10 +284,10 @@ fun GroupInfoPage(
                                 Modifier.fillMaxWidth()
                                     .clickable {
                                         if (GroupChatManager.addMember(ctx, currentGroup.id, name)) {
-                                            currentGroup = currentGroup.copy(
-                                                members = currentGroup.members + name
-                                            )
-                                            onGroupChanged(currentGroup)
+                                            commitGroup(currentGroup.copy(
+                                                members = currentGroup.members + name,
+                                                memberEnabled = currentGroup.memberEnabled + (name to true)
+                                            ))
                                         }
                                         showAddDialog = false
                                     }
@@ -247,6 +311,47 @@ fun GroupInfoPage(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("关闭") } }
+        )
+    }
+
+    if (showModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showModeDialog = false },
+            title = { Text("选择群聊发言模式") },
+            text = {
+                Column {
+                    GroupChatMode.entries.forEach { mode ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable {
+                                    val updated = currentGroup.copy(mode = mode)
+                                    commitGroup(updated)
+                                    showModeDialog = false
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = currentGroup.mode == mode,
+                                onClick = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(mode.title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    mode.description,
+                                    fontSize = 12.sp,
+                                    color = AchatTheme.colors.onSurface.copy(alpha = 0.55f)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showModeDialog = false }) { Text("关闭") }
+            }
         )
     }
 
@@ -306,6 +411,12 @@ private fun MemberRow(
     name: String,
     persona: String,
     avatar: androidx.compose.ui.graphics.ImageBitmap?,
+    enabled: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onToggle: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
     onRemove: () -> Unit
 ) {
     Row(
@@ -345,6 +456,19 @@ private fun MemberRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMoveUp, enabled = canMoveUp, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.KeyboardArrowUp, "上移", modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onMoveDown, enabled = canMoveDown, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.KeyboardArrowDown, "下移", modifier = Modifier.size(18.dp))
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = { onToggle() },
+                modifier = Modifier.size(36.dp, 24.dp)
+            )
         }
         IconButton(onClick = onRemove) {
             Icon(

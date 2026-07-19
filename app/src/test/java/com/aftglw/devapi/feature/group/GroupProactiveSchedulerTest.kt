@@ -81,10 +81,10 @@ class GroupProactiveSchedulerTest {
     }
 
     @Test
-    fun `buildSpontaneousPrompt 包含群名与角色名`() {
-        val prompt = GroupProactiveScheduler.buildSpontaneousPrompt("测试群", "钦灵", members)
-        assertTrue(prompt.contains("测试群"))
-        assertTrue(prompt.contains("钦灵"))
-        assertTrue(prompt.contains("Alice"))
+    fun `buildSpontaneousHint 包含角色名与插话动机`() {
+        val hint = GroupProactiveScheduler.buildSpontaneousHint("钦灵")
+        // 群名/成员已由 memberSystemPrompt 注入，hint 只需包含角色名与插话提示
+        assertTrue(hint.contains("钦灵"))
+        assertTrue(hint.contains("插话") || hint.contains("想说"))
     }
 }
