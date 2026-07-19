@@ -352,7 +352,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 ChatHistory.saveEntries(
                     ctx,
                     chatKey,
-                    bubbles.filter { it.label != "sticker" }.map {
+                    bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
                         com.aftglw.devapi.core.storage.ChatHistoryEntry(
                             text = it.text,
                             isMe = it.isMe,
