@@ -37,12 +37,12 @@ class OpenAiService(context: Context) : AiService {
 
         return try {
             runBlocking {
-                HttpRetry.retrySuspend("OpenAi") {
+                HttpRetry.retrySuspend("OpenAi", maxRetries = requestMaxRetries(baseUrl)) {
                     val messages = buildMessages(history, userMessage, systemPrompt)
                     val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
                     val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
                         "Authorization" to "Bearer $apiKey")
-                    val call = HttpClient.client.newCall(request)
+                    val call = HttpClient.clientFor(baseUrl).newCall(request)
                     currentCall = call
                     val response = try {
                         call.execute()
@@ -140,12 +140,12 @@ class OpenAiService(context: Context) : AiService {
 
         try {
             val result = runBlocking {
-                HttpRetry.retrySuspend("OpenAi") {
+                HttpRetry.retrySuspend("OpenAi", maxRetries = requestMaxRetries(baseUrl)) {
                     val messages = buildMessages(history, userMessage, systemPrompt)
                     val body = buildRequestBody(model, messages, streaming = true, tools = buildToolsArray())
                     val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
                         "Authorization" to "Bearer $apiKey")
-                    val call = HttpClient.client.newCall(httpReq)
+                    val call = HttpClient.clientFor(baseUrl).newCall(httpReq)
                     currentCall = call
                     val httpResp = try {
                         call.execute()
@@ -233,6 +233,10 @@ class OpenAiService(context: Context) : AiService {
             onDone("")
         }
     }
+
+    /** A desktop/Wisp debug endpoint should fail immediately when it is stopped. */
+    private fun requestMaxRetries(baseUrl: String): Int =
+        if (HttpClient.isLikelyLanUrl(baseUrl)) 0 else 3
 
     private fun buildRequestBody(
         model: String, messages: JSONArray, streaming: Boolean,

@@ -26,7 +26,18 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
     /** 调用 MCP 的 tools/list，返回工具列表 */
     fun listTools(): Result<List<ToolInfo>> = runCatching {
         val resp = jsonRpcCall("tools/list", JSONObject())
-        val tools = resp.optJSONArray("result") ?: resp.optJSONArray("tools") ?: JSONArray()
+        if (resp.has("error")) {
+            val error = resp.optJSONObject("error")
+            throw IllegalStateException(error?.optString("message", "MCP tools/list failed") ?: "MCP tools/list failed")
+        }
+        // Standard MCP returns result: { tools: [...] }; keep the old array shape for compatibility.
+        val result = resp.opt("result")
+        val tools = when (result) {
+            is JSONObject -> result.optJSONArray("tools") ?: JSONArray()
+            is JSONArray -> result
+            null -> resp.optJSONArray("tools") ?: JSONArray()
+            else -> resp.optJSONArray("tools") ?: JSONArray()
+        }
         (0 until tools.length()).map { i ->
             val t = tools.getJSONObject(i)
             ToolInfo(
@@ -44,6 +55,10 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
             put("arguments", arguments)
         }
         val resp = jsonRpcCall("tools/call", params)
+        if (resp.has("error")) {
+            val error = resp.optJSONObject("error")
+            throw IllegalStateException(error?.optString("message", "MCP tools/call failed") ?: "MCP tools/call failed")
+        }
         val result = resp.optJSONObject("result")
         val content = result?.optJSONArray("content")
         if (content != null && content.length() > 0) {
@@ -72,7 +87,9 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
         val request = builder.build()
         val response = mcpHttpClient.newCall(request).execute()
         val respBody = response.body?.string() ?: "{}"
+        val statusCode = response.code
         response.close()
+        if (!response.isSuccessful) throw IllegalStateException("MCP HTTP $statusCode: ${respBody.take(300)}")
         return JSONObject(respBody)
     }
 
