@@ -98,11 +98,11 @@ fun DebugPage(
                 )
                 Text("${"%.1f".format(ttsPitch)}", fontSize = 13.sp, color = Color(0xFF1A1A1A), modifier = Modifier.width(36.dp))
             }
-            // 引擎选择（本地 / 云端）
+            // 引擎选择（本地 / 云端 / PC GPT-SoVITS）
             var ttsEngine by remember { mutableStateOf(sysPrefs.getString("tts_engine", "local") ?: "local") }
             Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("引擎", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
-                val engineOptions = listOf("local" to "本地", "cloud" to "云端")
+                val engineOptions = listOf("local" to "本地", "cloud" to "云端", "gpt_sovits" to "PC GPT-SoVITS")
                 val engineExpanded = remember { mutableStateOf(false) }
                 Box(modifier = Modifier.weight(1f)) {
                     val engineLabel = engineOptions.find { it.first == ttsEngine }?.second ?: "本地"
@@ -116,8 +116,9 @@ fun DebugPage(
             }
             // 云端配置
             if (ttsEngine == "cloud") {
-                // 音色选择
-                var ttsVoice by remember { mutableStateOf(sysPrefs.getString("tts_voice", "alloy") ?: "alloy") }
+                // 音色选择（按引擎存储，避免污染其他引擎）
+                val cloudVoiceKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.enginePrefsKey("cloud")
+                var ttsVoice by remember { mutableStateOf(sysPrefs.getString(cloudVoiceKey, "alloy") ?: "alloy") }
                 Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("音色", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
                     val voiceExpanded = remember { mutableStateOf(false) }
@@ -125,43 +126,108 @@ fun DebugPage(
                         Text(ttsVoice, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { voiceExpanded.value = true })
                         DropdownMenu(expanded = voiceExpanded.value, onDismissRequest = { voiceExpanded.value = false }) {
                             com.aftglw.devapi.core.voice.CloudTtsService.AVAILABLE_VOICES.forEach { v ->
-                                DropdownMenuItem(text = { Text(v, fontSize = 13.sp) }, onClick = { ttsVoice = v; sysPrefs.edit().putString("tts_voice", v).apply(); voiceExpanded.value = false })
+                                DropdownMenuItem(text = { Text(v, fontSize = 13.sp) }, onClick = { ttsVoice = v; sysPrefs.edit().putString(cloudVoiceKey, v).apply(); voiceExpanded.value = false })
                             }
                         }
                     }
                 }
                 TextFieldRow("TTS 端点", "留空则用 AI API URL + /v1/audio/speech", sysPrefs.getString("tts_cloud_url", "") ?: "") { v -> sysPrefs.edit().putString("tts_cloud_url", v).apply() }
-                PasswordRow("TTS Key", "留空则复用 AI API Key", sysPrefs.getString("tts_cloud_key", "") ?: "") { v -> sysPrefs.edit().putString("tts_cloud_key", v).apply() }
+                PasswordRow("TTS Key", "留空则复用 AI API Key", com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "tts_cloud_key")) { v -> com.aftglw.devapi.core.security.SecureKeyStore.putString(ctx, "tts_cloud_key", v) }
                 TextFieldRow("TTS 模型", "默认 tts-1", sysPrefs.getString("tts_cloud_model", "tts-1") ?: "tts-1") { v -> sysPrefs.edit().putString("tts_cloud_model", v).apply() }
             }
-            // 试听按钮
+            // PC GPT-SoVITS 配置
+            if (ttsEngine == "gpt_sovits") {
+                TextFieldRow("PC 服务地址", "如 http://192.168.1.10:9880", sysPrefs.getString("tts_gptsovits_url", "") ?: "") { v -> sysPrefs.edit().putString("tts_gptsovits_url", v).apply() }
+                // 探活按钮 + 状态显示（availableVoices 随引擎切换重置，避免上一次引擎残留）
+                var healthStatus by remember { mutableStateOf("") }
+                var checking by remember { mutableStateOf(false) }
+                var availableVoices by remember(ttsEngine) { mutableStateOf<List<String>>(emptyList()) }
+                val healthScope = rememberCoroutineScope()
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        enabled = !checking,
+                        onClick = {
+                            val url = sysPrefs.getString("tts_gptsovits_url", "")?.trim() ?: ""
+                            if (url.isEmpty()) {
+                                healthStatus = "请先填写服务地址"
+                                return@TextButton
+                            }
+                            checking = true
+                            healthStatus = "检测中..."
+                            healthScope.launch {
+                                try {
+                                    val ok = com.aftglw.devapi.core.voice.RemoteGptSoVitsTtsProvider(ctx).let { p ->
+                                        // 复用 Provider 的 isAvailable（含 5min 缓存）
+                                        kotlinx.coroutines.withTimeoutOrNull(3000L) { p.isAvailable() } ?: false
+                                    }
+                                    healthStatus = if (ok) "✓ 在线" else "✗ 无法连接"
+                                    if (ok) {
+                                        // 拉取音色列表
+                                        val voices = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            try {
+                                                val req = okhttp3.Request.Builder()
+                                                    .url("${url.trimEnd('/')}/speakers")
+                                                    .get().build()
+                                                val resp = com.aftglw.devapi.network.HttpClient.client.newCall(req).execute()
+                                                resp.use { r ->
+                                                    if (r.isSuccessful) {
+                                                        org.json.JSONArray(r.body?.string() ?: "[]")
+                                                            .let { arr -> List(arr.length()) { arr.optString(it) } }
+                                                    } else emptyList()
+                                                }
+                                            } catch (_: Exception) { emptyList() }
+                                        }
+                                        availableVoices = voices
+                                        if (voices.isNotEmpty()) healthStatus = "✓ 在线（${voices.size} 个音色）"
+                                    }
+                                } catch (e: Exception) {
+                                    healthStatus = "✗ ${e.message?.take(40)}"
+                                }
+                                checking = false
+                            }
+                        }
+                    ) { Text(if (checking) "检测中..." else "检测连接", color = Color(0xFF07C160)) }
+                    Spacer(Modifier.width(12.dp))
+                    Text(healthStatus, fontSize = 13.sp, color = if (healthStatus.startsWith("✓")) Color(0xFF07C160) else Color(0xFF888888))
+                }
+                // 音色选择（从 /speakers 拉取的列表，按引擎存储）
+                if (availableVoices.isNotEmpty()) {
+                    val gptVoiceKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.enginePrefsKey("gpt_sovits")
+                    var ttsVoice by remember(availableVoices) {
+                        mutableStateOf(sysPrefs.getString(gptVoiceKey, availableVoices.first()) ?: availableVoices.first())
+                    }
+                    Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("音色", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                        val voiceExpanded = remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.weight(1f)) {
+                            Text(ttsVoice, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { voiceExpanded.value = true })
+                            DropdownMenu(expanded = voiceExpanded.value, onDismissRequest = { voiceExpanded.value = false }) {
+                                availableVoices.forEach { v ->
+                                    DropdownMenuItem(text = { Text(v, fontSize = 13.sp) }, onClick = { ttsVoice = v; sysPrefs.edit().putString(gptVoiceKey, v).apply(); voiceExpanded.value = false })
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp)) {
+                    Text("PC 离线时自动降级到云端 / 系统 TTS", fontSize = 12.sp, color = Color(0xFF888888))
+                }
+            }
+            // 试听按钮（统一走 TtsProviderManager，自动降级；voiceId 由 router 按引擎解析）
             val previewScope = rememberCoroutineScope()
             Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp)) {
                 TextButton(onClick = {
                     val engine = sysPrefs.getString("tts_engine", "local") ?: "local"
                     val sentence = "你好呀，我是你的 AI 伙伴。"
-                    if (engine == "cloud") {
-                        val voice = sysPrefs.getString("tts_voice", "alloy") ?: "alloy"
-                        val svc = com.aftglw.devapi.core.voice.CloudTtsService(ctx)
-                        previewScope.launch {
-                            try {
-                                val path = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    svc.synthesize(sentence, voice)
-                                }
-                                com.aftglw.devapi.core.voice.VoicePlayer(ctx).play(path)
-                            } catch (e: Exception) {
-                                Toast.makeText(ctx, "云端 TTS 失败: ${e.message?.take(60)}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    } else {
-                        val tts = com.aftglw.devapi.core.voice.VoiceTts(ctx)
-                        if (tts.initSync(2000)) {
-                            tts.updateParams(rate = ttsRate, pitch = ttsPitch)
-                            tts.speak(sentence, "tts_test",
-                                onDone = { tts.shutdown() })
-                        } else {
-                            Toast.makeText(ctx, "TTS 引擎不可用", Toast.LENGTH_SHORT).show()
-                            tts.shutdown()
+                    previewScope.launch {
+                        com.aftglw.devapi.core.voice.TtsProviderManager.configure(ctx, engine)
+                        val outcome = com.aftglw.devapi.core.voice.TtsProviderManager.speak(
+                            ctx = ctx,
+                            text = sentence,
+                            utteranceId = "tts_test"
+                        )
+                        if (outcome is com.aftglw.devapi.core.voice.TtsOutcome.Failed) {
+                            Toast.makeText(ctx, "TTS 失败: ${outcome.reason.take(60)}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }) { Text("试听", color = Color(0xFF07C160)) }

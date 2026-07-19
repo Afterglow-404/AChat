@@ -109,6 +109,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
     val model = remember { prefs.getString("ai_model", "deepsleep-cat") ?: "deepsleep-cat" }
 
+    // 工具调用安全：高风险工具执行前通过 DialogToolGuard 弹窗询问用户
+    val toolGuard = remember { com.aftglw.devapi.tools.DialogToolGuard(ctx.applicationContext) }
+    val pendingToolReq by toolGuard.pending.collectAsState()
+
     val chatBgUri = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("chat_bg_uri", "")?.takeIf { it.isNotEmpty() }
     val chatBgBitmap = remember(chatBgUri) {
@@ -131,12 +135,23 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             if (parts.size > 1) {
                 parts.forEach { bubbles.add(Bubble(it, e.isMe, e.time, imagePath = e.imagePath)) }
             } else {
-                bubbles.add(Bubble(e.text, e.isMe, e.time, imagePath = e.imagePath))
+                bubbles.add(
+                    Bubble(
+                        text = e.text,
+                        isMe = e.isMe,
+                        time = e.time,
+                        imagePath = e.imagePath,
+                        voicePath = e.voicePath,
+                        voiceDuration = e.voiceDuration,
+                        voiceTranscript = e.voiceTranscript
+                    )
+                )
             }
         }
         history.addAll(saved.map { e ->
             val role = if (e.isMe) "user" else "assistant"
-            val content = e.text.replace("【顿】", "").trim()
+            val content = (e.voiceTranscript?.takeIf { it.isNotBlank() } ?: e.text)
+                .replace("【顿】", "").trim()
             val images = if (!e.imagePath.isNullOrEmpty()) listOf(e.imagePath) else emptyList()
             ChatMessage(role, content, images = images)
         })
@@ -196,7 +211,21 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 } catch (_: Exception) {} /* 非关键 */
             }
         }
-        ChatHistory.saveEntries(ctx, chatKey, bubbles.filter { it.label != "system" && it.label != "sticker" }.map { com.aftglw.devapi.core.storage.ChatHistoryEntry(it.text, it.isMe, it.time, it.imagePath) })
+        ChatHistory.saveEntries(
+            ctx,
+            chatKey,
+            bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
+                com.aftglw.devapi.core.storage.ChatHistoryEntry(
+                    text = it.text,
+                    isMe = it.isMe,
+                    time = it.time,
+                    imagePath = it.imagePath,
+                    voicePath = it.voicePath,
+                    voiceDuration = it.voiceDuration,
+                    voiceTranscript = it.voiceTranscript
+                )
+            }
+        )
     }
 
         // 长时记忆 + 人设浓缩：每 10 轮提取
@@ -259,6 +288,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     // 统一的用户消息发送逻辑：text 传入实际文字（给 AI），voiceBubble/imageBubble 非空时用对应气泡展示
     fun sendUserMessage(text: String, voiceBubble: Bubble? = null, imageBubble: Bubble? = null) {
         if (waiting) return
+        // 离线检测：非本地模式下若网络不可用，直接提示并不发送
+        val isLocalMode = prefs.getString("ai_protocol", "auto") == "local"
+        if (!isLocalMode && !com.aftglw.devapi.network.NetworkMonitor.isOnline) {
+            android.widget.Toast.makeText(ctx, com.aftglw.devapi.network.AiError.Offline.message, android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         waiting = true
         val bubble = imageBubble ?: voiceBubble
         if (bubble != null) {
@@ -301,7 +336,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             val moodPersona = if (mood.hint != null) "$enhancedPersona\n\n【注意：${mood.hint}】" else enhancedPersona
 
             // === Agent Loop（委托给 Agent runtime）===
-            val agent = com.aftglw.devapi.core.ai.Agent(ctx)
+            val agent = com.aftglw.devapi.core.ai.Agent(ctx, toolGuard = toolGuard)
             val result = agent.prompt(
                 history = history.toList(),
                 userMessage = text,
@@ -314,7 +349,21 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 PostLLMProcessor.process(ctx, name, text, finalReply)
                 val saveText = finalReply.replace(Regex("【sticker:[^】]+:[^】]+】"), "").trim()
                 val historyText = saveText.ifEmpty { "[表情]" }
-                ChatHistory.saveEntries(ctx, chatKey, bubbles.filter { it.label != "sticker" }.map { com.aftglw.devapi.core.storage.ChatHistoryEntry(it.text, it.isMe, it.time, it.imagePath) } + com.aftglw.devapi.core.storage.ChatHistoryEntry(historyText, false, now()))
+                ChatHistory.saveEntries(
+                    ctx,
+                    chatKey,
+                    bubbles.filter { it.label != "sticker" }.map {
+                        com.aftglw.devapi.core.storage.ChatHistoryEntry(
+                            text = it.text,
+                            isMe = it.isMe,
+                            time = it.time,
+                            imagePath = it.imagePath,
+                            voicePath = it.voicePath,
+                            voiceDuration = it.voiceDuration,
+                            voiceTranscript = it.voiceTranscript
+                        )
+                    } + com.aftglw.devapi.core.storage.ChatHistoryEntry(historyText, false, now())
+                )
 
                 withContext(Dispatchers.Main) {
                     fun addSegment(part: String) {
@@ -357,15 +406,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 }
             } else {
                 withContext(Dispatchers.Main) {
-                    val errMsg = when {
-                        lastError?.contains("401") == true -> "API Key 无效"
-                        lastError?.contains("429") == true -> "请求频率超限，请稍后重试"
-                        lastError?.contains("502") == true || lastError?.contains("503") == true || lastError?.contains("504") == true -> "AI 服务器暂时不可用，已自动重试"
-                        lastError?.contains("timeout") == true || lastError?.contains("Timeout") == true -> "请求超时，已自动重试"
-                        lastError?.contains("connection") == true || lastError?.contains("Connection") == true || lastError?.contains("refused") == true -> "无法连接到 AI 服务器，请检查网络"
-                        lastError?.contains("5") == true && lastError?.length!! < 20 -> "AI 服务器错误"
-                        lastError != null -> "AI 回复失败: ${lastError!!.take(60)}"
-                        else -> "AI 回复失败，请检查 API 配置和网络连接"
+                    val errMsg = if (lastError.isNullOrBlank()) {
+                        com.aftglw.devapi.network.AiError.Unknown("请检查 API 配置和网络连接").message
+                    } else {
+                        // 复用 AiError 的字符串分类逻辑（lastError 是 service 抛出的 message）
+                        com.aftglw.devapi.network.AiError.fromException(
+                            java.io.IOException(lastError)
+                        ).message
                     }
                     android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_SHORT).show()
                     waiting = false
@@ -410,7 +457,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                     onSendVoice = { transcript, path, duration ->
                         if (waiting) return@ChatContent
                         val userText = transcript.ifEmpty { "[语音消息]" }
-                        val voiceBubble = Bubble(transcript, true, voicePath = path, voiceDuration = duration, voiceTranscript = transcript)
+                        val voiceBubble = Bubble(userText, true, voicePath = path, voiceDuration = duration, voiceTranscript = transcript)
                         sendUserMessage(userText, voiceBubble)
                     },
                     onSendImage = { text, imagePath ->
@@ -418,6 +465,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         val userText = text.ifEmpty { "[图片]" }
                         val imageBubble = Bubble(text, true, imagePath = imagePath)
                         sendUserMessage(userText, imageBubble = imageBubble)
+                    },
+                    onCancel = {
+                        // 取消当前在飞的 AI 请求：service.cancel() 让 OkHttp Call 抛 IOException("Canceled")
+                        try {
+                            com.aftglw.devapi.network.AiServiceFactory.getService().cancel()
+                        } catch (_: Exception) { /* 忽略：即使取消失败也复位 waiting */ }
+                        waiting = false
                     }
                 )
             }
@@ -454,6 +508,86 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             }
         }
     }
+
+    // 高风险工具调用的用户确认弹窗
+    pendingToolReq?.let { req ->
+        ToolConfirmDialog(
+            request = req,
+            onAllow = { toolGuard.respond(req, true) },
+            onDeny = { toolGuard.respond(req, false) }
+        )
+    }
+}
+
+/**
+ * 工具调用确认弹窗。展示工具名、风险等级和参数，要求用户明确允许或拒绝。
+ */
+@Composable
+private fun ToolConfirmDialog(
+    request: com.aftglw.devapi.tools.ToolConfirmationRequest,
+    onAllow: () -> Unit,
+    onDeny: () -> Unit
+) {
+    val riskColor = when (request.riskLevel) {
+        com.aftglw.devapi.tools.RiskLevel.HIGH -> Color(0xFFD32F2F)
+        com.aftglw.devapi.tools.RiskLevel.MEDIUM -> Color(0xFFEF6C00)
+        com.aftglw.devapi.tools.RiskLevel.LOW -> Color.Gray
+    }
+    val riskText = when (request.riskLevel) {
+        com.aftglw.devapi.tools.RiskLevel.HIGH -> "高风险"
+        com.aftglw.devapi.tools.RiskLevel.MEDIUM -> "中风险"
+        com.aftglw.devapi.tools.RiskLevel.LOW -> "低风险"
+    }
+    AlertDialog(
+        onDismissRequest = onDeny,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("工具调用确认", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = riskColor.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        riskText,
+                        color = riskColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column {
+                Text("AI 想要调用工具：", fontSize = 13.sp, color = Color.Gray)
+                Spacer(Modifier.height(4.dp))
+                Text(request.tool.name, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(request.tool.description, fontSize = 12.sp, color = Color.Gray)
+                if (request.argsJson.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("参数：", fontSize = 12.sp, color = Color.Gray)
+                    Text(
+                        request.argsJson.take(500),
+                        fontSize = 12.sp,
+                        color = Color.DarkGray,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .heightIn(max = 200.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onAllow, colors = ButtonDefaults.buttonColors(containerColor = riskColor)) {
+                Text("允许")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDeny) { Text("拒绝", color = Color.Gray) }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -469,6 +603,7 @@ fun ChatContent(
     onSend: () -> Unit,
     onSendVoice: (transcript: String, path: String, durationSec: Int) -> Unit = { _, _, _ -> },
     onSendImage: (text: String, imagePath: String) -> Unit = { _, _ -> },
+    onCancel: () -> Unit = {},
     onBack: () -> Unit,
     avatarUri: String = "",
     characterFolder: String = "",
@@ -487,6 +622,19 @@ fun ChatContent(
     val tts = remember { VoiceTts(ctx) }
     val cloudTts = remember { CloudTtsService(ctx) }
     val ttsEngine = remember { prefs.getString("tts_engine", "local") ?: "local" }
+    // 配置 TtsProviderManager：进入聊天页时按用户选的引擎初始化降级链
+    LaunchedEffect(ttsEngine) {
+        com.aftglw.devapi.core.voice.TtsProviderManager.configure(ctx, ttsEngine)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            sttHelper.stop()
+            recorder.cancel()
+            voicePlayer.stop()
+            tts.shutdown()
+            com.aftglw.devapi.core.voice.TtsProviderManager.shutdown()
+        }
+    }
     // 应用 TTS 语速/音调（从设置读取）— 仅本地引擎生效
     LaunchedEffect(Unit) {
         tts.updateParams(
@@ -896,41 +1044,34 @@ fun ChatContent(
                                             IconButton(
                                                 onClick = {
                                                     if (isPlayingThis) {
-                                                        if (ttsEngine == "cloud") voicePlayer.stop()
-                                                        else tts.stop()
+                                                        // 统一停止（Manager 会路由到当前活跃 Provider）
+                                                        com.aftglw.devapi.core.voice.TtsProviderManager.stop()
+                                                        voicePlayer.stop()  // 兼容旧 voicePlayer 路径
+                                                        tts.stop()
                                                         playingTtsId = null
                                                     } else {
-                                                        if (ttsEngine == "cloud") {
-                                                            // 云端 TTS：合成并播放
-                                                            val voice = prefs.getString("tts_voice", "alloy") ?: "alloy"
-                                                            playingTtsId = ttsId
-                                                            scope.launch {
-                                                                try {
-                                                                    val path = cloudTts.synthesize(b.text, voice)
-                                                                    voicePlayer.play(
-                                                                        path,
-                                                                        onStart = { playingTtsId = ttsId },
-                                                                        onComplete = { if (playingTtsId == ttsId) playingTtsId = null }
-                                                                    )
-                                                                } catch (e: Exception) {
-                                                                    playingTtsId = null
-                                                                    Toast.makeText(ctx, "云端 TTS 失败: ${e.message?.take(60)}", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                            }
-                                                        } else {
-                                                            // 本地 TTS
-                                                            // 初始化（首次点击时等待就绪）
-                                                            if (!tts.isReady()) {
-                                                                Toast.makeText(ctx, "TTS 初始化中，请稍后重试", Toast.LENGTH_SHORT).show()
-                                                                tts.initSync(1000)
-                                                                return@IconButton
-                                                            }
-                                                            tts.speak(
+                                                        // 统一调用 TtsProviderManager：自动按引擎选择 + 失败降级
+                                                        // voiceId 由 TtsVoiceRouter 按当前引擎 + 角色名解析（避免跨引擎污染）
+                                                        // 用户在设置页选的 tts_voice 通过 tts_voice_<engine>_<characterName> 命名空间隔离
+                                                        playingTtsId = ttsId
+                                                        scope.launch {
+                                                            val outcome = com.aftglw.devapi.core.voice.TtsProviderManager.speak(
+                                                                ctx = ctx,
                                                                 text = b.text,
                                                                 utteranceId = ttsId,
+                                                                characterName = name.takeIf { it.isNotEmpty() },
                                                                 onStart = { playingTtsId = ttsId },
-                                                                onDone = { playingTtsId = null }
+                                                                onDone = { success ->
+                                                                    if (playingTtsId == ttsId) playingTtsId = null
+                                                                    if (!success) {
+                                                                        Toast.makeText(ctx, "TTS 播放失败", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
                                                             )
+                                                            if (outcome is com.aftglw.devapi.core.voice.TtsOutcome.Failed) {
+                                                                playingTtsId = null
+                                                                Toast.makeText(ctx, "TTS 失败: ${outcome.reason.take(60)}", Toast.LENGTH_SHORT).show()
+                                                            }
                                                         }
                                                     }
                                                 },
@@ -1092,8 +1233,17 @@ fun ChatContent(
                     enabled = !waiting && !isRecording
                 )
                 Spacer(Modifier.width(8.dp))
-                // 文本非空 或 有待发图片 时显示发送；否则显示麦克风（按住说话）
-                if (localInput.value.isNotEmpty() || pendingImagePath != null) {
+                // 等待 AI 回复时显示"停止"按钮（红色），取消当前请求
+                if (waiting) {
+                    TextButton(
+                        onClick = { onCancel() },
+                        Modifier.background(Color(0xFFFA5151), RoundedCornerShape(18.dp)),
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
+                    ) {
+                        Text("停止")
+                    }
+                } else if (localInput.value.isNotEmpty() || pendingImagePath != null) {
+                    // 文本非空 或 有待发图片 时显示发送
                     TextButton(
                         onClick = {
                             val text = localInput.value.trim()
@@ -1111,7 +1261,7 @@ fun ChatContent(
                         Modifier.background(AchatTheme.colors.primary, RoundedCornerShape(18.dp)),
                         colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
                     ) {
-                        Text(if (waiting) "..." else "发送")
+                        Text("发送")
                     }
                 } else {
                     Box(
@@ -1126,8 +1276,12 @@ fun ChatContent(
                                             val file = recorder.start()
                                             if (file != null) {
                                                 isRecording = true
-                                                tryAwaitRelease()
+                                                val released = tryAwaitRelease()
                                                 isRecording = false
+                                                if (!released) {
+                                                    recorder.cancel()
+                                                    return@detectTapGestures
+                                                }
                                                 val duration = recorder.stop()
                                                 if (duration > 0 && file.exists()) {
                                                     // STT 转写（异步）
