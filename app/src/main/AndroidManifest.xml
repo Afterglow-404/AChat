@@ -31,12 +31,12 @@
             </intent-filter>
         </activity>
 
-        <activity android:name="com.aftglw.devapi.SettingsActivity" android:exported="false" />
+        <activity android:name="com.aftglw.devapi.feature.settings.SettingsActivity" android:exported="false" />
 
 
 
         <service android:name="com.aftglw.devapi.DebugOverlayService" android:exported="false" />
-        <receiver android:name="com.aftglw.devapi.ProactiveReceiver" android:exported="false" />
+        <receiver android:name="com.aftglw.devapi.core.time.ProactiveReceiver" android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

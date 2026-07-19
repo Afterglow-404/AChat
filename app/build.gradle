@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -16,10 +17,53 @@ android {
         versionName = '0.0.1'
     }
 
+    // ABI 拆分：每个 ABI 单独打 APK，避免 arm64 包含 x86 .so 等冗余。
+    // 同时输出 universalApk 兜底（商店分发时可按 ABI 投放）。
+    // 单 APK 体积约可减少 30-50%（取决于 native 库占比）。
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk true
+        }
+    }
+
+    // ONNX 情绪模型（~28MB）改为可选下载，不再打包进 APK。
+    // MoodModel 会优先从 filesDir/models/ 或 getExternalFilesDir("models")/ 加载，
+    // 找不到时返回 isLoaded=false，由 MoodDetector 走 LLM 兜底。
+    // bert_vocab.txt / vocab.txt / label_mapping.json 保留（tokenizer 需要）。
+    aaptOptions {
+        ignoreAssetsPattern = 'model.onnx:model_quant.onnx'
+    }
+
+    // 发布签名配置：从 gradle.properties 或环境变量读取，避免 keystore 进入版本库。
+    // 使用方法：在 ~/.gradle/gradle.properties 中配置
+    //   RELEASE_STORE_FILE=/path/to/release.jks
+    //   RELEASE_STORE_PASSWORD=...
+    //   RELEASE_KEY_ALIAS=...
+    //   RELEASE_KEY_PASSWORD=...
+    // 未配置时 release 包仍可构建（输出未签名 APK，需用 apksigner 手动签名后才能安装）。
+    signingConfigs {
+        release {
+            def storeFilePath = project.findProperty('RELEASE_STORE_FILE') ?: System.getenv('RELEASE_STORE_FILE')
+            if (storeFilePath != null) {
+                storeFile file(storeFilePath)
+                storePassword project.findProperty('RELEASE_STORE_PASSWORD') ?: System.getenv('RELEASE_STORE_PASSWORD')
+                keyAlias project.findProperty('RELEASE_KEY_ALIAS') ?: System.getenv('RELEASE_KEY_ALIAS')
+                keyPassword project.findProperty('RELEASE_KEY_PASSWORD') ?: System.getenv('RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 仅当 release signingConfig 的 storeFile 已设置时才启用签名
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -38,6 +82,15 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+
+    // lint 配置：CI 中 lintDebug 用于发现潜在问题，报告上传为 artifact。
+    // 初期不阻断构建，避免历史 warning 卡住 CI；后续可逐步收紧到 abortOnError = true。
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        // 项目仅支持英文 + 中文资源，无需翻译校验
+        disable 'MissingTranslation', 'ExtraTranslation'
     }
 }
 
@@ -64,7 +117,18 @@ dependencies {
     implementation libs.tensorflow.lite.task.text
     implementation libs.work.runtime.ktx
     implementation libs.snakeyaml
+    implementation libs.security.crypto
+    implementation libs.room.runtime
+    implementation libs.room.ktx
+    ksp libs.room.compiler
     testImplementation libs.junit
     testImplementation libs.mockk
     testImplementation libs.org.json
+
+    // Instrumented UI tests (src/androidTest) — 需要 emulator 或 device 运行
+    androidTestImplementation libs.androidx.test.ext.junit
+    androidTestImplementation libs.androidx.test.runner
+    androidTestImplementation libs.androidx.test.espresso
+    androidTestImplementation libs.compose.ui.test
+    debugImplementation libs.compose.ui.test.manifest
 }
