@@ -2,6 +2,7 @@ package com.aftglw.devapi.core.time
 import com.aftglw.devapi.core.storage.ChatHistory
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.mood.AffinityManager
+import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.MainActivity
 
 import android.app.AlarmManager
@@ -12,6 +13,7 @@ import android.content.Intent
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class ProactiveReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -49,10 +51,10 @@ object ProactiveScheduler {
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
-            val arr = org.json.JSONArray(context.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
-            for (i in 0 until arr.length()) {
-                val chatDisplay = arr.getJSONObject(i).getString("name")
-                val chat = arr.getJSONObject(i).optString("id", "").takeIf { it.isNotEmpty() } ?: chatDisplay
+            val allChats = runBlocking { AppDatabase.get(context).chatDao().getAll() }
+            for (item in allChats) {
+                val chatDisplay = item.name
+                val chat = item.id.ifEmpty { chatDisplay }
                 if (!prefs.getBoolean("proactive_enabled_${chat}", false)) continue
                 if (System.currentTimeMillis() < prefs.getLong("proactive_silence_${chat}", 0L)) continue
                 val limit = prefs.getInt("proactive_daily_limit_${chat}", 10)
@@ -100,7 +102,7 @@ object ProactiveScheduler {
         val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
         if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
         // 以下为原有的自定义规则模式
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
         if (apiKey.isBlank()) return "在干嘛呢？"
         val persona = loadPersona(ctx, chatName)
         val affinity = AffinityManager.getAffinity(prefs, chatName).toInt()
@@ -186,9 +188,11 @@ object ProactiveScheduler {
     }
 
     private fun loadPersona(ctx: Context, chatName: String): String {
-        val arr = org.json.JSONArray(ctx.getSharedPreferences("wechat_chats", Context.MODE_PRIVATE).getString("chats", "[]") ?: "[]")
-        for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); if (o.optString("id", "") == chatName || o.getString("name") == chatName) return o.optString("persona", "") }
-        return ""
+        return runBlocking {
+            val dao = AppDatabase.get(ctx).chatDao()
+            val e = dao.getById(chatName) ?: dao.getAll().firstOrNull { it.name == chatName }
+            e?.persona ?: ""
+        }
     }
 
     private fun sendNotif(ctx: Context, chat: String, msg: String) {

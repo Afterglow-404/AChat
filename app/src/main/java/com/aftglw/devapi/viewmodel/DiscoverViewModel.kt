@@ -15,9 +15,6 @@ class DiscoverViewModel : ViewModel() {
         DiscoverItem("2", "喵神谕", R.drawable.ic_cat_fortune),
         DiscoverItem("3", "喵神の试炼", R.drawable.ic_shake),
         DiscoverItem("4", "Too-Do", R.drawable.ic_discover),
-        DiscoverItem("5", "搜一搜", R.drawable.ic_search),
-        DiscoverItem("6", "附近", R.drawable.ic_nearby),
-        DiscoverItem("7", "剧本演示", R.drawable.ic_mini_program),
         DiscoverItem("8", "人设工坊", R.drawable.ic_settings)
     )
 }

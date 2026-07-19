@@ -20,9 +20,10 @@ import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.aftglw.devapi.network.AiServiceFactory
+import com.aftglw.devapi.network.NetworkMonitor
 import com.aftglw.devapi.feature.chat.ChatScreen
 import com.aftglw.devapi.feature.chat.ChatsScreen
-import com.aftglw.devapi.feature.discover.DiscoverScreen
+import com.aftglw.devapi.ui.screens.DiscoverScreen
 import com.aftglw.devapi.feature.profile.MeScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -32,6 +33,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.aftglw.devapi.feature.group.GroupChatScreen
+import com.aftglw.devapi.feature.group.GroupInfoPage
+import com.aftglw.devapi.feature.group.GroupChatManager
+import com.aftglw.devapi.model.GroupChat
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.theme.*
 
@@ -47,7 +52,9 @@ private val tabTitles = listOf("对话", "发现", "我的")
 
 private sealed class AppPage {
     data object Tabs : AppPage()
-    data class Chat(val name: String, val persona: String, val avatarUri: String, val id: String = "") : AppPage()
+    data class Chat(val name: String, val persona: String, val avatarUri: String, val id: String = "", val characterFolder: String = "", val thinkingMessage: String = "") : AppPage()
+    data class GroupChat(val group: com.aftglw.devapi.model.GroupChat) : AppPage()
+    data class GroupInfo(val group: com.aftglw.devapi.model.GroupChat) : AppPage()
 }
 
 @Composable
@@ -55,6 +62,7 @@ fun WeChatApp() {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) {
         AiServiceFactory.init(ctx)
+        NetworkMonitor.init(ctx)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             (ctx as? androidx.activity.ComponentActivity)?.requestPermissions(
                 arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
@@ -135,11 +143,16 @@ fun WeChatApp() {
             onTabSelected = { selectedTab = it },
             backdrop = backdrop,
             chatsScreen = {
-                ChatsScreen(onChatClick = { name, persona, avatarUri, id ->
-                    currentPage = AppPage.Chat(name, persona, avatarUri, id)
-                })
+                ChatsScreen(
+                    onChatClick = { name, persona, avatarUri, id, characterFolder, thinkingMessage ->
+                        currentPage = AppPage.Chat(name, persona, avatarUri, id, characterFolder, thinkingMessage)
+                    },
+                    onGroupClick = { group ->
+                        currentPage = AppPage.GroupChat(group)
+                    }
+                )
             },
-            discoverScreen = { DiscoverScreen(onSubPageChange = { hideNavBar = it }) },
+            discoverScreen = { DiscoverScreen(emptyList(), onSubPageChange = { hideNavBar = it }) },
             meScreen = { MeScreen() },
             chatScreen = { page ->
                 ChatScreen(
@@ -147,8 +160,32 @@ fun WeChatApp() {
                     persona = page.persona,
                     avatarUri = page.avatarUri,
                     id = page.id,
+                    characterFolder = page.characterFolder,
+                    thinkingMessage = page.thinkingMessage,
                     showTimestamps = showTimestamps,
                     onBack = { currentPage = AppPage.Tabs })
+            },
+            groupChatScreen = { page ->
+                GroupChatScreen(
+                    group = page.group,
+                    onBack = { currentPage = AppPage.Tabs },
+                    onOpenInfo = { currentPage = AppPage.GroupInfo(page.group) }
+                )
+            },
+            groupInfoScreen = { page ->
+                GroupInfoPage(
+                    group = page.group,
+                    onBack = {
+                        // 返回群聊界面，携带可能被更新的 group
+                        currentPage = AppPage.GroupChat(page.group)
+                    },
+                    onGroupChanged = { updated ->
+                        currentPage = AppPage.GroupInfo(updated)
+                    },
+                    onGroupDeleted = {
+                        currentPage = AppPage.Tabs
+                    }
+                )
             }
         )
     }
@@ -168,7 +205,9 @@ private fun WeChatAppContent(
     chatsScreen: @Composable () -> Unit,
     discoverScreen: @Composable () -> Unit,
     meScreen: @Composable () -> Unit,
-    chatScreen: @Composable (AppPage.Chat) -> Unit
+    chatScreen: @Composable (AppPage.Chat) -> Unit,
+    groupChatScreen: @Composable (AppPage.GroupChat) -> Unit,
+    groupInfoScreen: @Composable (AppPage.GroupInfo) -> Unit
 ) {
     val themeTypography = Typography(
         headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontFamily = AchatTheme.typography.title),
@@ -254,9 +293,9 @@ private fun WeChatAppContent(
                                 }
                             }
                         }
-                        is AppPage.Chat -> {
-                            chatScreen(page)
-                        }
+                        is AppPage.Chat -> chatScreen(page)
+                        is AppPage.GroupChat -> groupChatScreen(page)
+                        is AppPage.GroupInfo -> groupInfoScreen(page)
                     }
                 }
             }
@@ -300,6 +339,8 @@ fun WeChatAppPreview() {
         chatsScreen = { Text("Chats List Placeholder", Modifier.padding(16.dp)) },
         discoverScreen = { Text("Discover Placeholder", Modifier.padding(16.dp)) },
         meScreen = { Text("Me Placeholder", Modifier.padding(16.dp)) },
-        chatScreen = { Text("Chat with ${it.name}", Modifier.padding(16.dp)) }
+        chatScreen = { Text("Chat with ${it.name}", Modifier.padding(16.dp)) },
+        groupChatScreen = { Text("Group: ${it.group.name}", Modifier.padding(16.dp)) },
+        groupInfoScreen = { Text("Group Info: ${it.group.name}", Modifier.padding(16.dp)) }
     )
 }

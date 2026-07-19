@@ -4,6 +4,7 @@ import com.aftglw.devapi.network.HttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * MCP JSON-RPC 2.0 客户端。
@@ -11,10 +12,10 @@ import org.json.JSONObject
  * 通过 HTTP/HTTPS 和外部 MCP Server 通信，符合标准 MCP 协议。
  *
  * 调用流程：
- *   1. listTools() → 获取服务端工具列表
- *   2. callTool(name, args) → 调用指定工具
+ *   1. listTools() -> 获取服务端工具列表
+ *   2. callTool(name, args) -> 调用指定工具
  */
-class MCPClient(val baseUrl: String) {
+class MCPClient(val baseUrl: String, private val token: String = "") {
 
     data class ToolInfo(
         val name: String,
@@ -25,7 +26,18 @@ class MCPClient(val baseUrl: String) {
     /** 调用 MCP 的 tools/list，返回工具列表 */
     fun listTools(): Result<List<ToolInfo>> = runCatching {
         val resp = jsonRpcCall("tools/list", JSONObject())
-        val tools = resp.optJSONArray("result") ?: resp.optJSONArray("tools") ?: JSONArray()
+        if (resp.has("error")) {
+            val error = resp.optJSONObject("error")
+            throw IllegalStateException(error?.optString("message", "MCP tools/list failed") ?: "MCP tools/list failed")
+        }
+        // Standard MCP returns result: { tools: [...] }; keep the old array shape for compatibility.
+        val result = resp.opt("result")
+        val tools = when (result) {
+            is JSONObject -> result.optJSONArray("tools") ?: JSONArray()
+            is JSONArray -> result
+            null -> resp.optJSONArray("tools") ?: JSONArray()
+            else -> resp.optJSONArray("tools") ?: JSONArray()
+        }
         (0 until tools.length()).map { i ->
             val t = tools.getJSONObject(i)
             ToolInfo(
@@ -43,6 +55,10 @@ class MCPClient(val baseUrl: String) {
             put("arguments", arguments)
         }
         val resp = jsonRpcCall("tools/call", params)
+        if (resp.has("error")) {
+            val error = resp.optJSONObject("error")
+            throw IllegalStateException(error?.optString("message", "MCP tools/call failed") ?: "MCP tools/call failed")
+        }
         val result = resp.optJSONObject("result")
         val content = result?.optJSONArray("content")
         if (content != null && content.length() > 0) {
@@ -54,7 +70,7 @@ class MCPClient(val baseUrl: String) {
 
     /** 发送 JSON-RPC 2.0 请求 */
     private fun jsonRpcCall(method: String, params: JSONObject): JSONObject {
-        val requestId = System.currentTimeMillis()
+        val requestId = requestIdGen.incrementAndGet()
         val body = JSONObject().apply {
             put("jsonrpc", "2.0")
             put("id", requestId)
@@ -62,17 +78,29 @@ class MCPClient(val baseUrl: String) {
             put("params", params)
         }
 
-        val request = okhttp3.Request.Builder()
+        val builder = okhttp3.Request.Builder()
             .url(baseUrl)
             .post(body.toString().toRequestBody(HttpClient.JSON_MEDIA_TYPE))
-            .build()
-        val response = HttpClient.client.newCall(request).execute()
+        if (token.isNotEmpty()) {
+            builder.header("Authorization", "Bearer $token")
+        }
+        val request = builder.build()
+        val response = mcpHttpClient.newCall(request).execute()
         val respBody = response.body?.string() ?: "{}"
+        val statusCode = response.code
         response.close()
+        if (!response.isSuccessful) throw IllegalStateException("MCP HTTP $statusCode: ${respBody.take(300)}")
         return JSONObject(respBody)
     }
 
     companion object {
+        private val requestIdGen = AtomicLong(0)
+        private val mcpHttpClient = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
         /** 从环境/配置解析 MCP Server URL */
         fun fromConfig(ctx: android.content.Context): List<MCPClient> {
             val raw = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)

@@ -25,6 +25,41 @@
 - **情绪可视化** — 用户消息旁显示情绪表情
 - **时间感知** — 联网校准
 - **导入 Skill** — 支持 ex-skill 格式导入角色人设，未来支持酒馆角色卡
+- **语音输入 (STT)** — 6 引擎可选 + 自动降级链，详见下方 [STT](#语音输入-stt)
+- **语音朗读 (TTS)** — 本地 / 云端 / PC GPT-SoVITS 三引擎降级链
+
+## 语音输入 (STT)
+
+设置 → 调试 → 语音转文字 (STT) 中选择引擎，主引擎失败时按降级链自动兜底：
+
+| 引擎 | 适用场景 | 准确率 | 资源占用 |
+|---|---|---|---|
+| 本地 SenseVoice | 离线、中文为主 | 高（推荐） | 模型 239MB（int8） |
+| 本地 Whisper | 离线、多语种 | 中（中文弱） | 模型 103MB（三件套） |
+| 讯飞 RTASR | 在线、中文顶尖 | 极高 | 需 APPID + APIKey |
+| 云端 Whisper | 在线、OpenAI 兼容 | 高 | 需 API Key |
+| PC Whisper | 局域网 PC 转写 | 高 | 需 PC 服务 |
+| 系统 STT | 兜底 | 取决于 ROM | 无 |
+
+降级链示例：`local_sensevoice → xfyun → cloud → system`
+
+### 本地 SenseVoice / Whisper 模型来源
+
+通过 SAF（系统文件选择器）导入到 app 私有目录：
+
+- **SenseVoice**：[sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2)（解压后选 `model.int8.onnx` + `tokens.txt`）
+- **Whisper**：[sherpa-onnx-whisper-tiny](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2)（解压后选 `tiny-encoder.int8.onnx` + `tiny-decoder.int8.onnx` + `tiny-tokens.txt`）
+
+## 开发者构建
+
+依赖 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 预编译 AAR 做 STT 推理。首次构建前需手动下载放置：
+
+```bash
+curl -L -o app/libs/sherpa-onnx-1.12.40.aar \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.40/sherpa-onnx-1.12.40.aar
+```
+
+AAR 体积 54MB，已通过 `.gitignore` 排除，不会进入版本库。
 
 ## 注意
 

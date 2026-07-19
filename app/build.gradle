@@ -1,7 +1,8 @@
 plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.plugin.compose'
-    id 'org.jetbrains.compose'
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -16,10 +17,53 @@ android {
         versionName = '0.0.1'
     }
 
+    // ABI 拆分：每个 ABI 单独打 APK，避免 arm64 包含 x86 .so 等冗余。
+    // 同时输出 universalApk 兜底（商店分发时可按 ABI 投放）。
+    // 单 APK 体积约可减少 30-50%（取决于 native 库占比）。
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk true
+        }
+    }
+
+    // ONNX 情绪模型（~28MB）改为可选下载，不再打包进 APK。
+    // MoodModel 会优先从 filesDir/models/ 或 getExternalFilesDir("models")/ 加载，
+    // 找不到时返回 isLoaded=false，由 MoodDetector 走 LLM 兜底。
+    // bert_vocab.txt / vocab.txt / label_mapping.json 保留（tokenizer 需要）。
+    aaptOptions {
+        ignoreAssetsPattern = 'model.onnx:model_quant.onnx'
+    }
+
+    // 发布签名配置：从 gradle.properties 或环境变量读取，避免 keystore 进入版本库。
+    // 使用方法：在 ~/.gradle/gradle.properties 中配置
+    //   RELEASE_STORE_FILE=/path/to/release.jks
+    //   RELEASE_STORE_PASSWORD=...
+    //   RELEASE_KEY_ALIAS=...
+    //   RELEASE_KEY_PASSWORD=...
+    // 未配置时 release 包仍可构建（输出未签名 APK，需用 apksigner 手动签名后才能安装）。
+    signingConfigs {
+        release {
+            def storeFilePath = project.findProperty('RELEASE_STORE_FILE') ?: System.getenv('RELEASE_STORE_FILE')
+            if (storeFilePath != null) {
+                storeFile file(storeFilePath)
+                storePassword project.findProperty('RELEASE_STORE_PASSWORD') ?: System.getenv('RELEASE_STORE_PASSWORD')
+                keyAlias project.findProperty('RELEASE_KEY_ALIAS') ?: System.getenv('RELEASE_KEY_ALIAS')
+                keyPassword project.findProperty('RELEASE_KEY_PASSWORD') ?: System.getenv('RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
-            minifyEnabled = false
+            minifyEnabled = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 仅当 release signingConfig 的 storeFile 已设置时才启用签名
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -28,34 +72,70 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            returnDefaultValues = true
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // sherpa-onnx AAR 与 onnxruntime-android 都打包了 libonnxruntime.so，
+            // 取 sherpa-onnx 自带版本（与 sherpa-onnx-jni.so ABI/版本匹配，避免运行期符号冲突）
+            pickFirsts += ['**/libonnxruntime.so']
         }
+    }
+
+    // lint 配置：CI 中 lintDebug 用于发现潜在问题，报告上传为 artifact。
+    // 初期不阻断构建，避免历史 warning 卡住 CI；后续可逐步收紧到 abortOnError = true。
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        // 项目仅支持英文 + 中文资源，无需翻译校验
+        disable 'MissingTranslation', 'ExtraTranslation'
     }
 }
 
 dependencies {
-    // JetBrains Compose Multiplatform 1.11.1
+    // JetBrains Compose Multiplatform
     implementation(compose.foundation)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(compose.ui)
-    implementation "androidx.compose.ui:ui-tooling-preview:1.11.1"
-    debugImplementation "androidx.compose.ui:ui-tooling:1.11.1"
+    implementation libs.compose.ui.tooling.preview
+    debugImplementation libs.compose.ui.tooling
 
-    // LiquidGlass backdrop library
-    implementation("io.github.kyant0:backdrop:2.0.0")
-    implementation("io.github.kyant0:shapes:1.2.0")
+    // LiquidGlass
+    implementation libs.backdrop
+    implementation libs.shapes
 
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
-    implementation 'com.google.android.material:material:1.14.0'
-    implementation 'androidx.activity:activity-compose:1.13.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
-    implementation 'androidx.navigation:navigation-compose:2.9.8'
-    implementation 'androidx.compose.runtime:runtime-livedata'
-    implementation 'io.coil-kt:coil-compose:2.7.0'
-    implementation 'org.tensorflow:tensorflow-lite-task-text:0.4.4'
-    implementation 'androidx.work:work-runtime-ktx:2.10.0'
-    implementation 'org.yaml:snakeyaml:2.3'
+    implementation libs.onnxruntime.android
+    implementation libs.material
+    implementation libs.activity.compose
+    implementation libs.lifecycle.viewmodel.compose
+    implementation libs.navigation.compose
+    implementation libs.compose.runtime.livedata
+    implementation libs.coil.compose
+    // TFLite 核心：保留用于其他场景（情绪检测等）
+    implementation libs.tensorflow.lite
+    // sherpa-onnx Android AAR：本地 Whisper STT 推理引擎（预编译，无需 NDK）
+    // 替代原 tflite whisper 方案，支持 language=zh + task=transcribe 强制中文输出
+    implementation files('libs/sherpa-onnx-1.12.40.aar')
+    implementation libs.work.runtime.ktx
+    implementation libs.snakeyaml
+    implementation libs.security.crypto
+    implementation libs.room.runtime
+    implementation libs.room.ktx
+    ksp libs.room.compiler
+    testImplementation libs.junit
+    testImplementation libs.mockk
+    testImplementation libs.org.json
+
+    // Instrumented UI tests (src/androidTest) — 需要 emulator 或 device 运行
+    androidTestImplementation libs.androidx.test.ext.junit
+    androidTestImplementation libs.androidx.test.runner
+    androidTestImplementation libs.androidx.test.espresso
+    androidTestImplementation libs.compose.ui.test
+    debugImplementation libs.compose.ui.test.manifest
 }

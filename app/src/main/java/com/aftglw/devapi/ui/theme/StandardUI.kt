@@ -121,6 +121,7 @@ fun AchatSectionHeader(title: String) {
 /**
  * Marathon-specific high-saturation background logic.
  */
+@Composable
 fun Modifier.marathonBackground(): Modifier = this.then(
     Modifier.background(AchatTheme.colors.background)
 )

@@ -9,13 +9,17 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="@bool/wisp_allow_cleartext"
         android:theme="@style/Theme.Wisp">
 
         <activity
@@ -28,12 +32,12 @@
             </intent-filter>
         </activity>
 
-        <activity android:name="com.aftglw.devapi.SettingsActivity" android:exported="false" />
+        <activity android:name="com.aftglw.devapi.feature.settings.SettingsActivity" android:exported="false" />
 
 
 
         <service android:name="com.aftglw.devapi.DebugOverlayService" android:exported="false" />
-        <receiver android:name="com.aftglw.devapi.ProactiveReceiver" android:exported="false" />
+        <receiver android:name="com.aftglw.devapi.core.time.ProactiveReceiver" android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

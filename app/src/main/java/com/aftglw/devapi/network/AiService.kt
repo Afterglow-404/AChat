@@ -4,9 +4,6 @@ import com.aftglw.devapi.model.ChatMessage
 
 /**
  * 粗略估算一段文本的 token 数量。
- * 英文约 4 字符/token，CJK 约 1.5 字符/token，混合取加权。
- */
-/**
  * 粗略估算一段文本的 token 数量，会根据模型类型调整中文系数。
  *
  * 模型 tokenizer 差异：
@@ -35,7 +32,9 @@ fun estimateTokenCount(text: String, modelHint: String = ""): Int {
 interface AiService {
     fun sendMessage(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String = "",
-        onError: ((String) -> Unit)? = null
+        onError: ((String) -> Unit)? = null,
+        /** 输出参数：原生 tool_calls 收集器（为 null 时兼容旧调用方） */
+        toolCallsOut: MutableList<ToolCall>? = null
     ): String?
 
     /**
@@ -48,10 +47,30 @@ interface AiService {
         systemPrompt: String = "",
         onChunk: (String) -> Unit,
         onDone: (String) -> Unit,
-        onError: ((String) -> Unit)? = null
+        onError: ((String) -> Unit)? = null,
+        toolCallsOut: MutableList<ToolCall>? = null
     ) {
-        val reply = sendMessage(history, userMessage, systemPrompt) ?: ""
+        val reply = sendMessage(history, userMessage, systemPrompt, onError, toolCallsOut) ?: ""
         if (reply.isNotEmpty()) onChunk(reply)
         onDone(reply)
     }
+
+    /**
+     * 取消正在进行的请求（如有）。
+     *
+     * 实现侧应：
+     * - 取消当前在飞的 OkHttp Call（如有），让其抛出 IOException("Canceled")
+     * - 清理内部状态，确保下次调用可正常发送
+     *
+     * 默认空实现，给不需要取消语义的 service（如 Mock/Local）使用。
+     * 在 UI 层挂载"停止生成"按钮时调用。
+     */
+    fun cancel() { /* default no-op */ }
 }
+
+/** 原生 tool_call 结构（与 Agent.regex 解耦） */
+data class ToolCall(
+    val name: String,
+    val arguments: String,
+    val id: String = "",
+)

@@ -24,6 +24,35 @@ object HttpClient {
             .build()
     }
 
+    /** Short-lived client for the desktop/Wisp debugger. */
+    private val debugClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(1, 5, TimeUnit.SECONDS))
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
+    fun clientFor(url: String): OkHttpClient =
+        if (isLikelyLanUrl(url)) debugClient else client
+
+    fun isLikelyLanUrl(url: String): Boolean = try {
+        val host = java.net.URI(url).host
+            ?.removePrefix("[")
+            ?.removeSuffix("]")
+            ?.substringBefore('%')
+            ?.lowercase() ?: return false
+        host == "localhost" || host == "127.0.0.1" || host == "::1" ||
+            host.startsWith("10.") || host.startsWith("192.168.") ||
+            (host.startsWith("172.") && host.split('.').getOrNull(1)?.toIntOrNull() in 16..31) ||
+            host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")
+    } catch (_: Exception) {
+        false
+    }
+
     /** 快捷方法：构建 POST JSON 请求 */
     fun postJson(url: String, jsonBody: String, vararg headers: Pair<String, String>): okhttp3.Request {
         val builder = okhttp3.Request.Builder()

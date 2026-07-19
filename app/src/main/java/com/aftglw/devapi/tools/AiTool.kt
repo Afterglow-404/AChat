@@ -16,6 +16,12 @@ interface AiTool {
     val description: String
 
     /**
+     * 风险等级，影响是否需要用户确认。
+     * 默认 [RiskLevel.LOW]（无需确认）；高风险工具应覆盖为 [RiskLevel.HIGH]。
+     */
+    val riskLevel: RiskLevel get() = RiskLevel.LOW
+
+    /**
      * JSON Schema 描述输入参数。
      *
      * 格式示例：

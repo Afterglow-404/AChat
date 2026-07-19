@@ -16,6 +16,8 @@ import java.net.URLEncoder
 class WebSearchTool : AiTool {
     override val name = "web_search"
     override val description = "搜索互联网获取最新信息、新闻、知识。需要联网。如果需要搜索用户本地笔记请用 recall 工具。"
+    // 联网请求外部服务，可能携带用户查询词 — 中风险
+    override val riskLevel = RiskLevel.MEDIUM
 
     override val inputSchema = JSONObject().apply {
         put("type", "object")
@@ -138,7 +140,7 @@ class WebSearchTool : AiTool {
     private fun searchCustom(ctx: Context, query: String, count: Int): String? {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val apiUrl = prefs.getString("web_search_api_url", "")?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        val apiKey = prefs.getString("web_search_api_key", "")?.trim()?.takeIf { it.isNotBlank() } ?: ""
+        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "web_search_api_key").trim().takeIf { it.isNotBlank() } ?: ""
         return try {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val finalUrl = apiUrl

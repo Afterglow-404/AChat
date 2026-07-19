@@ -23,6 +23,8 @@ private fun isOpenBookMode(ctx: Context): Boolean {
 class LocationTool : AiTool {
     override val name = "access_location"
     override val description = "获取设备当前所在位置的经纬度。需要用户开启「开诚布公」模式并授予位置权限。"
+    // 读取 GPS 位置 — 隐私敏感，中风险
+    override val riskLevel = RiskLevel.MEDIUM
     override val inputSchema = JSONObject()
 
     override suspend fun execute(ctx: Context, args: JSONObject): String {
@@ -52,6 +54,8 @@ class LocationTool : AiTool {
 class ReadNotificationsTool : AiTool {
     override val name = "read_notifications"
     override val description = "读取当前设备上该应用展示的活跃通知列表。需要用户开启「开诚布公」模式。"
+    // 读取其他应用通知 — 隐私敏感，中风险
+    override val riskLevel = RiskLevel.MEDIUM
     override val inputSchema = JSONObject()
 
     override suspend fun execute(ctx: Context, args: JSONObject): String {
@@ -80,6 +84,8 @@ class ReadNotificationsTool : AiTool {
 class ReadAppUsageTool : AiTool {
     override val name = "read_app_usage"
     override val description = "读取最近 24 小时内的应用使用情况统计（各应用使用时长）。需要用户开启「开诚布公」模式并授予使用情况访问权限。"
+    // 读取应用使用统计 — 隐私敏感，中风险
+    override val riskLevel = RiskLevel.MEDIUM
     override val inputSchema = JSONObject()
 
     override suspend fun execute(ctx: Context, args: JSONObject): String {

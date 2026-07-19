@@ -36,7 +36,8 @@ class LocalAiService(private val ctx: Context) : AiService {
         history: List<ChatMessage>,
         userMessage: String,
         systemPrompt: String,
-        onError: ((String) -> Unit)?
+        onError: ((String) -> Unit)?,
+        toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ): String? {
         if (!ensureModel()) return null
 
@@ -67,10 +68,10 @@ class LocalAiService(private val ctx: Context) : AiService {
         systemPrompt: String,
         onChunk: (String) -> Unit,
         onDone: (String) -> Unit,
-        onError: ((String) -> Unit)?
+        onError: ((String) -> Unit)?,
+        toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?
     ) {
-        // 本地模型暂不支持流式，退化为非流式
-        val reply = sendMessage(history, userMessage, systemPrompt, onError)
+        val reply = sendMessage(history, userMessage, systemPrompt, onError, toolCallsOut)
         if (reply != null) {
             onChunk(reply)
             onDone(reply)
@@ -108,11 +109,9 @@ class LocalAiService(private val ctx: Context) : AiService {
         return LlamaEngine.findModel(ctx) != null
     }
 
-    /** 获取可用模型信息 */
+    /** 获取可用模型文件（内部 + 外部存储） */
     fun getAvailableModels(): List<File> {
-        val dir = File(ctx.filesDir, "models")
-        if (!dir.exists()) return emptyList()
-        return dir.listFiles { f -> f.extension == "gguf" }?.toList() ?: emptyList()
+        return LlamaEngine.listAvailableModels(ctx)
     }
 }
 

@@ -3,6 +3,7 @@ package com.aftglw.devapi.core.tools
 import android.content.Context
 import com.aftglw.devapi.network.HttpClient
 import com.aftglw.devapi.tools.AiTool
+import com.aftglw.devapi.tools.RiskLevel
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,6 +26,8 @@ class ScriptTool(
     override val name: String get() = toolDef.name
     override val description: String get() = toolDef.description
     override val inputSchema: JSONObject get() = buildInputSchema()
+    // 动态加载工具可执行 shell / HTTP / Kotlin 反射 — 默认最高风险
+    override val riskLevel: RiskLevel get() = RiskLevel.HIGH
 
     private fun buildInputSchema(): JSONObject {
         val schema = JSONObject()

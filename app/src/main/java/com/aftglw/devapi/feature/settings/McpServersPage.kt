@@ -50,7 +50,7 @@ fun McpServersPage(onBack: () -> Unit) {
             val freshStatuses = mutableMapOf<String, String>()
 
             for (client in freshUrls) {
-                val url = client.toString()
+                val url = client.baseUrl
                 freshStatuses[url] = "连接中..."
                 val result = client.listTools()
                 if (result.isSuccess) {

@@ -5,6 +5,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +14,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -35,6 +39,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aftglw.devapi.model.ChatItem
+import com.aftglw.devapi.model.GroupChat
+import com.aftglw.devapi.feature.group.GroupChatManager
 import com.aftglw.devapi.viewmodel.ChatsViewModel
 import androidx.compose.ui.tooling.preview.Preview
 import com.aftglw.devapi.ui.theme.*
@@ -43,7 +49,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit = { _, _, _, _ -> }, vm: ChatsViewModel = viewModel<ChatsViewModel>()) {
+fun ChatsScreen(
+    onChatClick: (name: String, persona: String, avatarUri: String, id: String, characterFolder: String, thinkingMessage: String) -> Unit = { _, _, _, _, _, _ -> },
+    onGroupClick: (GroupChat) -> Unit = {},
+    vm: ChatsViewModel = viewModel<ChatsViewModel>()
+) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -54,13 +64,23 @@ fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String, 
     }
     LaunchedEffect(Unit) { vm.refresh() }
 
+    val ctx = LocalContext.current
     val chats: List<ChatItem> by vm.chats.observeAsState(emptyList())
+    val groups = remember { mutableStateOf(GroupChatManager.loadGroups(ctx)) }
+    // 每当界面恢复时重新加载群聊列表
+    LaunchedEffect(chats) { groups.value = GroupChatManager.loadGroups(ctx) }
+
     ChatsScreenContent(
         chats = chats,
+        groups = groups.value,
         onSearchQueryChange = { vm.setSearchQuery(it) },
         onChatClick = onChatClick,
+        onGroupClick = onGroupClick,
         onTogglePin = { vm.togglePin(it) },
-        onDeleteChat = { vm.deleteChat(it) }
+        onDeleteChat = { vm.deleteChat(it) },
+        onGroupCreated = { groups.value = GroupChatManager.loadGroups(ctx) },
+        onDeleteGroup = { id -> GroupChatManager.deleteGroup(ctx, id); groups.value = GroupChatManager.loadGroups(ctx) },
+        ctx = ctx
     )
 }
 
@@ -69,11 +89,17 @@ fun ChatsScreen(onChatClick: (name: String, persona: String, avatarUri: String, 
 fun ChatsScreenContent(
     chats: List<ChatItem>,
     onSearchQueryChange: (String) -> Unit,
-    onChatClick: (name: String, persona: String, avatarUri: String, id: String) -> Unit,
+    onChatClick: (name: String, persona: String, avatarUri: String, id: String, characterFolder: String, thinkingMessage: String) -> Unit,
     onTogglePin: (String) -> Unit,
-    onDeleteChat: (String) -> Unit
+    onDeleteChat: (String) -> Unit,
+    groups: List<GroupChat> = emptyList(),
+    onGroupClick: (GroupChat) -> Unit = {},
+    onGroupCreated: () -> Unit = {},
+    onDeleteGroup: (String) -> Unit = {},
+    ctx: android.content.Context? = null
 ) {
     var q by remember { mutableStateOf("") }
+    var showCreateGroup by remember { mutableStateOf(false) }
     val bgModifier = when(AchatTheme.colors.themeId) {
         "newspaper" -> Modifier.newspaperBackground(AchatTheme.colors.background)
         "washi" -> Modifier.washiBackground(AchatTheme.colors.background)
@@ -81,14 +107,85 @@ fun ChatsScreenContent(
     }
 
     Column(Modifier.fillMaxSize().then(bgModifier)) {
-        OutlinedTextField(q, { q = it; onSearchQueryChange(it) }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).defaultMinSize(minHeight = 48.dp),
-            placeholder = { Text("搜索", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }, 
-            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            shape = CircleShape,
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
+        // 顶部搜索栏 + 右上角"创建群聊"按钮（避免与底部 glassnavbar 重合）
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(q, { q = it; onSearchQueryChange(it) }, Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                placeholder = { Text("搜索", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) },
+                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
+                singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+                shape = CircleShape,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = { showCreateGroup = true },
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(AchatTheme.colors.primary)
+            ) {
+                Icon(Icons.Filled.Add, "创建群聊", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+        }
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 90.dp)) {
+        Box(Modifier.weight(1f)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 80.dp)) {
+            // 群聊条目
+            itemsIndexed(groups, key = { _, g -> "group_${g.id}" }) { index, g ->
+                var menuExpanded by remember { mutableStateOf(false) }
+
+                StaggeredEntrance(index = index, visible = true) {
+                    Box(
+                        Modifier.padding(vertical = 0.5.dp)
+                            .background(AchatTheme.colors.surface, AchatTheme.shapes.card)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().height(72.dp)
+                                .combinedClickable(
+                                    onClick = { onGroupClick(g) },
+                                    onLongClick = { menuExpanded = true }
+                                )
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 群聊头像（首字 + group icon）
+                            Box(Modifier.size(48.dp).clip(CircleShape).background(AchatTheme.colors.primary.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.People, null, Modifier.size(24.dp), tint = AchatTheme.colors.primary)
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(g.name, fontWeight = FontWeight.Medium, fontSize = 16.sp,
+                                        modifier = Modifier.weight(1f), color = AchatTheme.colors.onSurface,
+                                        fontFamily = AchatTheme.typography.title)
+                                    Text(g.time, fontSize = 11.sp, color = Color.Gray, fontFamily = AchatTheme.typography.mono)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(g.lastMessage, fontSize = 13.sp, color = Color.Gray,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f), fontFamily = AchatTheme.typography.body)
+                                    Text("${g.members.size}人", fontSize = 11.sp,
+                                        color = AchatTheme.colors.primary.copy(alpha = 0.6f))
+                                }
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            offset = DpOffset(64.dp, 0.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("删除群聊", color = Color(0xFFFA5151)) },
+                                onClick = { onDeleteGroup(g.id); menuExpanded = false }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 单聊条目
             itemsIndexed(chats, key = { _, c -> c.id }) { index, c ->
                 var menuExpanded by remember { mutableStateOf(false) }
 
@@ -112,7 +209,7 @@ fun ChatsScreenContent(
                         Row(
                             Modifier.fillMaxWidth().height(72.dp)
                                 .combinedClickable(
-                                    onClick = { onChatClick(c.name, c.persona, c.avatarUri, c.id) },
+                                    onClick = { onChatClick(c.name, c.persona, c.avatarUri, c.id, c.characterFolder, c.thinkingMessage) },
                                     onLongClick = { menuExpanded = true }
                                 )
                                 .padding(horizontal = 16.dp),
@@ -155,17 +252,26 @@ fun ChatsScreenContent(
                 }
             }
         }
+        }
+    }
+
+    // 创建群聊弹窗
+    if (showCreateGroup && ctx != null) {
+        CreateGroupDialog(
+            ctx = ctx,
+            onDismiss = { showCreateGroup = false },
+            onCreated = { showCreateGroup = false; onGroupCreated() }
+        )
     }
 }
 
 @Composable
 private fun ChatAvatar(avatarUri: String, avatarColor: Int, name: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Box(Modifier.size(48.dp).clip(CircleShape).background(Color(avatarColor)), contentAlignment = Alignment.Center) {
         if (avatarUri.isNotEmpty()) {
             val bmp = remember(avatarUri) {
-                try {
-                    BitmapFactory.decodeFile(avatarUri)?.asImageBitmap()
-                } catch (_: Exception) { null }
+                com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
             }
             if (bmp != null) {
                 Image(bmp, null, Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
@@ -176,6 +282,95 @@ private fun ChatAvatar(avatarUri: String, avatarColor: Int, name: String) {
             Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         }
     }
+}
+
+/**
+ * 创建群聊弹窗 — 选择成员 + 命名群聊。
+ */
+@Composable
+private fun CreateGroupDialog(
+    ctx: android.content.Context,
+    onDismiss: () -> Unit,
+    onCreated: () -> Unit
+) {
+    val members = remember { GroupChatManager.getAvailableMembers(ctx) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var groupName by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("创建群聊", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text("群聊名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("选择成员（至少 2 人）", fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
+                Spacer(Modifier.height(8.dp))
+                if (members.isEmpty()) {
+                    Text("暂无可用角色，请先在设置中添加对话。", fontSize = 13.sp, color = Color.Gray)
+                } else {
+                    members.forEach { (name, persona) ->
+                        val isSel = name in selected
+                        Column(
+                            Modifier.fillMaxWidth().clickable {
+                                selected = if (isSel) selected - name else selected + name
+                            }.padding(vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isSel, onCheckedChange = {
+                                    selected = if (it) selected + name else selected - name
+                                })
+                                Spacer(Modifier.width(8.dp))
+                                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            }
+                            if (persona.isNotBlank()) {
+                                Text(
+                                    persona.take(40) + if (persona.length > 40) "…" else "",
+                                    fontSize = 11.sp,
+                                    color = AchatTheme.colors.onSurface.copy(alpha = 0.4f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(start = 44.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                if (error.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(error, fontSize = 12.sp, color = Color(0xFFFA5151))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                when {
+                    groupName.isBlank() -> error = "请输入群聊名称"
+                    selected.size < 2 -> error = "请至少选择 2 个成员"
+                    else -> {
+                        GroupChatManager.saveGroup(ctx, GroupChat(
+                            id = "group_${System.currentTimeMillis()}",
+                            name = groupName.trim(),
+                            members = selected.toList(),
+                            time = "",
+                            lastMessage = ""
+                        ))
+                        onCreated()
+                    }
+                }
+            }) { Text("创建") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Preview(showBackground = true)
@@ -190,7 +385,7 @@ fun ChatsScreenPreview() {
         ChatsScreenContent(
             chats = sampleChats,
             onSearchQueryChange = {},
-            onChatClick = { _, _, _, _ -> },
+            onChatClick = { _, _, _, _, _, _ -> },
             onTogglePin = {},
             onDeleteChat = {}
         )

@@ -1,6 +1,5 @@
 package com.aftglw.devapi.feature.settings
 import com.aftglw.devapi.DebugOverlayService
-import com.aftglw.devapi.feature.discover.WeChatScreenWithData
 import com.aftglw.devapi.feature.tools.ToolMarketPage
 
 import android.content.Intent
@@ -63,9 +62,12 @@ private sealed class SettingsPage {
     data object Appearance : SettingsPage()
     data object Debug : SettingsPage()
     data object About : SettingsPage()
-    data object WCPreview : SettingsPage()
     data object McpServers : SettingsPage()
     data object ToolMarket : SettingsPage()
+    data object LocalModel : SettingsPage()
+    data object ToolSecurity : SettingsPage()
+    data object DataManagement : SettingsPage()
+    data object MoodModel : SettingsPage()
 }
 
 class SettingsActivity : ComponentActivity() {
@@ -96,7 +98,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var debug by remember { mutableStateOf(prefs.getBoolean("debug_overlay", false)) }
 
     var apiUrl by remember { mutableStateOf(prefs.getString("ai_api_url", "") ?: "") }
-    var apiKey by remember { mutableStateOf(prefs.getString("ai_api_key", "") ?: "") }
+    var apiKey by remember { mutableStateOf(com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")) }
     var model by remember { mutableStateOf(prefs.getString("ai_model", "deepsleep-cat") ?: "deepsleep-cat") }
     var mockReplies by remember { mutableStateOf(prefs.getString("mock_replies", "") ?: "") }
     var mockDelay by remember { mutableStateOf(prefs.getString("mock_delay_ms", "800") ?: "800") }
@@ -110,6 +112,8 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var aiStopSequences by remember { mutableStateOf(prefs.getString("ai_stop_sequences", "") ?: "") }
     var aiResponseFormat by remember { mutableStateOf(prefs.getString("ai_response_format", "") ?: "") }
     var aiClaudeThinking by remember { mutableStateOf(prefs.getBoolean("ai_claude_thinking", false)) }
+    var aiDeepSeekThinking by remember { mutableStateOf(prefs.getBoolean("ai_deepseek_thinking", false)) }
+    var aiProtocol by remember { mutableStateOf(prefs.getString("ai_protocol", "auto") ?: "auto") }
     var newChatName by remember { mutableStateOf("") }
     var newChatPersona by remember { mutableStateOf("") }
     var newChatAvatarUri by remember { mutableStateOf("") }
@@ -195,7 +199,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
                     is SettingsPage.AiApi -> AiApiPage(
                         onBack = goBack,
                         apiUrl, { apiUrl = it; prefs.edit().putString("ai_api_url", it).apply() },
-                        apiKey, { apiKey = it; prefs.edit().putString("ai_api_key", it).apply() },
+                        apiKey, { apiKey = it; com.aftglw.devapi.core.security.SecureKeyStore.putString(ctx, "ai_api_key", it) },
                         model, { model = it; prefs.edit().putString("ai_model", it).apply() },
                         mockReplies, { mockReplies = it; prefs.edit().putString("mock_replies", it).apply() },
                         mockDelay, { mockDelay = it; prefs.edit().putString("mock_delay_ms", it).apply() },
@@ -208,7 +212,9 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         aiPresencePenalty, { aiPresencePenalty = it; prefs.edit().putString("ai_presence_penalty", it).apply() },
                         aiStopSequences, { aiStopSequences = it; prefs.edit().putString("ai_stop_sequences", it).apply() },
                         aiResponseFormat, { aiResponseFormat = it; prefs.edit().putString("ai_response_format", it).apply() },
-                        aiClaudeThinking, { aiClaudeThinking = it; prefs.edit().putBoolean("ai_claude_thinking", it).apply() }
+                        aiClaudeThinking, { aiClaudeThinking = it; prefs.edit().putBoolean("ai_claude_thinking", it).apply() },
+                        aiDeepSeekThinking, { aiDeepSeekThinking = it; prefs.edit().putBoolean("ai_deepseek_thinking", it).apply() },
+                        aiProtocol, { aiProtocol = it; prefs.edit().putString("ai_protocol", it).apply() }
                     )
                     is SettingsPage.ManageRoles -> ManageRolesPage(
                         onBack = goBack,
@@ -240,8 +246,7 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         customFont, { customFont = it; prefs.edit().putBoolean("custom_font", it).apply() },
                         showTimestamps, { showTimestamps = it; prefs.edit().putBoolean("show_timestamps", it).apply() },
                         hitokotoType, { hitokotoType = it; prefs.edit().putString("hitokoto_type", it).apply() },
-                        currentThemeId, { currentThemeId = it; prefs.edit().putString("current_theme", it).apply() },
-                        onNavToWC = { nav(SettingsPage.WCPreview) }
+                        currentThemeId, { currentThemeId = it; prefs.edit().putString("current_theme", it).apply() }
                     )
                     is SettingsPage.Debug -> DebugPage(
                         onBack = goBack,
@@ -261,9 +266,12 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         openBookMode, { openBookMode = it; prefs.edit().putBoolean("open_book_mode", it).apply() }
                     )
                     is SettingsPage.About -> AboutPage(onBack = goBack)
-                    is SettingsPage.WCPreview -> WeChatScreenWithData(onBack = goBack)
                     is SettingsPage.McpServers -> McpServersPage(onBack = goBack)
                     is SettingsPage.ToolMarket -> ToolMarketPage(onBack = goBack)
+                    is SettingsPage.LocalModel -> LocalModelPage(onBack = goBack)
+                    is SettingsPage.ToolSecurity -> ToolSecurityPage(onBack = goBack)
+                    is SettingsPage.DataManagement -> DataManagementPage(onBack = goBack)
+                    is SettingsPage.MoodModel -> MoodModelPage(onBack = goBack)
                 }
             }
         }
@@ -280,14 +288,18 @@ private fun savePickedImage(ctx: android.content.Context, uri: Uri, fileName: St
 }
 
 private fun addChat(ctx: android.content.Context, name: String, persona: String, avatarUri: String) {
-    val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-    val chats = org.json.JSONArray(prefs.getString("chats", "[]") ?: "[]")
-    val newChat = org.json.JSONObject().apply {
-        put("name", name); put("persona", persona); put("avatarUri", avatarUri)
-        put("pinned", false); put("id", java.util.UUID.randomUUID().toString())
+    kotlinx.coroutines.runBlocking {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.aftglw.devapi.core.storage.room.AppDatabase.get(ctx).chatDao().upsert(
+                com.aftglw.devapi.core.storage.room.ChatEntity(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = name,
+                    persona = persona,
+                    avatarUri = avatarUri
+                )
+            )
+        }
     }
-    chats.put(newChat)
-    prefs.edit().putString("chats", chats.toString()).apply()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -297,6 +309,9 @@ private fun SettingsMainPage(onBack: () -> Unit, onNav: (SettingsPage) -> Unit) 
         Triple("个人信息", "昵称、头像、个人签名", SettingsPage.Profile),
         Triple("通知设置", "消息提示音 with 振动", SettingsPage.Notifications),
         Triple("AI 接口", "API 地址、密钥、模型与离线状态随机回复", SettingsPage.AiApi),
+        Triple("工具安全", "工具白名单与高风险确认", SettingsPage.ToolSecurity),
+        Triple("数据管理", "导出/清空聊天数据", SettingsPage.DataManagement),
+        Triple("情绪模型", "导入/管理 ONNX 情绪识别模型", SettingsPage.MoodModel),
         Triple("管理角色", "添加对话角色与设定人设", SettingsPage.ManageRoles),
         Triple("背景设置", "主界面与聊天背景图片", SettingsPage.Backgrounds),
         Triple("界面设置", "通透效果、液态动效、字体、主题", SettingsPage.Appearance),

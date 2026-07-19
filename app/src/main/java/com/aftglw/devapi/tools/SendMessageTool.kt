@@ -14,6 +14,8 @@ import java.util.*
 class SendMessageTool : AiTool {
     override val name = "send_message"
     override val description = "主动给用户发一条通知栏消息，或者保存到特定角色的对话记录"
+    // 主动发通知/写入对话记录 — 有外部副作用，需用户确认
+    override val riskLevel = RiskLevel.HIGH
 
     override val inputSchema = JSONObject().apply {
         put("type", "object")

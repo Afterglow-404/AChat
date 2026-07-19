@@ -48,7 +48,7 @@ class CalculatorTool : AiTool {
         while (i < s.length) {
             val c = s[i]
             if (c.isWhitespace()) { i++; continue }
-            if (c in "+-*/%(),") {
+            if (c in "+-*/%^(),") {
                 if (sb.isNotEmpty()) { result.add(sb.toString()); sb.clear() }
                 result.add(c.toString())
             } else if (c.isLetterOrDigit() || c == '.') {
@@ -100,7 +100,7 @@ class CalculatorTool : AiTool {
         if (pos >= it.size) throw IllegalArgumentException("表达式不完整")
         val token = it[pos]
         pos++
-        return when {
+        var base = when {
             token == "(" -> {
                 val inner = parseExpr(it, pos)
                 if (inner.pos >= it.size || it[inner.pos] != ")") throw IllegalArgumentException("缺少右括号")
@@ -134,6 +134,13 @@ class CalculatorTool : AiTool {
             }
             else -> throw IllegalArgumentException("无法解析: $token")
         }
+        // 幂运算 ^（右结合，优先级高于 * /）
+        pos = base.pos
+        if (pos < it.size && it[pos] == "^") {
+            val exp = parseFactor(it, pos + 1)
+            base = ParseResult(base.value.pow(exp.value), exp.pos)
+        }
+        return base
     }
 
     private data class ParseResult(val value: Double, val pos: Int)

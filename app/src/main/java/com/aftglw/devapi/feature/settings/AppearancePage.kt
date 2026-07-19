@@ -44,7 +44,6 @@ fun AppearancePage(
     showTimestamps: Boolean, onShowTimestampsChange: (Boolean) -> Unit,
     hitokotoType: String, onHitokotoTypeChange: (String) -> Unit,
     currentThemeId: String, onThemeChange: (String) -> Unit,
-    onNavToWC: () -> Unit
 ) {
     SubPageScaffold("界面设置", onBack) {
         Spacer(Modifier.height(8.dp))
@@ -79,8 +78,6 @@ fun AppearancePage(
 
         Spacer(Modifier.height(8.dp))
         SettingsMainHeader("实验室")
-        SettingsEntry("微信首页复刻", "查看 WCduplicate 复刻效果") { onNavToWC() }
-
         Spacer(Modifier.height(8.dp))
         Text("一言类型（可多选）", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
 

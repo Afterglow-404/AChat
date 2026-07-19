@@ -20,3 +20,11 @@ tokenizer_out/
 tokenizer_out_7class/
 genmsg.txt
 worker_debug.txt
+# 发布签名 keystore — 永远不应进入版本库
+*.jks
+*.keystore
+keystore.properties
+
+# sherpa-onnx AAR (54MB 二进制，开发者需手动下载放置)
+# 下载：https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.40/sherpa-onnx-1.12.40.aar
+app/libs/*.aar

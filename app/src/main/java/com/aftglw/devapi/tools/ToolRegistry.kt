@@ -26,6 +26,9 @@ object ToolRegistry {
     /** 获取所有已注册工具 */
     fun getAll(): List<AiTool> = tools.values.toList()
 
+    /** 测试用：清空所有注册的工具 */
+    fun resetForTest() { tools.clear() }
+
     /** 输出 MCP tools/list 格式的 JSON 数组 */
     fun listToolsJson(): JSONArray = JSONArray().apply {
         for (tool in tools.values) {
@@ -50,10 +53,10 @@ object ToolRegistry {
                 val desc = p.optString("description", "")
                 val req = if (key in required) "必填" else "可选"
                 "  ${key}(${type},${req}): ${desc}"
-            }
+            }.toList()
             buildString {
                 appendLine("【tool:${tool.name}】${tool.description}")
-                if (paramLines.any()) {
+                if (paramLines.isNotEmpty()) {
                     paramLines.forEach { appendLine(it) }
                 }
             }.trimEnd()
