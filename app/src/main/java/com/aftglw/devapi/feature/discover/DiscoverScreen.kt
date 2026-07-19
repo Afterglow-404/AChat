@@ -82,6 +82,13 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
     var from by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
 
+    // 调用方未传 items 时（如 WeChatApp 传 emptyList()），从 ViewModel 加载默认功能列表
+    val effectiveItems = if (items.isEmpty()) {
+        val vm: DiscoverViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+        val liveItems by vm.items.observeAsState(emptyList())
+        liveItems
+    } else items
+
     val cnFont = FontFamily(Font(R.font.notoserifsc_bold, weight = FontWeight.Bold))
     val enFont = FontFamily(Font(R.font.special_elite_regular, weight = FontWeight.Normal))
 
@@ -297,7 +304,7 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
             )
             3 -> TodoPage(onBack = { showTodo = false }, cnFont = cnFont, enFont = enFont, fortuneText = fortuneText, backdrop = todoBackdrop)
             4 -> PromptBuilderPage(onBack = { showPromptBuilder = false })
-            else -> DiscoverScreenContent(items = items, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
+            else -> DiscoverScreenContent(items = effectiveItems, hitokoto = hitokoto, from = from, loading = loading, onRefresh = { fetchHitokoto() }, cnFont = cnFont, enFont = enFont,
                 onCatClick = { showCatPage = true; fetchCat() },
                 onChallengeClick = { showChallenge = true; challengeDone = false; fetchBoredChallenge() },
                 onTodoClick = { showTodo = true },
