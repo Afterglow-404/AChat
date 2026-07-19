@@ -70,7 +70,17 @@
 # --- TensorFlow Lite (引用了 com.google.auto.value.AutoValue，但该库未打包) ---
 -dontwarn com.google.auto.value.AutoValue
 -keep class org.tensorflow.lite.** { *; }
+-keep class org.tensorflow.lite.support.** { *; }
 -dontwarn org.tensorflow.lite.**
+-dontwarn org.tensorflow.lite.support.**
+
+# --- sherpa-onnx STT (JNI 调用，需要保留 native 方法与 Kotlin API 类) ---
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+# --- 旧版 tflite Whisper 残留（已废弃，保留 keep 避免编译期引用报错） ---
+-keep class com.aftglw.devapi.core.voice.whisper.** { *; }
+# --- 讯飞 RTASR Provider（HmacSHA1/MD5/Base64 反射调用） ---
+-keep class com.aftglw.devapi.core.voice.XfyunSttProvider { *; }
+-keep class com.aftglw.devapi.core.voice.LocalSenseVoiceSttProvider { *; }
 
 # --- 隐私：release 构建移除低级别日志（Log.v / Log.d），避免泄露请求细节 ---
 # Log.i / Log.w / Log.e 保留用于关键诊断，已审计确认不输出 API Key 或请求体

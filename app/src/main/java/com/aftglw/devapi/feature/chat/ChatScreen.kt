@@ -281,8 +281,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     val recentUserText = remember(bubbles.size) {
         bubbles.asReversed().filter { it.isMe }.take(3).joinToString(" ") { it.text }.take(500)
     }
-    val enhancedPersona = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-        PromptBuilder.build(ctx, name, currentPersona, "", optimized, traits, recentUserText)
+    // 异步构建 enhancedPersona（PromptBuilder 内部有 MemoryStore 查询 + 世界书匹配，磁盘 IO 较重）
+    // 此前是 runBlocking，会卡主线程 5-20s（ANR 根因），改为 LaunchedEffect + State 异步计算
+    var enhancedPersona by remember { mutableStateOf(currentPersona) }
+    LaunchedEffect(currentPersona, optimized, traits, recentUserText) {
+        enhancedPersona = withContext(Dispatchers.IO) {
+            PromptBuilder.build(ctx, name, currentPersona, "", optimized, traits, recentUserText)
+        }
     }
 
     // 统一的用户消息发送逻辑：text 传入实际文字（给 AI），voiceBubble/imageBubble 非空时用对应气泡展示
@@ -329,7 +334,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         }
 
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
-            val moodEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+            try {
+                val moodEnabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                 .getBoolean("mood_enabled", false)
             val historyText = bubbles.takeLast(8).joinToString("\n") { "${if (it.isMe) "我" else "AI"}：${it.text}" }
             val mood = if (moodEnabled) { MoodDetector.feed(text, listOf(historyText)) } else MoodInfo(null, null)
@@ -371,7 +377,12 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         val sm = stickerRegex.find(part)
                         if (sm != null) {
                             val path = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])
-                            bubbles.add(Bubble("", false, label = "sticker", stickerPath = path))
+                            if (path != null) {
+                                bubbles.add(Bubble("", false, label = "sticker", stickerPath = path))
+                            } else {
+                                // Keep the conversation responsive when an AI emits an unknown pack/tag.
+                                bubbles.add(Bubble("无法识别贴纸：${sm.value}", false))
+                            }
                         } else {
                             bubbles.add(Bubble(part, false))
                         }
@@ -393,7 +404,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                     addSegment(parts[i])
                                 }
                             }
-                        } else {
+                        } else if (parts.size == 1) {
                             addSegment(parts[0])
                         }
                     }
@@ -415,6 +426,22 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         ).message
                     }
                     android.widget.Toast.makeText(ctx, errMsg, android.widget.Toast.LENGTH_SHORT).show()
+                    waiting = false
+                }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ChatScreen", "AI request or reply handling failed", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        ctx,
+                        com.aftglw.devapi.network.AiError.fromException(e).message,
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
                     waiting = false
                 }
             }
@@ -622,9 +649,25 @@ fun ChatContent(
     val tts = remember { VoiceTts(ctx) }
     val cloudTts = remember { CloudTtsService(ctx) }
     val ttsEngine = remember { prefs.getString("tts_engine", "local") ?: "local" }
+    val sttEngine = remember { prefs.getString("stt_engine", "system") ?: "system" }
     // 配置 TtsProviderManager：进入聊天页时按用户选的引擎初始化降级链
+    // 注意：configure 会构造 provider 实例（SystemTtsProvider 会 new TextToSpeech，
+    // SystemTts/SttProvider 都会绑定系统服务），必须放到 IO 线程避免主线程卡顿/ANR
     LaunchedEffect(ttsEngine) {
-        com.aftglw.devapi.core.voice.TtsProviderManager.configure(ctx, ttsEngine)
+        withContext(Dispatchers.IO) {
+            com.aftglw.devapi.core.voice.TtsProviderManager.configure(ctx, ttsEngine)
+        }
+    }
+    // 配置 SttProviderManager：仅 cloud / remote_whisper / local_whisper 引擎需要
+    // （system 走原 VoiceSttHelper 实时识别）
+    LaunchedEffect(sttEngine) {
+        withContext(Dispatchers.IO) {
+            if (sttEngine != "system") {
+                com.aftglw.devapi.core.voice.SttProviderManager.configure(ctx, sttEngine)
+            } else {
+                com.aftglw.devapi.core.voice.SttProviderManager.shutdown()
+            }
+        }
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -633,6 +676,7 @@ fun ChatContent(
             voicePlayer.stop()
             tts.shutdown()
             com.aftglw.devapi.core.voice.TtsProviderManager.shutdown()
+            com.aftglw.devapi.core.voice.SttProviderManager.shutdown()
         }
     }
     // 应用 TTS 语速/音调（从设置读取）— 仅本地引擎生效
@@ -1284,38 +1328,80 @@ fun ChatContent(
                                                 }
                                                 val duration = recorder.stop()
                                                 if (duration > 0 && file.exists()) {
-                                                    // STT 转写（异步）+ 超时保护
-                                                    // 某些 ROM 系统 STT 不回调 onResult/onError，会导致永远没有语音气泡
-                                                    // 加 5s 超时：到时仍未回调，强制发送仅音频气泡
+                                                    // STT 转写（异步，无超时保护 — 用户要求删去超时设定）
+                                                    // sent 标志位仅用于防止重复发送（Manager.transcribe 可能既触发 onResult 又返回 Success）
                                                     var sent = false
-                                                    val sttTimeoutJob = scope.launch {
-                                                        delay(5000L)
-                                                        if (!sent) {
-                                                            sent = true
-                                                            onSendVoice("", file.absolutePath, duration)
-                                                            sttHelper.stop()
-                                                            Toast.makeText(ctx, "语音转文字超时，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                    if (sttEngine == "system") {
+                                                        // 系统 STT：实时识别模式（VoiceSttHelper 边录边识别）
+                                                        sttHelper.start(
+                                                            onResult = { text ->
+                                                                if (!sent) {
+                                                                    sent = true
+                                                                    onSendVoice(text, file.absolutePath, duration)
+                                                                }
+                                                                sttHelper.stop()
+                                                            },
+                                                            onError = {
+                                                                if (!sent) {
+                                                                    sent = true
+                                                                    onSendVoice("", file.absolutePath, duration)
+                                                                    Toast.makeText(ctx, "语音转文字失败，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                                sttHelper.stop()
+                                                            }
+                                                        )
+                                                    } else {
+                                                        // 云端 / PC Whisper / 本地 Whisper：文件转写模式
+                                                        val engineLabel = when (sttEngine) {
+                                                            "local_whisper" -> "本地 Whisper"
+                                                            "local_sensevoice" -> "本地 SenseVoice"
+                                                            "xfyun" -> "讯飞"
+                                                            "remote_whisper" -> "PC Whisper"
+                                                            else -> "云端"
+                                                        }
+                                                        Toast.makeText(ctx, "正在转写（$engineLabel）...", Toast.LENGTH_SHORT).show()
+                                                        scope.launch {
+                                                            try {
+                                                                val outcome = com.aftglw.devapi.core.voice.SttProviderManager.transcribe(
+                                                                    ctx = ctx,
+                                                                    audioPath = file.absolutePath,
+                                                                    lang = "zh-CN",
+                                                                    onResult = { text ->
+                                                                        if (!sent) {
+                                                                            sent = true
+                                                                            onSendVoice(text, file.absolutePath, duration)
+                                                                        }
+                                                                    },
+                                                                    onError = {
+                                                                        if (!sent) {
+                                                                            sent = true
+                                                                            onSendVoice("", file.absolutePath, duration)
+                                                                            // onError 可能在 IO 线程触发，Toast 必须切主线程
+                                                                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                                                Toast.makeText(ctx, "语音转文字失败，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                )
+                                                                // 兜底：Manager.transcribe 返回 Success 时 onResult 应已转发；
+                                                                // 若因协程调度原因未触发，这里补发一次
+                                                                if (outcome is com.aftglw.devapi.core.voice.SttOutcome.Success && !sent) {
+                                                                    sent = true
+                                                                    onSendVoice(outcome.text, file.absolutePath, duration)
+                                                                }
+                                                            } catch (e: Exception) {
+                                                                // 兜底保护：Manager 或回调链路抛未预期异常时，至少保证音频发出 + 不崩
+                                                                android.util.Log.e("ChatScreen", "STT transcribe threw", e)
+                                                                if (!sent) {
+                                                                    sent = true
+                                                                    onSendVoice("", file.absolutePath, duration)
+                                                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                                        Toast.makeText(ctx, "语音转文字异常，仅发送音频", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
-                                                    sttHelper.start(
-                                                        onResult = { text ->
-                                                            sttTimeoutJob.cancel()
-                                                            if (!sent) {
-                                                                sent = true
-                                                                onSendVoice(text, file.absolutePath, duration)
-                                                            }
-                                                            sttHelper.stop()
-                                                        },
-                                                        onError = {
-                                                            sttTimeoutJob.cancel()
-                                                            if (!sent) {
-                                                                sent = true
-                                                                onSendVoice("", file.absolutePath, duration)
-                                                                Toast.makeText(ctx, "语音转文字失败，仅发送音频", Toast.LENGTH_SHORT).show()
-                                                            }
-                                                            sttHelper.stop()
-                                                        }
-                                                    )
                                                 } else {
                                                     Toast.makeText(ctx, "录音失败", Toast.LENGTH_SHORT).show()
                                                 }

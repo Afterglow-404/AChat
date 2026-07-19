@@ -81,6 +81,9 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // sherpa-onnx AAR 与 onnxruntime-android 都打包了 libonnxruntime.so，
+            // 取 sherpa-onnx 自带版本（与 sherpa-onnx-jni.so ABI/版本匹配，避免运行期符号冲突）
+            pickFirsts += ['**/libonnxruntime.so']
         }
     }
 
@@ -114,7 +117,11 @@ dependencies {
     implementation libs.navigation.compose
     implementation libs.compose.runtime.livedata
     implementation libs.coil.compose
-    implementation libs.tensorflow.lite.task.text
+    // TFLite 核心：保留用于其他场景（情绪检测等）
+    implementation libs.tensorflow.lite
+    // sherpa-onnx Android AAR：本地 Whisper STT 推理引擎（预编译，无需 NDK）
+    // 替代原 tflite whisper 方案，支持 language=zh + task=transcribe 强制中文输出
+    implementation files('libs/sherpa-onnx-1.12.40.aar')
     implementation libs.work.runtime.ktx
     implementation libs.snakeyaml
     implementation libs.security.crypto

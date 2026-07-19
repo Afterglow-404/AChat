@@ -21,6 +21,7 @@ import androidx.security.crypto.MasterKey
  * 已识别的敏感 key：
  * - `ai_api_key`         主 API Key（OpenAI/Claude/DeepSeek 通用）
  * - `tts_cloud_key`      云端 TTS Key（留空复用 ai_api_key）
+ * - `stt_cloud_key`      云端 STT Key（留空复用 ai_api_key）
  * - `web_search_api_key` Web 搜索 API Key
  */
 object SecureKeyStore {
@@ -33,6 +34,7 @@ object SecureKeyStore {
     private val SENSITIVE_KEYS = listOf(
         "ai_api_key",
         "tts_cloud_key",
+        "stt_cloud_key",
         "web_search_api_key"
     )
 
