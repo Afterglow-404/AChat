@@ -461,8 +461,6 @@ fun DiscoverScreenContent(items: List<DiscoverItem>, hitokoto: String = "", from
                                     "2" -> onCatClick()
                                     "3" -> onChallengeClick()
                                     "4" -> onTodoClick()
-                                    "5" -> {}
-                                    "6" -> {}
                                     "8" -> onPromptBuilderClick()
                                 }
                             }.padding(horizontal = 16.dp, vertical = 12.dp),

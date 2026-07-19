@@ -107,12 +107,25 @@ fun ChatsScreenContent(
     }
 
     Column(Modifier.fillMaxSize().then(bgModifier)) {
-        OutlinedTextField(q, { q = it; onSearchQueryChange(it) }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).defaultMinSize(minHeight = 48.dp),
-            placeholder = { Text("搜索", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) }, 
-            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-            singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-            shape = CircleShape,
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
+        // 顶部搜索栏 + 右上角"创建群聊"按钮（避免与底部 glassnavbar 重合）
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(q, { q = it; onSearchQueryChange(it) }, Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                placeholder = { Text("搜索", fontSize = 14.sp, fontFamily = AchatTheme.typography.title) },
+                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
+                singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+                shape = CircleShape,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface))
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = { showCreateGroup = true },
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(AchatTheme.colors.primary)
+            ) {
+                Icon(Icons.Filled.Add, "创建群聊", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+        }
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 80.dp)) {
@@ -239,16 +252,6 @@ fun ChatsScreenContent(
                 }
             }
         }
-
-            // FAB 创建群聊
-            FloatingActionButton(
-                onClick = { showCreateGroup = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-                    .size(52.dp),
-                containerColor = AchatTheme.colors.primary
-            ) {
-                Icon(Icons.Filled.Add, "创建群聊", tint = Color.White, modifier = Modifier.size(24.dp))
-            }
         }
     }
 
