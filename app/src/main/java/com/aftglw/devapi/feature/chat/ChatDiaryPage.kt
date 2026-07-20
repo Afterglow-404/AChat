@@ -1,4 +1,6 @@
 package com.aftglw.devapi.feature.chat
+import android.util.Log
+import android.widget.Toast
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.memory.MemoryItem
 
@@ -33,7 +35,11 @@ fun DiaryPage(name: String, onBack: () -> Unit) {
     var diaries by remember { mutableStateOf<List<MemoryItem>>(emptyList()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(name) {
-        diaries = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 50, "diary:$name") }
+        try {
+            diaries = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 50, "diary:$name") }
+        } catch (e: Exception) {
+            Log.e("ChatDiaryPage", "load diaries failed", e)
+        }
     }
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
@@ -56,9 +62,16 @@ fun DiaryPage(name: String, onBack: () -> Unit) {
                         Text(content, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 13.sp, color = AchatTheme.colors.onSurface, maxLines = 3)
                         IconButton(onClick = {
                             scope.launch(Dispatchers.IO) {
-                                MemoryStore.deleteByText(d.text, "diary:$name")
-                                val refreshed = MemoryStore.search(ctx, "日记", 50, "diary:$name")
-                                withContext(Dispatchers.Main) { diaries = refreshed }
+                                try {
+                                    MemoryStore.deleteByText(d.text, "diary:$name")
+                                    val refreshed = MemoryStore.search(ctx, "日记", 50, "diary:$name")
+                                    withContext(Dispatchers.Main) { diaries = refreshed }
+                                } catch (e: Exception) {
+                                    Log.e("ChatDiaryPage", "delete diary failed", e)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(ctx, "删除失败", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))

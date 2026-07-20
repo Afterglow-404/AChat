@@ -1,5 +1,7 @@
 package com.aftglw.devapi.feature.settings
 
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,10 +36,20 @@ fun ToolSecurityPage(onBack: () -> Unit) {
     val ctx = LocalContext.current
     // 进入页面时确保 ToolRegistry 已初始化
     LaunchedEffect(Unit) {
-        ToolRegistry.init(ctx)
+        try {
+            ToolRegistry.init(ctx)
+        } catch (e: Exception) {
+            Log.e("ToolSecurityPage", "ToolRegistry.init failed", e)
+        }
     }
-    val tools = remember { ToolRegistry.getAll().sortedBy { it.riskLevel.ordinal } }
-    val disabledSet = remember { mutableStateOf(ToolWhitelist.disabledNames(ctx)) }
+    val tools = remember {
+        try { ToolRegistry.getAll().sortedBy { it.riskLevel.ordinal } } catch (e: Exception) { Log.e("ToolSecurityPage", "getAll failed", e); emptyList() }
+    }
+    val disabledSet = remember {
+        mutableStateOf(
+            try { ToolWhitelist.disabledNames(ctx) } catch (e: Exception) { Log.e("ToolSecurityPage", "disabledNames failed", e); emptySet() }
+        )
+    }
 
     SubPageScaffold(title = "工具安全", onBack = onBack) {
         // 说明卡片
@@ -123,8 +135,13 @@ fun ToolSecurityPage(onBack: () -> Unit) {
                         Switch(
                             checked = !isDisabled,
                             onCheckedChange = { enabled ->
-                                ToolWhitelist.setDisabled(ctx, tool.name, !enabled)
-                                disabledSet.value = ToolWhitelist.disabledNames(ctx)
+                                try {
+                                    ToolWhitelist.setDisabled(ctx, tool.name, !enabled)
+                                    disabledSet.value = ToolWhitelist.disabledNames(ctx)
+                                } catch (e: Exception) {
+                                    Log.e("ToolSecurityPage", "setDisabled failed for ${tool.name}", e)
+                                    Toast.makeText(ctx, "设置失败", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = AchatTheme.colors.primary,

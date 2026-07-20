@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.settings
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -34,7 +35,11 @@ fun McpServersPage(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var urls by remember { mutableStateOf(MCPClient.fromConfig(ctx).map { it.baseUrl }) }
+    var urls by remember {
+        mutableStateOf(
+            try { MCPClient.fromConfig(ctx).map { it.baseUrl } } catch (e: Exception) { Log.e("McpServersPage", "fromConfig failed", e); emptyList() }
+        )
+    }
     var toolInfos by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     var statuses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -159,10 +164,15 @@ fun McpServersPage(onBack: () -> Unit) {
                                     }
                                 }
                                 IconButton(onClick = {
-                                    val newUrls = urls.toMutableList().apply { remove(url) }
-                                    MCPClient.saveConfig(ctx, newUrls)
-                                    urls = newUrls
-                                    scope.launch(Dispatchers.IO) { MCPBridge.refresh(ctx) }
+                                    try {
+                                        val newUrls = urls.toMutableList().apply { remove(url) }
+                                        MCPClient.saveConfig(ctx, newUrls)
+                                        urls = newUrls
+                                        scope.launch(Dispatchers.IO) { MCPBridge.refresh(ctx) }
+                                    } catch (e: Exception) {
+                                        Log.e("McpServersPage", "saveConfig/delete failed", e)
+                                        Toast.makeText(ctx, "删除失败", Toast.LENGTH_SHORT).show()
+                                    }
                                 }) {
                                     Icon(Icons.Default.Delete, "删除", tint = Color(0xFFE53935), modifier = Modifier.size(20.dp))
                                 }
@@ -232,14 +242,19 @@ fun McpServersPage(onBack: () -> Unit) {
                 TextButton(onClick = {
                     val trimmed = newUrl.trim()
                     if (trimmed.isNotBlank()) {
-                        val newList = urls.toMutableList().apply { add(trimmed) }
-                        MCPClient.saveConfig(ctx, newList)
-                        urls = newList
-                        newUrl = ""
-                        testResult = null
-                        showAddDialog = false
-                        scope.launch(Dispatchers.IO) { MCPBridge.refresh(ctx) }
-                        refreshAll()
+                        try {
+                            val newList = urls.toMutableList().apply { add(trimmed) }
+                            MCPClient.saveConfig(ctx, newList)
+                            urls = newList
+                            newUrl = ""
+                            testResult = null
+                            showAddDialog = false
+                            scope.launch(Dispatchers.IO) { MCPBridge.refresh(ctx) }
+                            refreshAll()
+                        } catch (e: Exception) {
+                            Log.e("McpServersPage", "saveConfig/add failed", e)
+                            Toast.makeText(ctx, "添加失败", Toast.LENGTH_SHORT).show()
+                        }
                     } else Toast.makeText(ctx, "URL 不能为空", Toast.LENGTH_SHORT).show()
                 }) { Text("添加", color = AchatTheme.colors.primary) }
             },

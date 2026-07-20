@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.group
 
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -58,8 +59,15 @@ fun GroupInfoPage(
         currentGroup = updated
         onGroupChanged(updated)
         scope.launch {
-            withContext(Dispatchers.IO) {
-                GroupChatManager.saveGroup(ctx, updated)
+            try {
+                withContext(Dispatchers.IO) {
+                    GroupChatManager.saveGroup(ctx, updated)
+                }
+            } catch (e: Exception) {
+                Log.e("GroupInfoPage", "saveGroup failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "保存失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -79,25 +87,33 @@ fun GroupInfoPage(
     // 当前群成员 + 人设预览（每次 currentGroup 变化时刷新）
     var memberInfo by remember { mutableStateOf<List<Triple<String, androidx.compose.ui.graphics.ImageBitmap?, String>>>(emptyList()) }
     LaunchedEffect(currentGroup.members, currentGroup.memberEnabled) {
-        val loaded = withContext(Dispatchers.IO) {
-            currentGroup.members.map { name ->
-                val avatarUri = GroupChatManager.getMemberAvatarUri(ctx, name)
-                val avatar = if (avatarUri.isNotEmpty()) {
-                    BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
-                } else null
-                val persona = GroupChatManager.getMemberPersona(ctx, name)
-                Triple(name, avatar, persona)
+        try {
+            val loaded = withContext(Dispatchers.IO) {
+                currentGroup.members.map { name ->
+                    val avatarUri = GroupChatManager.getMemberAvatarUri(ctx, name)
+                    val avatar = if (avatarUri.isNotEmpty()) {
+                        BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
+                    } else null
+                    val persona = GroupChatManager.getMemberPersona(ctx, name)
+                    Triple(name, avatar, persona)
+                }
             }
+            memberInfo = loaded
+        } catch (e: Exception) {
+            Log.e("GroupInfoPage", "loadMemberInfo failed", e)
         }
-        memberInfo = loaded
     }
 
     // 可添加的候选成员（去重当前已加入的）
     var availableCandidates by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     LaunchedEffect(currentGroup.members) {
-        val existing = currentGroup.members.toSet()
-        val all = GroupChatManager.getAvailableMembers(ctx)
-        availableCandidates = all.filter { it.first !in existing }
+        try {
+            val existing = currentGroup.members.toSet()
+            val all = GroupChatManager.getAvailableMembers(ctx)
+            availableCandidates = all.filter { it.first !in existing }
+        } catch (e: Exception) {
+            Log.e("GroupInfoPage", "getAvailableMembers failed", e)
+        }
     }
 
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
@@ -213,11 +229,18 @@ fun GroupInfoPage(
                             Toast.makeText(ctx, "至少保留一名群成员", Toast.LENGTH_SHORT).show()
                         } else {
                             scope.launch {
-                                if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
-                                    commitGroup(currentGroup.copy(
-                                        members = currentGroup.members.filter { it != name },
-                                        memberEnabled = currentGroup.memberEnabled - name
-                                    ))
+                                try {
+                                    if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
+                                        commitGroup(currentGroup.copy(
+                                            members = currentGroup.members.filter { it != name },
+                                            memberEnabled = currentGroup.memberEnabled - name
+                                        ))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("GroupInfoPage", "removeMember failed", e)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(ctx, "移除失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         }
@@ -265,10 +288,17 @@ fun GroupInfoPage(
                     enabled = renameText.isNotBlank() && renameText != currentGroup.name,
                     onClick = {
                         scope.launch {
-                            GroupChatManager.renameGroup(ctx, currentGroup.id, renameText.trim())
-                            currentGroup = currentGroup.copy(name = renameText.trim())
-                            onGroupChanged(currentGroup)
-                            showRenameDialog = false
+                            try {
+                                GroupChatManager.renameGroup(ctx, currentGroup.id, renameText.trim())
+                                currentGroup = currentGroup.copy(name = renameText.trim())
+                                onGroupChanged(currentGroup)
+                                showRenameDialog = false
+                            } catch (e: Exception) {
+                                Log.e("GroupInfoPage", "renameGroup failed", e)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(ctx, "重命名失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     }
                 ) { Text("保存") }
@@ -296,11 +326,18 @@ fun GroupInfoPage(
                                 Modifier.fillMaxWidth()
                                     .clickable {
                                         scope.launch {
-                                            if (GroupChatManager.addMember(ctx, currentGroup.id, name)) {
-                                                commitGroup(currentGroup.copy(
-                                                    members = currentGroup.members + name,
-                                                    memberEnabled = currentGroup.memberEnabled + (name to true)
-                                                ))
+                                            try {
+                                                if (GroupChatManager.addMember(ctx, currentGroup.id, name)) {
+                                                    commitGroup(currentGroup.copy(
+                                                        members = currentGroup.members + name,
+                                                        memberEnabled = currentGroup.memberEnabled + (name to true)
+                                                    ))
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("GroupInfoPage", "addMember failed", e)
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(ctx, "添加失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                             showAddDialog = false
                                         }
@@ -379,9 +416,16 @@ fun GroupInfoPage(
                 TextButton(
                     onClick = {
                         scope.launch {
-                            GroupChatManager.deleteGroup(ctx, currentGroup.id)
-                            showDeleteDialog = false
-                            onGroupDeleted()
+                            try {
+                                GroupChatManager.deleteGroup(ctx, currentGroup.id)
+                                showDeleteDialog = false
+                                onGroupDeleted()
+                            } catch (e: Exception) {
+                                Log.e("GroupInfoPage", "deleteGroup failed", e)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(ctx, "解散失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     },
                     colors = ButtonDefaults.textButtonColors(

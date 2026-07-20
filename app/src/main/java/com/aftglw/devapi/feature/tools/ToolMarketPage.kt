@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.tools
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -34,7 +35,11 @@ import kotlinx.coroutines.withContext
 fun ToolMarketPage(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var packages by remember { mutableStateOf(ToolScanner.getInstalledPackages(ctx)) }
+    var packages by remember {
+        mutableStateOf(
+            try { ToolScanner.getInstalledPackages(ctx) } catch (e: Exception) { Log.e("ToolMarketPage", "getInstalledPackages failed", e); emptyList() }
+        )
+    }
     var showInstallDialog by remember { mutableStateOf(false) }
     var installUrl by remember { mutableStateOf("") }
 
@@ -63,9 +68,14 @@ fun ToolMarketPage(onBack: () -> Unit) {
                             Text("点击删除可卸载", fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f))
                         }
                         IconButton(onClick = {
-                            ToolScanner.uninstall(ctx, pkg)
-                            packages = ToolScanner.getInstalledPackages(ctx)
-                            Toast.makeText(ctx, "已卸载: $pkg", Toast.LENGTH_SHORT).show()
+                            try {
+                                ToolScanner.uninstall(ctx, pkg)
+                                packages = ToolScanner.getInstalledPackages(ctx)
+                                Toast.makeText(ctx, "已卸载: $pkg", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Log.e("ToolMarketPage", "uninstall failed for $pkg", e)
+                                Toast.makeText(ctx, "卸载失败", Toast.LENGTH_SHORT).show()
+                            }
                         }) {
                             Icon(Icons.Default.Delete, "卸载", tint = Color(0xFFE53935))
                         }

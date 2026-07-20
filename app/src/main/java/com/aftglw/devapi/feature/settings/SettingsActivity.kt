@@ -290,7 +290,7 @@ private fun savePickedImage(ctx: android.content.Context, uri: Uri, fileName: St
         val file = java.io.File(ctx.filesDir, fileName)
         input?.use { it.copyTo(file.outputStream()) }
         onSaved(file)
-    } catch (_: Exception) {}
+    } catch (e: Exception) { Log.e("SettingsActivity", "savePickedImage failed", e) }
 }
 
 private suspend fun addChat(ctx: android.content.Context, name: String, persona: String, avatarUri: String) {

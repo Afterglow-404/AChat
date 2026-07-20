@@ -2,6 +2,7 @@ package com.aftglw.devapi.feature.chat
 import com.aftglw.devapi.core.character.CharacterCardParser
 import com.aftglw.devapi.core.ui.InfoRow
 import com.aftglw.devapi.core.memory.MemoryStore
+import com.aftglw.devapi.feature.settings.TextFieldRow
 
 import android.content.Context
 import android.graphics.BitmapFactory
@@ -73,7 +74,7 @@ fun ChatInfoPage(
                         var bmp by remember(avatarUri) { mutableStateOf<ImageBitmap?>(null) }
                         LaunchedEffect(avatarUri) {
                             bmp = withContext(Dispatchers.IO) {
-                                try { BitmapFactory.decodeFile(avatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                                try { BitmapFactory.decodeFile(avatarUri)?.asImageBitmap() } catch (e: Exception) { Log.w("ChatInfoPage", "avatar decode failed", e); null }
                             }
                         }
                         val bmpVal = bmp
@@ -145,6 +146,38 @@ fun ChatInfoPage(
                         }
                     }
                     Text("用于 GPT-SoVITS 的 text_lang 参数；未覆盖时使用全局默认值。", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+            if (prefs.getString("tts_engine", "local") == "qwen3_tts") {
+                Spacer(Modifier.height(8.dp))
+                Text("Qwen3-TTS 角色设置", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                val voiceKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.prefsKey("qwen3_tts", name)
+                val languageKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.languagePrefsKey("qwen3_tts", name)
+                val instructionKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.instructionPrefsKey("qwen3_tts", name)
+                var qwenVoice by remember(name) { mutableStateOf(prefs.getString(voiceKey, "") ?: "") }
+                var qwenLanguage by remember(name) { mutableStateOf(prefs.getString(languageKey, "") ?: "") }
+                var qwenInstruction by remember(name) { mutableStateOf(prefs.getString(instructionKey, "") ?: "") }
+                val languageOptions = listOf("" to "继承全局默认", "zh" to "中文", "en" to "英语", "ja" to "日语", "ko" to "韩语", "de" to "德语", "fr" to "法语", "ru" to "俄语", "pt" to "葡萄牙语", "es" to "西班牙语", "it" to "意大利语", "auto" to "自动")
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
+                    TextFieldRow("角色音色", "留空继承全局，例如 Vivian", qwenVoice) { qwenVoice = it; prefs.edit().putString(voiceKey, it.trim()).apply() }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("角色语言", Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface)
+                        val languageExpanded = remember { mutableStateOf(false) }
+                        Box {
+                            Text(languageOptions.find { it.first == qwenLanguage }?.second ?: "继承全局默认", fontSize = 14.sp, color = AchatTheme.colors.primary, modifier = Modifier.clickable { languageExpanded.value = true })
+                            DropdownMenu(expanded = languageExpanded.value, onDismissRequest = { languageExpanded.value = false }) {
+                                languageOptions.forEach { (code, label) ->
+                                    DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = {
+                                        qwenLanguage = code
+                                        prefs.edit().apply { if (code.isEmpty()) remove(languageKey) else putString(languageKey, code) }.apply()
+                                        languageExpanded.value = false
+                                    })
+                                }
+                            }
+                        }
+                    }
+                    TextFieldRow("角色语气", "留空继承全局，例如 温柔、亲切地说", qwenInstruction) { qwenInstruction = it; prefs.edit().putString(instructionKey, it.trim()).apply() }
+                    Text("Qwen3-TTS 支持通过自然语言控制情绪、语速和表达方式。", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 6.dp))
                 }
             }
             // 主动关怀

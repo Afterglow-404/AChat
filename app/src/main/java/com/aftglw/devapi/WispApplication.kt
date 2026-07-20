@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.util.Log
+import com.aftglw.devapi.core.debug.CrashHandler
 import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.core.voice.LocalSenseVoiceSttProvider
 import com.aftglw.devapi.core.voice.LocalWhisperSttProvider
@@ -24,6 +25,9 @@ class WispApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 全局崩溃日志保护（最先初始化，确保后续异常也能被捕获）
+        CrashHandler.init(this)
+
         // 异步预热数据库 + 执行一次性迁移（不阻塞主线程）
         appScope.launch {
             try {

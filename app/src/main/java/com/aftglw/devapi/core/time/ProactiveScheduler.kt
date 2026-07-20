@@ -1,4 +1,5 @@
 package com.aftglw.devapi.core.time
+import android.util.Log
 import com.aftglw.devapi.core.storage.ChatHistory
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.mood.AffinityManager
@@ -109,10 +110,7 @@ object ProactiveScheduler {
                 sendNotif(context, chatDisplay, msg)
                 prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
             }
-        } catch (_: Exception) {}
-    }
-
-    private suspend fun generateMessage(ctx: Context, chatName: String): String {
+        } catch (e: Exception) { Log.w("ProactiveScheduler", "trigger failed", e) }(ctx: Context, chatName: String): String {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
         if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
@@ -198,8 +196,7 @@ object ProactiveScheduler {
                 val msg = reply.substringAfter("消息：").trim().take(100)
                 return if (msg.isNotBlank()) msg else "在干嘛呢？"
             }
-        } catch (_: Exception) {}
-        return ""  // 返回空 = 跳过本次
+        } catch (e: Exception) { Log.w("ProactiveScheduler", "ai msg generation failed", e) }
     }
 
     private suspend fun loadPersona(ctx: Context, chatName: String): String {

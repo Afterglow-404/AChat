@@ -143,10 +143,7 @@ object MoodModel {
             try {
                 val external = File(ctx.getExternalFilesDir("models"), target)
                 if (external.exists() && external.extension.equals("onnx", ignoreCase = true)) return external
-            } catch (_: Exception) {}
-        }
-
-        // 2. filesDir/models/ 下第一个 .onnx（model_quant.onnx 优先）
+            } catch (e: Exception) { Log.w(TAG, "getModelFile external scan failed", e) }（model_quant.onnx 优先）
         val internalDir = File(ctx.filesDir, "models")
         internalDir.listFiles { f -> f.isFile && f.extension.equals("onnx", ignoreCase = true) }
             ?.sortedByDescending { it.name.contains("quant", ignoreCase = true) }
@@ -158,12 +155,7 @@ object MoodModel {
             externalDir?.listFiles { f -> f.isFile && f.extension.equals("onnx", ignoreCase = true) }
                 ?.sortedByDescending { it.name.contains("quant", ignoreCase = true) }
                 ?.firstOrNull()?.let { return it }
-        } catch (_: Exception) {}
-
-        return null
-    }
-
-    /** 列出设备上所有可用的 ONNX 模型文件（内部 + 外部存储） */
+        } catch (e: Exception) { Log.w(TAG, "getModelFile external dir scan failed", e) }（内部 + 外部存储） */
     fun listAvailableModels(ctx: Context): List<File> {
         val result = mutableListOf<File>()
         val internalDir = File(ctx.filesDir, "models")
@@ -172,11 +164,7 @@ object MoodModel {
         try {
             ctx.getExternalFilesDir("models")?.listFiles { f -> f.isFile && f.extension.equals("onnx", ignoreCase = true) }
                 ?.let { result.addAll(it) }
-        } catch (_: Exception) {}
-        return result
-    }
-
-    /** 读取用户在设置中选择的活动模型文件名（可能为空） */
+        } catch (e: Exception) { Log.w(TAG, "listAvailableModels external scan failed", e) }（可能为空） */
     fun getSelectedModelName(ctx: Context): String? {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_MODEL_FILE, null)

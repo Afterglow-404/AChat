@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.group
 
 import android.content.Context
+import android.util.Log
 import com.aftglw.devapi.core.character.BuiltInCharacterLoader
 import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.core.storage.room.GroupEntity
@@ -201,7 +202,7 @@ object GroupChatManager {
         return try {
             val arr = JSONArray(raw)
             (0 until arr.length()).map { arr.getString(it) }
-        } catch (_: Exception) { emptyList() }
+        } catch (e: Exception) { Log.w("GroupChatManager", "parseMembers failed", e); emptyList() }
     }
 }
 
@@ -211,7 +212,7 @@ private fun GroupEntity.toModel(): GroupChat = GroupChat(
     members = try {
         val arr = JSONArray(members)
         (0 until arr.length()).map { arr.getString(it) }
-    } catch (_: Exception) { emptyList() },
+    } catch (e: Exception) { Log.w("GroupChatManager", "parse group failed", e); emptyList() },
     lastMessage = lastMessage,
     time = time,
     avatarUri = avatarUri,
@@ -245,7 +246,8 @@ private fun parseMemberEnabled(raw: String): Map<String, Boolean> {
             result[key] = obj.optBoolean(key, true)
         }
         result
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.w("GroupChatManager", "parseMemberEnabled failed", e)
         emptyMap()
     }
 }

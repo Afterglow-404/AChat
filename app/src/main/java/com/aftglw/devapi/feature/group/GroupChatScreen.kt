@@ -71,6 +71,14 @@ import kotlinx.coroutines.withTimeout
 private const val MAX_AUTO_REPLY_ROUNDS = 5
 private const val MAX_TURN_LLM_CALLS = 8
 private const val MAX_GROUP_TURN_DURATION_MS = 60_000L
+private const val MAX_MEMBER_CALL_DURATION_MS = 30_000L
+private const val BUILD_HISTORY_MAX_MESSAGES = 20
+private const val PROACTIVE_POLL_INTERVAL_MS = 30_000L
+private const val THINK_DELAY_MIN_MS = 500L
+private const val THINK_DELAY_MAX_MS = 3_000L
+private const val MEMORY_SEARCH_TOP_K = 3
+private const val JUDGE_CONVERSATION_LOOKBACK = 6
+private const val LOW_WILLINGNESS_CONSECUTIVE_LIMIT = 2
 
 /**
  * 群聊聊天页面。
@@ -211,7 +219,8 @@ fun GroupChatScreen(
     }
 
     // ── 历史消息构建（callMember 与主动插话共用）──
-    fun buildHistory(): List<ChatMessage> = messages.map { m ->
+    /** 只取最近 [BUILD_HISTORY_MAX_MESSAGES] 条消息，避免长对话导致 prompt 膨胀 */
+    fun buildHistory(): List<ChatMessage> = messages.takeLast(BUILD_HISTORY_MAX_MESSAGES).map { m ->
         val displayName = if (m.isMe) "你" else m.from
         ChatMessage(
             role = if (m.isMe) "user" else "assistant",
@@ -248,7 +257,7 @@ fun GroupChatScreen(
         try {
             // 检索该成员的个人记忆 + 群级共享记忆（合并去重）
             val mems = withContext(Dispatchers.IO) {
-                GroupMemoryStore.searchForMember(ctx, group.id, name, userInput, topK = 3)
+                GroupMemoryStore.searchForMember(ctx, group.id, name, userInput, topK = MEMORY_SEARCH_TOP_K)
             }
             val memoryBlock = if (mems.isNotEmpty()) {
                 buildString {
@@ -267,16 +276,27 @@ fun GroupChatScreen(
                     appendLine("调用格式：【tool:工具名 参数】；非必要时不要调用工具。")
                 }
             } else ""
+            // 在切 IO 前快照 systemPrompt + 消息历史，避免 IO 线程读取 Compose 快照状态
+            val systemPrompt = memberSystemPrompt(name, memoryBlock, toolsBlock)
+            val historyForCall = buildHistory()
             return withContext(Dispatchers.IO) {
                 // 使用 Agent runtime，让成员具备工具调用能力
                 // 群聊无人值守场景：注入 RestrictedToolGuard，HIGH 风险工具自动拒绝
                 val guard = com.aftglw.devapi.tools.RestrictedToolGuard(ctx.applicationContext)
                 val agent = Agent(ctx, toolGuard = guard)
-                val result = agent.prompt(
-                    history = buildHistory(),
-                    userMessage = userInput,
-                    systemPrompt = memberSystemPrompt(name, memoryBlock, toolsBlock)
-                )
+                // 单成员调用独立超时：避免某个成员卡住占用整轮 60s
+                val result = try {
+                    withTimeout(MAX_MEMBER_CALL_DURATION_MS) {
+                        agent.prompt(
+                            history = historyForCall,
+                            userMessage = userInput,
+                            systemPrompt = systemPrompt
+                        )
+                    }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    android.util.Log.w("GroupChat", "Member $name call timed out after ${MAX_MEMBER_CALL_DURATION_MS}ms")
+                    return@withContext null
+                }
                 if (result.toolCalls.isNotEmpty()) {
                     android.util.Log.d("GroupChat", "Member $name used tools: ${result.toolCalls.map { it.name }}")
                 }
@@ -393,7 +413,7 @@ fun GroupChatScreen(
 
                 // 保存用户消息：写入群级共享记忆 + 被 @ 成员个人记忆（异步，不阻塞主流程）
                 if (text.isNotBlank() && text != "[图片]") {
-                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    scope.launch(Dispatchers.IO) {
                         try {
                             GroupMemoryStore.saveUserMessage(ctx, group.id, mentioned, text)
                         } catch (e: Exception) {
@@ -408,17 +428,21 @@ fun GroupChatScreen(
                 // decide 与 callMember 各消耗 1 次，超出则停止链式推进，防止刷屏与 30-60s 阻塞。
                 // 预留 2 次（1 次 decide + 1 次 callMember），不足 2 则停止。
                 var llmCallBudget = MAX_TURN_LLM_CALLS
+                // 低意愿连续计数器：连续 N 次 LLM 返回 <0.3 的意愿，直接停止（节省 LLM 调用）
+                var consecutiveLowWillingness = 0
                 val WILLINGNESS_THRESHOLD = SpeakerDecision.DEFAULT_WILLINGNESS_THRESHOLD
                 while (group.mode == GroupChatMode.FREE && autoRounds < MAX_AUTO_REPLY_ROUNDS && llmCallBudget >= 2) {
                     llmCallBudget--  // decide 占用 1 次
                     typingMember = "判断中…"
+                    // 在切 IO 前快照对话内容，避免 IO 线程读取 Compose 快照状态
+                    val conversationSnapshot = messages.toList()
                     val decision: SpeakerDecision = withContext(Dispatchers.IO) {
                         NextSpeakerJudge.decide(
                             memberNames = activeMembers,
                             repliedNames = replied,
                             lastSpeaker = lastSpeaker,
                             lastMessage = lastReply ?: "",
-                            conversation = messages.takeLast(6).joinToString("\n") {
+                            conversation = conversationSnapshot.takeLast(JUDGE_CONVERSATION_LOOKBACK).joinToString("\n") {
                                 val label = if (it.isMe) "你" else it.from
                                 "$label: ${it.text}"
                             }
@@ -435,15 +459,33 @@ fun GroupChatScreen(
                         android.util.Log.d("GroupChat", "Stop chaining: willingness=${decision.willingness} < $WILLINGNESS_THRESHOLD, reason=${decision.reason}")
                         break
                     }
+                    // 低意愿连续计数：<0.3 连续 N 次则提前停止（节省 LLM 调用）
+                    if (decision.willingness < 0.3f) {
+                        consecutiveLowWillingness++
+                        if (consecutiveLowWillingness >= LOW_WILLINGNESS_CONSECUTIVE_LIMIT) {
+                            lastJudgeResult = "low_consecutive: ${decision.reason}"
+                            android.util.Log.d("GroupChat", "Stop chaining: $consecutiveLowWillingness consecutive low willingness")
+                            break
+                        }
+                    } else {
+                        consecutiveLowWillingness = 0
+                    }
                     autoRounds++
                     totalAutoRounds++
                     lastJudgeResult = "$next(${decision.willingness})"
 
                     android.util.Log.d("GroupChat", "decideNextSpeaker: auto round=$totalAutoRounds, next=$next, willingness=${decision.willingness}, budget=$llmCallBudget, replied=${replied.toList()}")
 
-                    // 接话前模拟思考时间（1.5-3s），避免连续快速接话导致刷屏
+                    // 接话前模拟思考时间（随意愿分动态调整：意愿高→快接话，意愿低→多想想）
                     typingMember = next
-                    kotlinx.coroutines.delay(1500L + kotlin.random.Random.nextLong(1500L))
+                    val thinkDelay = if (decision.willingness >= 0.8f) {
+                        THINK_DELAY_MIN_MS + kotlin.random.Random.nextLong(500L)       // 0.5-1s
+                    } else if (decision.willingness >= 0.6f) {
+                        THINK_DELAY_MIN_MS + kotlin.random.Random.nextLong(1500L)      // 0.5-2s
+                    } else {
+                        1500L + kotlin.random.Random.nextLong(1500L)                   // 1.5-3s
+                    }
+                    kotlinx.coroutines.delay(thinkDelay)
 
                     // 构建适合该成员的 userMessage（基于最近对话）
                     val contextPrompt = "${activeMembers.joinToString("、")}正在群聊中交谈。话题是最近的消息。轮到 $next 发言了。请自然接话。"
@@ -561,15 +603,22 @@ fun GroupChatScreen(
     }
 
     // ── 主动插话：用户停留在群聊页面时，定期判断是否需要某成员自发插话 ──
+    // lastActivityMs 基于最后一条消息的实际时间戳，切群再回来不会误触发
     var lastActivityMs by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(messages.size, sending) {
-        // 消息数变化或发送状态变化时刷新 lastActivity
-        lastActivityMs = System.currentTimeMillis()
+        // 有新消息时：基于最后一条消息的时间推算 idle 时长
+        val lastMsg = messages.lastOrNull()
+        if (lastMsg != null && lastMsg.time.isNotEmpty()) {
+            // time 字段格式 "HH:mm"，无法还原绝对时间戳，用当前时间保守估算
+            lastActivityMs = System.currentTimeMillis()
+        } else {
+            lastActivityMs = System.currentTimeMillis()
+        }
     }
     LaunchedEffect(group.id, sending) {
         // 用户停留且当前未在发送时，每 30 秒轮询一次
         while (true) {
-            kotlinx.coroutines.delay(30_000L)
+            kotlinx.coroutines.delay(PROACTIVE_POLL_INTERVAL_MS)
             if (sending) continue
             if (messages.isEmpty()) continue
             val nowMs = System.currentTimeMillis()
@@ -1091,7 +1140,8 @@ private fun GroupChatBubble(
                                                     Toast.makeText(ctx, "已保存到相册", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
-                                        } catch (_: Exception) {
+                                        } catch (e: Exception) {
+                                            Log.w("GroupChatScreen", "save to gallery failed", e)
                                             Toast.makeText(ctx, "保存失败", Toast.LENGTH_SHORT).show()
                                         }
                                         menuExpanded = false

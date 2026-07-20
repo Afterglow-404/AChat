@@ -187,7 +187,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
                             .sendMessage(emptyList(), text, "概括这段对话的核心内容和情绪，像日记一样写两句话。")
                         if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                    } catch (_: Exception) {} /* 非关键 */
+                    } catch (e: Exception) { Log.w("ChatScreen", "archive diary init failed", e) } /* 非关键 */
                 }
             }
         }
@@ -225,7 +225,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                     val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
                         .sendMessage(emptyList(), text, "用两句话概括这段对话。")
                     if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
-                } catch (_: Exception) {} /* 非关键 */
+                } catch (e: Exception) { Log.w("ChatScreen", "archive summary failed", e) } /* 非关键 */
             }
         }
         // 先在主线程取出快照（避免协程内 bubbles 被并发修改），再切 IO 持久化
@@ -264,7 +264,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                                 .putString("persona_optimized_$name", summary).apply()
                         }
                     }
-                } catch (_: Exception) {} /* 非关键 */
+                } catch (e: Exception) { Log.w("ChatScreen", "memory extract failed", e) } /* 非关键 */
             }
         }
     }
@@ -283,7 +283,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
                                 .putString("persona_dialogue_traits_$name", text).apply()
                         }
-                    } catch (_: Exception) {} /* 非关键 */
+                    } catch (e: Exception) { Log.w("ChatScreen", "dialogue opt failed", e) } /* 非关键 */
             }
         }
     }
@@ -961,7 +961,8 @@ fun ChatContent(
                                                             }
                                                         }
                                                     }
-                                                } catch (_: Exception) {
+                                                } catch (e: Exception) {
+                                                    Log.w("ChatScreen", "save to gallery failed", e)
                                                     withContext(Dispatchers.Main) {
                                                         Toast.makeText(ctx, "保存失败", Toast.LENGTH_SHORT).show()
                                                     }
@@ -1225,7 +1226,7 @@ fun ChatContent(
                                     LaunchedEffect(myAvatar) {
                                         myBmp = withContext(Dispatchers.IO) {
                                             try { BitmapFactory.decodeFile(myAvatar)?.asImageBitmap() }
-                                            catch (_: Exception) { null }
+                                            catch (e: Exception) { Log.w("ChatScreen", "avatar decode failed", e); null }
                                         }
                                     }
                                     val myBmpVal = myBmp

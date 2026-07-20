@@ -1,4 +1,5 @@
 package com.aftglw.devapi.core.mood
+import android.util.Log
 import com.aftglw.devapi.core.memory.MemoryStore
 
 import android.content.Context
@@ -21,7 +22,7 @@ object PostLLMProcessor {
                     val insight = AiServiceFactory.getService()
                         .sendMessage(emptyList(), prompt, "你是对话分析师。只输出概括，不要多余内容。")
                     if (!insight.isNullOrBlank()) MemoryStore.save(ctx, insight.trim(), "insight:$name")
-                } catch (_: Exception) {} /* 非关键 */
+                } catch (e: Exception) { Log.w("PostLLMProcessor", "insight extract failed", e) } /* 非关键 */
             }
         }
 
@@ -36,7 +37,7 @@ object PostLLMProcessor {
                     val aiEmo = AiServiceFactory.getService()
                         .sendMessage(emptyList(), prompt, "你是对话中的AI角色。")
                     if (!aiEmo.isNullOrBlank()) MemoryStore.save(ctx, aiEmo.trim(), "ai_emo:$name")
-                } catch (_: Exception) {} /* 非关键 */
+                } catch (e: Exception) { Log.w("PostLLMProcessor", "ai emotion memory failed", e) } /* 非关键 */
             }
         }
     }

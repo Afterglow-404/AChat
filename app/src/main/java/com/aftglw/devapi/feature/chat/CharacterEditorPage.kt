@@ -1,6 +1,7 @@
 package com.aftglw.devapi.feature.chat
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -191,10 +192,15 @@ private fun FieldSection(
 
 /** 把 persona 写回 chats 表中匹配 name 的项，返回是否找到并保存成功 */
 private fun savePersona(ctx: Context, chatName: String, persona: String): Boolean = runBlocking {
-    withContext(Dispatchers.IO) {
-        val dao = AppDatabase.get(ctx).chatDao()
-        val e = dao.getAll().firstOrNull { it.name == chatName } ?: return@withContext false
-        dao.upsert(e.copy(persona = persona))
-        true
+    try {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).chatDao()
+            val e = dao.getAll().firstOrNull { it.name == chatName } ?: return@withContext false
+            dao.upsert(e.copy(persona = persona))
+            true
+        }
+    } catch (e: Exception) {
+        Log.e("CharacterEditorPage", "savePersona failed", e)
+        false
     }
 }

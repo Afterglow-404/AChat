@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.chat
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,7 +41,14 @@ fun WorldbookPage(
     var entries by remember { mutableStateOf<List<WorldbookEntry>>(emptyList()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(chatName) {
-        entries = withContext(Dispatchers.IO) { WorldbookStore.load(ctx, chatName) }
+        try {
+            entries = withContext(Dispatchers.IO) { WorldbookStore.load(ctx, chatName) }
+        } catch (e: Exception) {
+            Log.e("WorldbookPage", "load failed", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(ctx, "加载世界书失败", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
     var editing by remember { mutableStateOf<WorldbookEntry?>(null) }
     var creatingNew by remember { mutableStateOf(false) }
@@ -68,10 +76,17 @@ fun WorldbookPage(
                                 onClick = { editing = entry },
                                 onDelete = {
                                     scope.launch(Dispatchers.IO) {
-                                        val refreshed = WorldbookStore.delete(ctx, chatName, entry.id)
-                                        withContext(Dispatchers.Main) {
-                                            entries = refreshed
-                                            Toast.makeText(ctx, "已删除", Toast.LENGTH_SHORT).show()
+                                        try {
+                                            val refreshed = WorldbookStore.delete(ctx, chatName, entry.id)
+                                            withContext(Dispatchers.Main) {
+                                                entries = refreshed
+                                                Toast.makeText(ctx, "已删除", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("WorldbookPage", "delete failed", e)
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(ctx, "删除失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
                                 }
@@ -100,11 +115,18 @@ fun WorldbookPage(
             onDismiss = { editing = null },
             onSave = { updated ->
                 scope.launch(Dispatchers.IO) {
-                    val refreshed = WorldbookStore.update(ctx, chatName, updated)
-                    withContext(Dispatchers.Main) {
-                        entries = refreshed
-                        editing = null
-                        Toast.makeText(ctx, "已保存", Toast.LENGTH_SHORT).show()
+                    try {
+                        val refreshed = WorldbookStore.update(ctx, chatName, updated)
+                        withContext(Dispatchers.Main) {
+                            entries = refreshed
+                            editing = null
+                            Toast.makeText(ctx, "已保存", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WorldbookPage", "update failed", e)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(ctx, "保存失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -118,11 +140,18 @@ fun WorldbookPage(
             onDismiss = { creatingNew = false },
             onSave = { newEntry ->
                 scope.launch(Dispatchers.IO) {
-                    val refreshed = WorldbookStore.add(ctx, chatName, newEntry)
-                    withContext(Dispatchers.Main) {
-                        entries = refreshed
-                        creatingNew = false
-                        Toast.makeText(ctx, "已添加", Toast.LENGTH_SHORT).show()
+                    try {
+                        val refreshed = WorldbookStore.add(ctx, chatName, newEntry)
+                        withContext(Dispatchers.Main) {
+                            entries = refreshed
+                            creatingNew = false
+                            Toast.makeText(ctx, "已添加", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WorldbookPage", "add failed", e)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(ctx, "添加失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }

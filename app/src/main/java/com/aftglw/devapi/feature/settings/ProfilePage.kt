@@ -56,7 +56,7 @@ fun ProfilePage(
                     var bmp by remember(profileAvatarUri) { mutableStateOf<ImageBitmap?>(null) }
                     LaunchedEffect(profileAvatarUri) {
                         bmp = withContext(Dispatchers.IO) {
-                            try { BitmapFactory.decodeFile(profileAvatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                            try { BitmapFactory.decodeFile(profileAvatarUri)?.asImageBitmap() } catch (e: Exception) { Log.w("ProfilePage", "avatar decode failed", e); null }
                         }
                     }
                     val bmpVal = bmp

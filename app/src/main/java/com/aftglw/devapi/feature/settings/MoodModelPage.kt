@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.settings
 
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,8 +57,15 @@ fun MoodModelPage(onBack: () -> Unit) {
 
     fun refresh() {
         scope.launch {
-            models = withContext(Dispatchers.IO) { MoodModel.listAvailableModels(ctx) }
-            loaded = MoodModel.isLoaded
+            try {
+                models = withContext(Dispatchers.IO) { MoodModel.listAvailableModels(ctx) }
+                loaded = MoodModel.isLoaded
+            } catch (e: Exception) {
+                Log.e("MoodModelPage", "refresh failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "刷新模型列表失败", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
     LaunchedEffect(Unit) { refresh() }
@@ -66,13 +74,21 @@ fun MoodModelPage(onBack: () -> Unit) {
         if (uri == null) return@rememberLauncherForActivityResult
         importing = true
         scope.launch {
-            val imported = withContext(Dispatchers.IO) { MoodModel.importModelFromUri(ctx, uri) }
-            importing = false
-            if (imported != null) {
-                Toast.makeText(ctx, "已导入：${imported.name}", Toast.LENGTH_SHORT).show()
-                refresh()
-            } else {
-                Toast.makeText(ctx, "导入失败，请重试", Toast.LENGTH_SHORT).show()
+            try {
+                val imported = withContext(Dispatchers.IO) { MoodModel.importModelFromUri(ctx, uri) }
+                importing = false
+                if (imported != null) {
+                    Toast.makeText(ctx, "已导入：${imported.name}", Toast.LENGTH_SHORT).show()
+                    refresh()
+                } else {
+                    Toast.makeText(ctx, "导入失败，请重试", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("MoodModelPage", "import failed", e)
+                importing = false
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "导入异常：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -110,16 +126,24 @@ fun MoodModelPage(onBack: () -> Unit) {
                 }
                 TextButton(onClick = {
                     scope.launch {
-                        withContext(Dispatchers.IO) {
-                            MoodModel.close()
-                            MoodModel.load(ctx)
+                        try {
+                            withContext(Dispatchers.IO) {
+                                MoodModel.close()
+                                MoodModel.load(ctx)
+                            }
+                            loaded = MoodModel.isLoaded
+                            Toast.makeText(
+                                ctx,
+                                if (loaded) "已加载模型" else "加载失败（未找到模型文件）",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } catch (e: Exception) {
+                            Log.e("MoodModelPage", "reload failed", e)
+                            loaded = false
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(ctx, "重载异常：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                        loaded = MoodModel.isLoaded
-                        Toast.makeText(
-                            ctx,
-                            if (loaded) "已加载模型" else "加载失败（未找到模型文件）",
-                            Toast.LENGTH_SHORT
-                        ).show()
                     }
                 }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "重新加载", tint = AchatTheme.colors.primary)
@@ -200,16 +224,24 @@ fun MoodModelPage(onBack: () -> Unit) {
                             MoodModel.setSelectedModelName(ctx, file.name)
                             selectedName = file.name
                             scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    MoodModel.close()
-                                    MoodModel.load(ctx)
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        MoodModel.close()
+                                        MoodModel.load(ctx)
+                                    }
+                                    loaded = MoodModel.isLoaded
+                                    Toast.makeText(
+                                        ctx,
+                                        if (loaded) "已切换并加载：${file.name}" else "切换失败",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } catch (e: Exception) {
+                                    Log.e("MoodModelPage", "switch load failed", e)
+                                    loaded = false
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(ctx, "切换异常：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                                loaded = MoodModel.isLoaded
-                                Toast.makeText(
-                                    ctx,
-                                    if (loaded) "已切换并加载：${file.name}" else "切换失败",
-                                    Toast.LENGTH_SHORT
-                                ).show()
                             }
                         }) {
                             Text(
@@ -219,16 +251,23 @@ fun MoodModelPage(onBack: () -> Unit) {
                         }
                         IconButton(onClick = {
                             scope.launch {
-                                val ok = withContext(Dispatchers.IO) { file.delete() }
-                                if (ok) {
-                                    if (selectedName == file.name) {
-                                        MoodModel.setSelectedModelName(ctx, null)
-                                        selectedName = null
+                                try {
+                                    val ok = withContext(Dispatchers.IO) { file.delete() }
+                                    if (ok) {
+                                        if (selectedName == file.name) {
+                                            MoodModel.setSelectedModelName(ctx, null)
+                                            selectedName = null
+                                        }
+                                        Toast.makeText(ctx, "已删除 ${file.name}", Toast.LENGTH_SHORT).show()
+                                        refresh()
+                                    } else {
+                                        Toast.makeText(ctx, "删除失败", Toast.LENGTH_SHORT).show()
                                     }
-                                    Toast.makeText(ctx, "已删除 ${file.name}", Toast.LENGTH_SHORT).show()
-                                    refresh()
-                                } else {
-                                    Toast.makeText(ctx, "删除失败", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Log.e("MoodModelPage", "delete failed", e)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(ctx, "删除异常：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         }) { Icon(Icons.Filled.Delete, contentDescription = "删除", tint = Color(0xFFD32F2F)) }

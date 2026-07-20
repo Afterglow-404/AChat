@@ -1,6 +1,11 @@
 package com.aftglw.devapi.feature.settings
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.aftglw.devapi.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,9 +66,51 @@ fun DebugPage(
             Text("模型已集成", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
         }
         Spacer(Modifier.height(8.dp))
-        ToggleRow("🔓 开诚布公", "允许 AI 访问位置、通知、应用使用统计", openBookMode, onOpenBookModeChange)
+        ToggleRow("🔓 开诚布公", "允许 AI 访问位置、通知、应用使用统计（仅单聊可用，群聊自动拒绝）", openBookMode, onOpenBookModeChange)
         Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("AI 调用前会先询问你的许可，数据仅当前对话内存中有效", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.weight(1f))
+        }
+        if (openBookMode) {
+            // 位置权限状态 + 跳转
+            val hasLocationPerm = remember {
+                ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("位置权限", Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF888888))
+                Text(if (hasLocationPerm) "✓ 已授予" else "✗ 未授予", fontSize = 13.sp, color = if (hasLocationPerm) Color(0xFF07C160) else Color(0xFFD14343))
+                if (!hasLocationPerm) {
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", ctx.packageName, null)
+                        }
+                        ctx.startActivity(intent)
+                    }) { Text("去授权", color = Color(0xFF07C160)) }
+                }
+            }
+            // 使用情况访问权限状态 + 跳转
+            val hasUsagePerm = remember {
+                val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                appOps.checkOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(),
+                    ctx.packageName
+                ) == android.app.AppOpsManager.MODE_ALLOWED
+            }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("使用情况访问", Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF888888))
+                Text(if (hasUsagePerm) "✓ 已授予" else "✗ 未授予", fontSize = 13.sp, color = if (hasUsagePerm) Color(0xFF07C160) else Color(0xFFD14343))
+                if (!hasUsagePerm) {
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                        ctx.startActivity(intent)
+                    }) { Text("去授权", color = Color(0xFF07C160)) }
+                }
+            }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text("通知读取无需额外权限（仅本应用展示的活跃通知）", fontSize = 12.sp, color = Color(0xFF888888))
+            }
         }
         Spacer(Modifier.height(8.dp))
         ToggleRow("好感度系统", "AI 语气随相处变化(待完善)", affinityEnabled, onAffinityEnabledChange)
@@ -101,7 +149,7 @@ fun DebugPage(
             var ttsEngine by remember { mutableStateOf(sysPrefs.getString("tts_engine", "local") ?: "local") }
             Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("引擎", Modifier.width(48.dp), fontSize = 13.sp, color = Color(0xFF888888))
-                val engineOptions = listOf("local" to "本地", "cloud" to "云端", "gpt_sovits" to "PC GPT-SoVITS")
+                val engineOptions = listOf("local" to "本地", "cloud" to "云端", "gpt_sovits" to "PC GPT-SoVITS", "qwen3_tts" to "PC Qwen3-TTS")
                 val engineExpanded = remember { mutableStateOf(false) }
                 Box(modifier = Modifier.weight(1f)) {
                     val engineLabel = engineOptions.find { it.first == ttsEngine }?.second ?: "本地"
@@ -189,7 +237,7 @@ fun DebugPage(
                                                             .let { arr -> List(arr.length()) { arr.optString(it) } }
                                                     } else emptyList()
                                                 }
-                                            } catch (_: Exception) { emptyList() }
+                                            } catch (e: Exception) { Log.w("DebugPage", "fetch voices failed", e); emptyList() }
                                         }
                                         availableVoices = voices
                                         if (voices.isNotEmpty()) healthStatus = "✓ 在线（${voices.size} 个音色）"
@@ -225,6 +273,30 @@ fun DebugPage(
                 }
                 Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp)) {
                     Text("PC 离线时自动降级到云端 / 系统 TTS", fontSize = 12.sp, color = Color(0xFF888888))
+                }
+            }
+            // PC Qwen3-TTS 配置
+            if (ttsEngine == "qwen3_tts") {
+                TextFieldRow("PC 服务地址", "如 http://192.168.1.10:17890", sysPrefs.getString("tts_qwen3_url", "") ?: "") { v -> sysPrefs.edit().putString("tts_qwen3_url", v).apply() }
+                val qwenLanguageKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.languageEnginePrefsKey("qwen3_tts")
+                var qwenLanguage by remember { mutableStateOf(sysPrefs.getString(qwenLanguageKey, "zh") ?: "zh") }
+                val languageOptions = listOf("zh" to "中文", "en" to "英语", "ja" to "日语", "ko" to "韩语", "de" to "德语", "fr" to "法语", "ru" to "俄语", "pt" to "葡萄牙语", "es" to "西班牙语", "it" to "意大利语", "auto" to "自动")
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("默认语言", Modifier.width(72.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                    val languageExpanded = remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.weight(1f)) {
+                        Text(languageOptions.find { it.first == qwenLanguage }?.second ?: qwenLanguage, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { languageExpanded.value = true })
+                        DropdownMenu(expanded = languageExpanded.value, onDismissRequest = { languageExpanded.value = false }) {
+                            languageOptions.forEach { (code, label) ->
+                                DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = { qwenLanguage = code; sysPrefs.edit().putString(qwenLanguageKey, code).apply(); languageExpanded.value = false })
+                            }
+                        }
+                    }
+                }
+                TextFieldRow("默认音色", "如 Vivian、Ryan", sysPrefs.getString(com.aftglw.devapi.core.voice.TtsVoiceRouter.enginePrefsKey("qwen3_tts"), "Vivian") ?: "Vivian") { v -> sysPrefs.edit().putString(com.aftglw.devapi.core.voice.TtsVoiceRouter.enginePrefsKey("qwen3_tts"), v).apply() }
+                TextFieldRow("默认语气", "如 温柔、亲切地说", sysPrefs.getString(com.aftglw.devapi.core.voice.TtsVoiceRouter.instructionEnginePrefsKey("qwen3_tts"), "") ?: "") { v -> sysPrefs.edit().putString(com.aftglw.devapi.core.voice.TtsVoiceRouter.instructionEnginePrefsKey("qwen3_tts"), v).apply() }
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp)) {
+                    Text("PC 离线时自动降级到 GPT-SoVITS / 云端 / 系统 TTS", fontSize = 12.sp, color = Color(0xFF888888))
                 }
             }
             // 试听按钮（统一走 TtsProviderManager，自动降级；voiceId 由 router 按引擎解析）
@@ -492,7 +564,10 @@ fun DebugPage(
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 ctx.startActivity(android.content.Intent.createChooser(shareIntent, "分享调试日志"))
-            } catch (_: Exception) { Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show() }
+            } catch (e: Exception) {
+                Log.e("DebugPage", "shareLog failed", e)
+                Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show()
+            }
         }
         OutlinedButton(onClick = { shareLog() }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { Text("导出调试日志", fontSize = 13.sp) }
         Spacer(Modifier.height(8.dp))

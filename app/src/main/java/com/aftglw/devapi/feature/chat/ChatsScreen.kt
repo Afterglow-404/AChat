@@ -1,6 +1,8 @@
 package com.aftglw.devapi.feature.chat
 
 import android.graphics.BitmapFactory
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -48,6 +50,7 @@ import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -70,9 +73,21 @@ fun ChatsScreen(
     val ctx = LocalContext.current
     val chats: List<ChatItem> by vm.chats.observeAsState(emptyList())
     var groups by remember { mutableStateOf<List<GroupChat>>(emptyList()) }
-    LaunchedEffect(Unit) { groups = GroupChatManager.loadGroups(ctx) }
+    LaunchedEffect(Unit) {
+        try {
+            groups = GroupChatManager.loadGroups(ctx)
+        } catch (e: Exception) {
+            Log.e("ChatsScreen", "loadGroups failed", e)
+        }
+    }
     // 每当界面恢复时重新加载群聊列表
-    LaunchedEffect(chats) { groups = GroupChatManager.loadGroups(ctx) }
+    LaunchedEffect(chats) {
+        try {
+            groups = GroupChatManager.loadGroups(ctx)
+        } catch (e: Exception) {
+            Log.e("ChatsScreen", "loadGroups on chats change failed", e)
+        }
+    }
 
     ChatsScreenContent(
         chats = chats,
@@ -82,10 +97,23 @@ fun ChatsScreen(
         onGroupClick = onGroupClick,
         onTogglePin = { scope.launch { vm.togglePin(it) } },
         onDeleteChat = { scope.launch { vm.deleteChat(it) } },
-        onGroupCreated = { scope.launch { groups = GroupChatManager.loadGroups(ctx) } },
+        onGroupCreated = { scope.launch {
+            try {
+                groups = GroupChatManager.loadGroups(ctx)
+            } catch (e: Exception) {
+                Log.e("ChatsScreen", "loadGroups after create failed", e)
+            }
+        } },
         onDeleteGroup = { id -> scope.launch {
-            GroupChatManager.deleteGroup(ctx, id)
-            groups = GroupChatManager.loadGroups(ctx)
+            try {
+                GroupChatManager.deleteGroup(ctx, id)
+                groups = GroupChatManager.loadGroups(ctx)
+            } catch (e: Exception) {
+                Log.e("ChatsScreen", "deleteGroup failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "删除群聊失败", Toast.LENGTH_SHORT).show()
+                }
+            }
         } },
         ctx = ctx
     )
@@ -281,7 +309,8 @@ private fun ChatAvatar(avatarUri: String, avatarColor: Int, name: String) {
         var bmp by remember { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(avatarUri) {
             bmp = if (avatarUri.isNotEmpty()) {
-                com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
+                try { com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap() }
+                catch (e: Exception) { Log.w("ChatsScreen", "avatar decode failed for $name", e); null }
             } else null
         }
         if (bmp != null) {
@@ -303,7 +332,13 @@ private fun CreateGroupDialog(
 ) {
     val scope = rememberCoroutineScope()
     var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    LaunchedEffect(Unit) { members = GroupChatManager.getAvailableMembers(ctx) }
+    LaunchedEffect(Unit) {
+        try {
+            members = GroupChatManager.getAvailableMembers(ctx)
+        } catch (e: Exception) {
+            Log.e("ChatsScreen", "getAvailableMembers failed", e)
+        }
+    }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var groupName by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
@@ -366,14 +401,19 @@ private fun CreateGroupDialog(
                     selected.size < 2 -> error = "请至少选择 2 个成员"
                     else -> {
                         scope.launch {
-                            GroupChatManager.saveGroup(ctx, GroupChat(
-                                id = "group_${System.currentTimeMillis()}",
-                                name = groupName.trim(),
-                                members = selected.toList(),
-                                time = "",
-                                lastMessage = ""
-                            ))
-                            onCreated()
+                            try {
+                                GroupChatManager.saveGroup(ctx, GroupChat(
+                                    id = "group_${System.currentTimeMillis()}",
+                                    name = groupName.trim(),
+                                    members = selected.toList(),
+                                    time = "",
+                                    lastMessage = ""
+                                ))
+                                onCreated()
+                            } catch (e: Exception) {
+                                Log.e("ChatsScreen", "saveGroup failed", e)
+                                error = "创建失败：${e.message?.take(30)}"
+                            }
                         }
                     }
                 }

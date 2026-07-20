@@ -2,6 +2,7 @@ package com.aftglw.devapi.core.tools
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.aftglw.devapi.tools.ToolRegistry
 import org.json.JSONArray
 import org.json.JSONObject
@@ -101,9 +102,9 @@ object ToolScanner {
                     val json = ctx.assets.open(fileName).bufferedReader().use { it.readText() }
                     val desc = ToolDescriptor.fromJson(JSONObject(json))
                     descriptors.add(desc)
-                } catch (_: Exception) { }
+                } catch (e: Exception) { Log.w("ToolScanner", "parse asset tool failed for $fileName", e) }
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) { Log.w("ToolScanner", "loadAssets failed", e) }
     }
 
     private fun loadFromFiles(ctx: Context) {
@@ -115,7 +116,7 @@ object ToolScanner {
                 val json = file.readText()
                 val desc = ToolDescriptor.fromJson(JSONObject(json))
                 descriptors.add(desc)
-            } catch (_: Exception) { }
+            } catch (e: Exception) { Log.w("ToolScanner", "parse file tool failed for ${file.name}", e) }
         }
     }
 

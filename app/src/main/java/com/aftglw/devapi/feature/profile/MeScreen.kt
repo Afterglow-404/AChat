@@ -2,6 +2,7 @@ package com.aftglw.devapi.feature.profile
 
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -96,7 +97,7 @@ fun MeScreenContent(
                             val p = item.split("|")
                             val name = p.getOrElse(0) { "用户" }
                             val wId = p.getOrElse(1) { "" }
-                            val clr = try { Color(p.getOrElse(2) { "#07C160" }.toColorInt()) } catch (_: Exception) { Color(0xFF07C160) }
+                            val clr = try { Color(p.getOrElse(2) { "#07C160" }.toColorInt()) } catch (e: Exception) { Log.w("MeScreen", "invalid color", e); Color(0xFF07C160) }
                             val avt = p.getOrElse(3) { "" }
 
                             Surface(
@@ -119,7 +120,7 @@ fun MeScreenContent(
                                             LaunchedEffect(avt) {
                                                 bmp = withContext(Dispatchers.IO) {
                                                     try { BitmapFactory.decodeFile(avt)?.asImageBitmap() }
-                                                    catch (_: Exception) { null }
+                                                    catch (e: Exception) { Log.w("MeScreen", "avatar decode failed", e); null }
                                                 }
                                             }
                                             val bmpVal = bmp

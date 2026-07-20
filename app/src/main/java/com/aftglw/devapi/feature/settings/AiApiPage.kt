@@ -256,7 +256,7 @@ private fun runConnectionTest(
             val respModel = try {
                 JSONObject(respBody).optJSONObject("model")?.toString()
                     ?: JSONObject(respBody).optString("model", model)
-            } catch (_: Exception) { model }
+            } catch (e: Exception) { Log.w("AiApiPage", "parse model name failed", e); model }
             true to "✓ 连接成功（${elapsed}ms，模型: $respModel）"
         } else {
             val errSnippet = respBody.take(120).replace("\n", " ")

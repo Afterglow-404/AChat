@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.settings
 
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,16 +49,20 @@ fun DataManagementPage(onBack: () -> Unit) {
     // 统计当前数据量
     fun refresh() {
         scope.launch {
-            val (c, g, m) = withContext(Dispatchers.IO) {
-                val db = AppDatabase.get(ctx)
-                Triple(
-                    db.chatDao().getAll().size,
-                    db.groupDao().getAll().size,
-                    db.chatDao().getAll().sumOf { db.messageDao().getMessages(it.id, false).size } +
-                    db.groupDao().getAll().sumOf { db.messageDao().getMessages(it.id, true).size }
-                )
+            try {
+                val (c, g, m) = withContext(Dispatchers.IO) {
+                    val db = AppDatabase.get(ctx)
+                    Triple(
+                        db.chatDao().getAll().size,
+                        db.groupDao().getAll().size,
+                        db.chatDao().getAll().sumOf { db.messageDao().getMessages(it.id, false).size } +
+                        db.groupDao().getAll().sumOf { db.messageDao().getMessages(it.id, true).size }
+                    )
+                }
+                chatCount = c; groupCount = g; msgCount = m
+            } catch (e: Exception) {
+                Log.e("DataManagementPage", "refresh failed", e)
             }
-            chatCount = c; groupCount = g; msgCount = m
         }
     }
     LaunchedEffect(Unit) { refresh() }
@@ -75,11 +80,12 @@ fun DataManagementPage(onBack: () -> Unit) {
                     } ?: return@withContext false
                     true
                 } catch (e: Exception) {
+                    Log.e("DataManagementPage", "export failed", e)
                     false
                 }
             }
             exporting = false
-            Toast.makeText(ctx, if (ok) "导出成功" else "导出失败：${"未知错误"}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, if (ok) "导出成功" else "导出失败", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -192,10 +198,16 @@ fun DataManagementPage(onBack: () -> Unit) {
                         showClearConfirm = false
                         clearing = true
                         scope.launch {
-                            val n = withContext(Dispatchers.IO) { ChatDataManager.clearAll(ctx) }
-                            clearing = false
-                            Toast.makeText(ctx, "已清空 $n 个聊天", Toast.LENGTH_SHORT).show()
-                            refresh()
+                            try {
+                                val n = withContext(Dispatchers.IO) { ChatDataManager.clearAll(ctx) }
+                                clearing = false
+                                Toast.makeText(ctx, "已清空 $n 个聊天", Toast.LENGTH_SHORT).show()
+                                refresh()
+                            } catch (e: Exception) {
+                                Log.e("DataManagementPage", "clearAll failed", e)
+                                clearing = false
+                                Toast.makeText(ctx, "清空失败", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))

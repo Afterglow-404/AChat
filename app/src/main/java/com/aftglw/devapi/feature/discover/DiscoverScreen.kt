@@ -1,6 +1,7 @@
 package com.aftglw.devapi.ui.screens
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -129,15 +130,12 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                 withContext(Dispatchers.Main) {
                     challengeText = text; challengeLoading = false; isLeetCode = false
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "fetchBoredChallenge failed", e)
                 withContext(Dispatchers.Main) {
                     challengeText = "网络不佳，稍后再试喵～"; challengeLoading = false
                 }
-            }
-        }
-    }
-
-    fun fetchLeetCodeChallenge() {
+            } {
         challengeLoading = true; challengeDone = false
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -161,15 +159,12 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                     val fullLink = if (link.startsWith("/")) "https://leetcode.com$link" else link
                     challengeText = text; leetCodeLink = fullLink; challengeLoading = false; isLeetCode = true
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "fetchLeetCodeChallenge failed", e)
                 withContext(Dispatchers.Main) {
                     challengeText = "LeetCode 不可用，换个挑战喵～"; challengeLoading = false
                 }
-            }
-        }
-    }
-
-    var showCatPage by remember { mutableStateOf(false) }
+            } by remember { mutableStateOf(false) }
     var catImg by remember { mutableStateOf<String?>(null) }
     var catLoading by remember { mutableStateOf(false) }
     val fortunes = arrayOf("大吉 🐱", "中吉 😺", "小吉 😸", "末吉 😿", "凶 😾", "大凶 🙀")
@@ -216,7 +211,7 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                         )
                         huangliText = parts.joinToString("\n")
                     }
-                } catch (_: Exception) { }
+                } catch (e: Exception) { Log.w("DiscoverScreen", "huangli API failed", e) }
 
                 withContext(Dispatchers.Main) {
                     val msg = if (huangliText.isNotEmpty()) huangliText else "喵神说今天宜摸鱼 🐱"
@@ -229,7 +224,8 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                 conn.disconnect()
                 catImg = json.optJSONObject(0)?.optString("url", "")?.takeIf { it.isNotEmpty() }
                 withContext(Dispatchers.Main) { catLoading = false }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "fetchCat failed", e)
                 withContext(Dispatchers.Main) {
                     fortuneText = if (fortuneText.isEmpty()) "网络不佳，摸摸猫头吧 🐱\n喵~" else fortuneText
                     catLoading = false
@@ -264,7 +260,8 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                     ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE).edit()
                         .putString("hitokoto_text", text).putString("hitokoto_from", "$source$typeTag").apply()
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "fetchHitokoto failed", e)
                 val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
                 withContext(Dispatchers.Main) {
                     hitokoto = prefs.getString("hitokoto_text", "知识就是力量。") ?: "知识就是力量。"

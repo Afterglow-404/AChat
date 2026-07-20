@@ -2,6 +2,7 @@ package com.aftglw.devapi.feature.settings
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,7 +59,7 @@ fun ManageRolesPage(
                         var bmp by remember(newChatAvatarUri) { mutableStateOf<ImageBitmap?>(null) }
                         LaunchedEffect(newChatAvatarUri) {
                             bmp = withContext(Dispatchers.IO) {
-                                try { BitmapFactory.decodeFile(newChatAvatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                                try { BitmapFactory.decodeFile(newChatAvatarUri)?.asImageBitmap() } catch (e: Exception) { Log.w("ManageRolesPage", "avatar decode failed", e); null }
                             }
                         }
                         val bmpVal = bmp
@@ -101,12 +102,19 @@ fun ManageRolesPage(
                         // MemoryStore.save 已 suspend 化（含 embedding 网络调用），切 IO 异步执行
                         val memoriesToSave = memories.take(15)
                         scope.launch {
-                            withContext(Dispatchers.IO) {
-                                memoriesToSave.forEach { com.aftglw.devapi.core.memory.MemoryStore.save(ctx, it, "skill:$chatName") }
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    memoriesToSave.forEach { com.aftglw.devapi.core.memory.MemoryStore.save(ctx, it, "skill:$chatName") }
+                                }
+                            } catch (e: Exception) {
+                                Log.w("ManageRolesPage", "memory save after import failed", e)
                             }
                             android.widget.Toast.makeText(ctx, "Skill 导入成功（${memories.size} 条记忆）", Toast.LENGTH_SHORT).show()
                         }
-                    } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show() }
+                    } catch (e: Exception) {
+                        Log.e("ManageRolesPage", "import skill failed", e)
+                        android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             TextButton(onClick = { importSkillLauncher.launch(arrayOf("text/*")) }, modifier = Modifier.fillMaxWidth()) {

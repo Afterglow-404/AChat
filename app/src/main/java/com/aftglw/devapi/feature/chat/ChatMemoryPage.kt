@@ -1,4 +1,6 @@
 package com.aftglw.devapi.feature.chat
+import android.util.Log
+import android.widget.Toast
 import com.aftglw.devapi.core.memory.MemoryStore
 import com.aftglw.devapi.core.memory.MemoryItem
 
@@ -37,7 +39,14 @@ fun MemoryPage(name: String, onBack: () -> Unit) {
     // 用于在搜索输入变化时取消上一次未完成的搜索，避免乱序覆盖
     var searchJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(name) {
-        items = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "", 100, "$name") }
+        try {
+            items = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "", 100, "$name") }
+        } catch (e: Exception) {
+            Log.e("ChatMemoryPage", "initial search failed", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(ctx, "加载记忆失败", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
@@ -51,8 +60,12 @@ fun MemoryPage(name: String, onBack: () -> Unit) {
                 query = q
                 searchJob?.cancel()
                 searchJob = scope.launch(Dispatchers.IO) {
-                    val results = MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name")
-                    withContext(Dispatchers.Main) { items = results }
+                    try {
+                        val results = MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name")
+                        withContext(Dispatchers.Main) { items = results }
+                    } catch (e: Exception) {
+                        Log.e("ChatMemoryPage", "search failed", e)
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth().padding(12.dp), placeholder = { Text("搜索记忆...", fontSize = 14.sp) },
@@ -73,9 +86,16 @@ fun MemoryPage(name: String, onBack: () -> Unit) {
                         }
                         IconButton(onClick = {
                             scope.launch(Dispatchers.IO) {
-                                MemoryStore.deleteByText(m.text, "$name")
-                                val results = MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
-                                withContext(Dispatchers.Main) { items = results }
+                                try {
+                                    MemoryStore.deleteByText(m.text, "$name")
+                                    val results = MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
+                                    withContext(Dispatchers.Main) { items = results }
+                                } catch (e: Exception) {
+                                    Log.e("ChatMemoryPage", "delete failed", e)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(ctx, "删除失败", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
