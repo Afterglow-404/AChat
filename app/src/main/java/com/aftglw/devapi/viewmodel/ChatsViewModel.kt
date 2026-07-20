@@ -4,50 +4,54 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
 import com.aftglw.devapi.core.character.BuiltInCharacterLoader
 import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.core.storage.room.ChatEntity
 import com.aftglw.devapi.model.ChatItem
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class ChatsViewModel(app: Application) : AndroidViewModel(app) {
-    private val _chats = MutableLiveData<List<ChatItem>>(loadChatsWithBuiltin())
+    private val _chats = MutableLiveData<List<ChatItem>>(emptyList())
     val chats: LiveData<List<ChatItem>> = _chats
 
-    fun setSearchQuery(query: String) {
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            _chats.postValue(loadChatsWithBuiltin())
+        }
+    }
+
+    suspend fun setSearchQuery(query: String) {
         _chats.value = if (query.isEmpty()) loadChats()
         else {
             val q = query.trim().lowercase()
             val app = getApplication<Application>()
             val all = loadChats()
+            // 一次 SQL LIKE 查询所有命中 chatId，替代「遍历 chat → getMessages → 内存过滤」N+1
+            val hitIds = withContext(Dispatchers.IO) {
+                AppDatabase.get(app).messageDao().searchChatIds("%$q%")
+            }.toSet()
             all.filter { chat ->
+                // 名字匹配优先
                 if (chat.name.lowercase().contains(q)) return@filter true
-                // 扫历史文本匹配
-                val hist = runBlocking {
-                    withContext(Dispatchers.IO) {
-                        AppDatabase.get(app).messageDao()
-                            .getMessages(chat.name, isGroup = false)
-                    }
-                }
-                hist.any { it.text.lowercase().contains(q) }
+                // 历史文本匹配：用 SQL 结果集合，避免逐个 chat 再查 messages
+                hitIds.contains(chat.name)
             }
         }
     }
 
-    fun refresh() { _chats.value = loadChats() }
+    suspend fun refresh() { _chats.value = loadChats() }
 
-    fun deleteChat(id: String) {
+    suspend fun deleteChat(id: String) {
         val chats = loadChats()
         val target = chats.find { it.id == id } ?: return
-        runBlocking {
-            withContext(Dispatchers.IO) {
-                val db = AppDatabase.get(getApplication())
-                db.runInTransaction {
-                    db.chatDao().deleteById(id)
-                    db.messageDao().deleteForChat(target.name, isGroup = false)
-                }
+        withContext(Dispatchers.IO) {
+            val db = AppDatabase.get(getApplication())
+            db.runInTransaction {
+                db.chatDao().deleteById(id)
+                db.messageDao().deleteForChat(target.name, isGroup = false)
             }
         }
         // 清除相关设置（proactive/mood/affinity 等仍用 SharedPreferences）
@@ -71,18 +75,16 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    fun togglePin(id: String) {
-        runBlocking {
-            withContext(Dispatchers.IO) {
-                val dao = AppDatabase.get(getApplication()).chatDao()
-                val e = dao.getById(id) ?: return@withContext
-                dao.upsert(e.copy(pinned = !e.pinned))
-            }
+    suspend fun togglePin(id: String) {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(getApplication()).chatDao()
+            val e = dao.getById(id) ?: return@withContext
+            dao.upsert(e.copy(pinned = !e.pinned))
         }
         refresh()
     }
 
-    private fun saveChats(chats: List<ChatItem>) = runBlocking {
+    private suspend fun saveChats(chats: List<ChatItem>) {
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(getApplication()).chatDao()
             dao.deleteAll()
@@ -94,7 +96,7 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
      * 启动时加载：首次启动（无已存角色）自动预装内置角色。
      * 之后用户删除内置角色不再自动加回（prefs 标记 builtin_seeded）。
      */
-    private fun loadChatsWithBuiltin(): List<ChatItem> {
+    private suspend fun loadChatsWithBuiltin(): List<ChatItem> {
         val app = getApplication<Application>()
         val prefs = app.getSharedPreferences("wechat_chats", android.content.Context.MODE_PRIVATE)
         val existing = loadChats()
@@ -112,16 +114,13 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
         return loadChats()
     }
 
-    private fun loadChats(): List<ChatItem> = runBlocking {
-        withContext(Dispatchers.IO) {
-            val app = getApplication<Application>()
-            val db = AppDatabase.get(app)
-            val mDao = db.messageDao()
-            db.chatDao().getAll().map { e ->
-                val lastMsg = mDao.getLastMessageText(e.name, isGroup = false) ?: ""
-                e.toModel(lastMsg)
-            }.sortedByDescending { it.pinned }
-        }
+    private suspend fun loadChats(): List<ChatItem> = withContext(Dispatchers.IO) {
+        val app = getApplication<Application>()
+        val db = AppDatabase.get(app)
+        // 一次 JOIN 取所有 chat + 最后一条消息文本，替代 N+1（每个 chat 单独查 messages）
+        db.chatDao().getAllWithLastMessage().map { row ->
+            row.chat.toModel(row.lastText ?: "")
+        }.sortedByDescending { it.pinned }
     }
 }
 

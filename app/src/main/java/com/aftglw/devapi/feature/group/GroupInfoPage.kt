@@ -77,21 +77,27 @@ fun GroupInfoPage(
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     // 当前群成员 + 人设预览（每次 currentGroup 变化时刷新）
-    val memberInfo = remember(currentGroup.members, currentGroup.memberEnabled) {
-        currentGroup.members.map { name ->
-            val avatarUri = GroupChatManager.getMemberAvatarUri(ctx, name)
-            val avatar = if (avatarUri.isNotEmpty()) {
-                BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
-            } else null
-            val persona = GroupChatManager.getMemberPersona(ctx, name)
-            Triple(name, avatar, persona)
+    var memberInfo by remember { mutableStateOf<List<Triple<String, androidx.compose.ui.graphics.ImageBitmap?, String>>>(emptyList()) }
+    LaunchedEffect(currentGroup.members, currentGroup.memberEnabled) {
+        val loaded = withContext(Dispatchers.IO) {
+            currentGroup.members.map { name ->
+                val avatarUri = GroupChatManager.getMemberAvatarUri(ctx, name)
+                val avatar = if (avatarUri.isNotEmpty()) {
+                    BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
+                } else null
+                val persona = GroupChatManager.getMemberPersona(ctx, name)
+                Triple(name, avatar, persona)
+            }
         }
+        memberInfo = loaded
     }
 
     // 可添加的候选成员（去重当前已加入的）
-    val availableCandidates = remember(currentGroup.members) {
+    var availableCandidates by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    LaunchedEffect(currentGroup.members) {
         val existing = currentGroup.members.toSet()
-        GroupChatManager.getAvailableMembers(ctx).filter { it.first !in existing }
+        val all = GroupChatManager.getAvailableMembers(ctx)
+        availableCandidates = all.filter { it.first !in existing }
     }
 
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
@@ -205,11 +211,15 @@ fun GroupInfoPage(
                     onRemove = {
                         if (currentGroup.members.size <= 1) {
                             Toast.makeText(ctx, "至少保留一名群成员", Toast.LENGTH_SHORT).show()
-                        } else if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
-                            commitGroup(currentGroup.copy(
-                                members = currentGroup.members.filter { it != name },
-                                memberEnabled = currentGroup.memberEnabled - name
-                            ))
+                        } else {
+                            scope.launch {
+                                if (GroupChatManager.removeMember(ctx, currentGroup.id, name)) {
+                                    commitGroup(currentGroup.copy(
+                                        members = currentGroup.members.filter { it != name },
+                                        memberEnabled = currentGroup.memberEnabled - name
+                                    ))
+                                }
+                            }
                         }
                     }
                 )
@@ -254,10 +264,12 @@ fun GroupInfoPage(
                 TextButton(
                     enabled = renameText.isNotBlank() && renameText != currentGroup.name,
                     onClick = {
-                        GroupChatManager.renameGroup(ctx, currentGroup.id, renameText.trim())
-                        currentGroup = currentGroup.copy(name = renameText.trim())
-                        onGroupChanged(currentGroup)
-                        showRenameDialog = false
+                        scope.launch {
+                            GroupChatManager.renameGroup(ctx, currentGroup.id, renameText.trim())
+                            currentGroup = currentGroup.copy(name = renameText.trim())
+                            onGroupChanged(currentGroup)
+                            showRenameDialog = false
+                        }
                     }
                 ) { Text("保存") }
             },
@@ -283,13 +295,15 @@ fun GroupInfoPage(
                             Row(
                                 Modifier.fillMaxWidth()
                                     .clickable {
-                                        if (GroupChatManager.addMember(ctx, currentGroup.id, name)) {
-                                            commitGroup(currentGroup.copy(
-                                                members = currentGroup.members + name,
-                                                memberEnabled = currentGroup.memberEnabled + (name to true)
-                                            ))
+                                        scope.launch {
+                                            if (GroupChatManager.addMember(ctx, currentGroup.id, name)) {
+                                                commitGroup(currentGroup.copy(
+                                                    members = currentGroup.members + name,
+                                                    memberEnabled = currentGroup.memberEnabled + (name to true)
+                                                ))
+                                            }
+                                            showAddDialog = false
                                         }
-                                        showAddDialog = false
                                     }
                                     .padding(vertical = 10.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -364,9 +378,11 @@ fun GroupInfoPage(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        GroupChatManager.deleteGroup(ctx, currentGroup.id)
-                        showDeleteDialog = false
-                        onGroupDeleted()
+                        scope.launch {
+                            GroupChatManager.deleteGroup(ctx, currentGroup.id)
+                            showDeleteDialog = false
+                            onGroupDeleted()
+                        }
                     },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error

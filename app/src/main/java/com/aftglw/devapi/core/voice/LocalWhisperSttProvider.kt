@@ -23,7 +23,7 @@ import java.io.File
  * sherpa-onnx 把 encoder/decoder 分离，可以通过 [OfflineWhisperModelConfig.language]
  * 和 [OfflineWhisperModelConfig.task] 强制设为 "zh" + "transcribe"，确保中文转写。
  *
- * 模型文件约定（与 [com.aftglw.devapi.core.ai.LlamaEngine] 一致）：
+ * 模型文件约定：
  *   - encoder: filesDir/whisper/xxx-encoder.int8.onnx
  *   - decoder: filesDir/whisper/xxx-decoder.int8.onnx
  *   - tokens : filesDir/whisper/xxx-tokens.txt
@@ -46,16 +46,9 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
 
     private val ctx = ctx.applicationContext
 
-    /** Recognizer 实例（懒加载，避免无配置时也实例化） */
-    @Volatile
-    private var recognizer: OfflineRecognizer? = null
-
-    /** 已加载的模型签名（避免重复加载） */
-    @Volatile
-    private var loadedSignature: String? = null
-
-    /** 推理互斥锁（OfflineRecognizer 非线程安全） */
-    private val inferMutex = Mutex()
+    // recognizer / loadedSignature / inferMutex 已移至 companion object 跨实例共享，
+    // 避免 SttProviderManager.configure 重建实例时反复 init/release ~150MB native 内存。
+    // 详见 [Companion.recognizer]。
 
     /** 模型目录：filesDir/whisper/ */
     private val whisperDir: File
@@ -117,16 +110,21 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
         }
         val rec = recognizer ?: return@withContext SttOutcome.Failed("Whisper 未初始化")
 
+        // 解码音频为 16kHz mono float[]（解码不需要互斥，放在 mutex 外可与其他推理并行）
+        val samples = try {
+            AudioDecoder.decodeToPcmFloat(audioPath)
+        } catch (e: Exception) {
+            Log.e(TAG, "Whisper 解码异常", e)
+            return@withContext SttOutcome.Failed("Whisper 解码异常: ${e.message?.take(60)}", e)
+        }
+        if (samples.isEmpty()) {
+            return@withContext SttOutcome.Failed("音频解码失败: $audioPath")
+        }
+        Log.d(TAG, "Decoded ${samples.size} samples (${samples.size / 16000f}s), recognizing...")
+
         // 推理（OfflineRecognizer 非线程安全，加锁串行化）
         try {
             inferMutex.withLock {
-                // 解码音频为 16kHz mono float[]
-                val samples = AudioDecoder.decodeToPcmFloat(audioPath)
-                if (samples.isEmpty()) {
-                    return@withLock SttOutcome.Failed("音频解码失败: $audioPath")
-                }
-                Log.d(TAG, "Decoded ${samples.size} samples (${samples.size / 16000f}s), recognizing...")
-
                 val stream = rec.createStream()
                 try {
                     stream.acceptWaveform(samples, 16000)
@@ -150,9 +148,8 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
     }
 
     override fun shutdown() {
-        try { recognizer?.release() } catch (_: Exception) {}
-        recognizer = null
-        loadedSignature = null
+        // 释放共享 native recognizer（~150MB），委托给 companion
+        releaseNative()
     }
 
     /** 查找 encoder 文件：用户选择 > 目录内首个 *-encoder*.onnx */
@@ -193,6 +190,36 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
         private const val TAG = "LocalWhisperSttProvider"
 
         /**
+         * 共享 Recognizer 实例（~150MB native 内存）。跨所有 [LocalWhisperSttProvider] 实例
+         * 单例，避免 [SttProviderManager.configure] 重建实例时反复 init/release native 资源。
+         */
+        @Volatile
+        private var recognizer: OfflineRecognizer? = null
+
+        /** 已加载的模型签名（避免重复加载） */
+        @Volatile
+        private var loadedSignature: String? = null
+
+        /** 推理互斥锁（OfflineRecognizer 非线程安全） */
+        private val inferMutex = Mutex()
+
+        /**
+         * 释放共享 native recognizer（~150MB native 内存）。
+         *
+         * 调用时机：
+         * - [com.aftglw.devapi.WispApplication.onTrimMemory] 收到 TRIM_MEMORY_MODERATE 时（系统内存压力）
+         * - 实例 [shutdown]（[SttProviderManager] 切换引擎/退出时）
+         *
+         * 幂等，多次调用安全。
+         */
+        @JvmStatic
+        fun releaseNative() {
+            try { recognizer?.release() } catch (_: Exception) {}
+            recognizer = null
+            loadedSignature = null
+        }
+
+        /**
          * 通过 SAF 导入 Whisper 模型文件到 filesDir/whisper/。
          * 根据文件名自动分类：
          * - 包含 "encoder"：保存为 encoder 模型，设为 stt_whisper_encoder
@@ -200,7 +227,7 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
          * - 包含 "tokens" 且为 .txt：保存为 tokens 文件，设为 stt_whisper_tokens
          * 其他扩展名返回 null。
          *
-         * 用 64KB buffer 流式拷贝，适配大文件（与 LlamaEngine.importModelFromUri 一致）。
+         * 用 64KB buffer 流式拷贝，适配大文件。
          */
         fun importFromUri(ctx: Context, uri: Uri): File? {
             return try {

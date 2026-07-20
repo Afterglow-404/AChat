@@ -22,6 +22,9 @@ import com.aftglw.devapi.core.worldbook.WorldbookEntry
 import com.aftglw.devapi.core.worldbook.WorldbookStore
 import com.aftglw.devapi.feature.settings.SubPageScaffold
 import com.aftglw.devapi.ui.theme.AchatTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 世界书页面 — 列表 + 内联编辑对话框。
@@ -34,7 +37,11 @@ fun WorldbookPage(
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
-    var entries by remember { mutableStateOf(WorldbookStore.load(ctx, chatName)) }
+    var entries by remember { mutableStateOf<List<WorldbookEntry>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(chatName) {
+        entries = withContext(Dispatchers.IO) { WorldbookStore.load(ctx, chatName) }
+    }
     var editing by remember { mutableStateOf<WorldbookEntry?>(null) }
     var creatingNew by remember { mutableStateOf(false) }
 
@@ -60,8 +67,13 @@ fun WorldbookPage(
                                 entry = entry,
                                 onClick = { editing = entry },
                                 onDelete = {
-                                    entries = WorldbookStore.delete(ctx, chatName, entry.id)
-                                    Toast.makeText(ctx, "已删除", Toast.LENGTH_SHORT).show()
+                                    scope.launch(Dispatchers.IO) {
+                                        val refreshed = WorldbookStore.delete(ctx, chatName, entry.id)
+                                        withContext(Dispatchers.Main) {
+                                            entries = refreshed
+                                            Toast.makeText(ctx, "已删除", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                 }
                             )
                             Spacer(Modifier.height(8.dp))
@@ -87,9 +99,14 @@ fun WorldbookPage(
             entry = e,
             onDismiss = { editing = null },
             onSave = { updated ->
-                entries = WorldbookStore.update(ctx, chatName, updated)
-                editing = null
-                Toast.makeText(ctx, "已保存", Toast.LENGTH_SHORT).show()
+                scope.launch(Dispatchers.IO) {
+                    val refreshed = WorldbookStore.update(ctx, chatName, updated)
+                    withContext(Dispatchers.Main) {
+                        entries = refreshed
+                        editing = null
+                        Toast.makeText(ctx, "已保存", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         )
     }
@@ -100,9 +117,14 @@ fun WorldbookPage(
             entry = WorldbookEntry(id = 0L, keywords = emptyList(), content = ""),
             onDismiss = { creatingNew = false },
             onSave = { newEntry ->
-                entries = WorldbookStore.add(ctx, chatName, newEntry)
-                creatingNew = false
-                Toast.makeText(ctx, "已添加", Toast.LENGTH_SHORT).show()
+                scope.launch(Dispatchers.IO) {
+                    val refreshed = WorldbookStore.add(ctx, chatName, newEntry)
+                    withContext(Dispatchers.Main) {
+                        entries = refreshed
+                        creatingNew = false
+                        Toast.makeText(ctx, "已添加", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         )
     }

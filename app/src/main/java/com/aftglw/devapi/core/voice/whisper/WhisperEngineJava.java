@@ -21,7 +21,7 @@ import java.nio.channels.FileChannel;
  * - 实现 transcribeBuffer(samples)（原版返回 null），支持内存 PCM 输入
  * - 删除未使用的 GPU/NNAPI 注释代码
  *
- * 模型路径优先级（与 LlamaEngine 一致）：
+ * 模型路径优先级：
  * 1. 用户在设置中显式选择的模型（stt_whisper_model）
  * 2. filesDir/whisper/ 下第一个 .tflite 文件
  * 词表必须存在：filesDir/whisper/filters_vocab_multilingual.bin

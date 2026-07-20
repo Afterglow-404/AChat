@@ -22,7 +22,7 @@ class SystemTtsProvider(ctx: Context) : TtsProvider {
 
     override val id: String = "system"
 
-    private val tts = VoiceTts(ctx.applicationContext)
+    private val tts = VoiceTts.getInstance(ctx.applicationContext)
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var initialized = false
 

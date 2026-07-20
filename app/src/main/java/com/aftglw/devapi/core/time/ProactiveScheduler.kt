@@ -5,53 +5,69 @@ import com.aftglw.devapi.core.mood.AffinityManager
 import com.aftglw.devapi.core.storage.room.AppDatabase
 import com.aftglw.devapi.MainActivity
 
-import android.app.AlarmManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-
-class ProactiveReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent?) {
-        val result = goAsync()
-        Thread {
-            try { ProactiveScheduler.runOnce(context) } catch (e: Exception) {  }
-            result.finish()
-        }.start()
-    }
-}
+import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
 object ProactiveScheduler {
+    /**
+     * 通过 WorkManager 调度主动消息检查。
+     *
+     * 替代原 AlarmManager.setInexactRepeating 方案：
+     * - AlarmManager 在 Doze 模式下被严重延迟，且需要单独的 BroadcastReceiver
+     * - WorkManager 由系统统一调度，更省电，与 CoroutineWorker 天然集成
+     *
+     * 使用 OneTimeWorkRequest + 30s 初始延迟：
+     * - KEEP policy 保证同一 unique work 不会重复入队（多次调用 enqueue 安全）
+     * - 30s 延迟避免 app 启动时立即触发 IO（与 Task 1.1 的 preInit 错开）
+     *
+     * 注：周期性触发可后续用 PeriodicWorkRequestBuilder 替换，或在 [ProactiveWorker.doWork] 末尾链式 enqueue。
+     */
     fun enqueue(context: Context) {
-        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val pi = PendingIntent.getBroadcast(context, 0, Intent(context, ProactiveReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        am.setInexactRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, android.os.SystemClock.elapsedRealtime() + 60000, 900000, pi)
-        runOnce(context)
+        val request = OneTimeWorkRequestBuilder<ProactiveWorker>()
+            .setInitialDelay(30, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "proactive",
+            ExistingWorkPolicy.KEEP,
+            request
+        )
     }
 
-    fun triggerNow(context: Context) { runOnce(context) }
+    fun triggerNow(context: Context) {
+        // 立即触发：跳过 WorkManager 调度，直接在 IO 协程中跑一次
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            runOnce(context)
+        }
+    }
 
     fun forceSend(context: Context, chatName: String) {
         val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
         val msg = "👋 测试消息 ($now)"
-        ChatHistory.save(context, chatName, ChatHistory.load(context, chatName) + Triple(msg, false, now))
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            ChatHistory.save(context, chatName, ChatHistory.load(context, chatName) + Triple(msg, false, now))
+        }
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) nm.createNotificationChannel(android.app.NotificationChannel("proactive", "主动消息", android.app.NotificationManager.IMPORTANCE_HIGH))
         val pi = android.app.PendingIntent.getActivity(context, chatName.hashCode(), Intent(context, MainActivity::class.java).apply { putExtra("open_chat", chatName); flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         (android.app.Notification.Builder(context, "proactive").setContentTitle(chatName).setContentText(msg).setSmallIcon(android.R.drawable.ic_dialog_info).setContentIntent(pi).setAutoCancel(true).build()).let { nm.notify(chatName.hashCode(), it) }
     }
 
-    fun runOnce(context: Context) {
-        // 确保网络请求在 IO 线程
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+    suspend fun runOnce(context: Context) {
+        // CoroutineWorker.doWork() 已在 Dispatchers.Default 调度，triggerNow 用 Dispatchers.IO.launch 包装。
+        // 此处直接执行，不再额外 launch。
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
-            val allChats = runBlocking { AppDatabase.get(context).chatDao().getAll() }
+            val allChats = AppDatabase.get(context).chatDao().getAll()
             for (item in allChats) {
                 val chatDisplay = item.name
                 val chat = item.id.ifEmpty { chatDisplay }
@@ -94,10 +110,9 @@ object ProactiveScheduler {
                 prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
             }
         } catch (_: Exception) {}
-        }
     }
 
-    private fun generateMessage(ctx: Context, chatName: String): String {
+    private suspend fun generateMessage(ctx: Context, chatName: String): String {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
         if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
@@ -138,7 +153,7 @@ object ProactiveScheduler {
         } catch (_: Exception) { "在干嘛呢？" }
     }
 
-    private fun generateMessageAiDriven(ctx: Context, chatName: String): String {
+    private suspend fun generateMessageAiDriven(ctx: Context, chatName: String): String {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val persona = loadPersona(ctx, chatName)
         val chatHistory = ChatHistory.load(ctx, chatName)
@@ -187,8 +202,8 @@ object ProactiveScheduler {
         return ""  // 返回空 = 跳过本次
     }
 
-    private fun loadPersona(ctx: Context, chatName: String): String {
-        return runBlocking {
+    private suspend fun loadPersona(ctx: Context, chatName: String): String {
+        return withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).chatDao()
             val e = dao.getById(chatName) ?: dao.getAll().firstOrNull { it.name == chatName }
             e?.persona ?: ""

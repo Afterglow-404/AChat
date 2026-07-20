@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.chat
 import com.aftglw.devapi.core.memory.MemoryStore
+import com.aftglw.devapi.core.memory.MemoryItem
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 日记页 — 查看和管理按日期归档的对话日记。
@@ -26,7 +30,11 @@ import com.aftglw.devapi.ui.theme.*
 @Composable
 fun DiaryPage(name: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
-    var diaries by remember { mutableStateOf(MemoryStore.search(ctx, "日记", 50, "diary:$name")) }
+    var diaries by remember { mutableStateOf<List<MemoryItem>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(name) {
+        diaries = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 50, "diary:$name") }
+    }
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
             title = { Text("📖 日记", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
@@ -47,8 +55,11 @@ fun DiaryPage(name: String, onBack: () -> Unit) {
                         Text(dateLabel, fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f), modifier = Modifier.width(64.dp))
                         Text(content, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 13.sp, color = AchatTheme.colors.onSurface, maxLines = 3)
                         IconButton(onClick = {
-                            MemoryStore.deleteByText(d.text, "diary:$name")
-                            diaries = MemoryStore.search(ctx, "日记", 50, "diary:$name")
+                            scope.launch(Dispatchers.IO) {
+                                MemoryStore.deleteByText(d.text, "diary:$name")
+                                val refreshed = MemoryStore.search(ctx, "日记", 50, "diary:$name")
+                                withContext(Dispatchers.Main) { diaries = refreshed }
+                            }
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(18.dp))
                         }

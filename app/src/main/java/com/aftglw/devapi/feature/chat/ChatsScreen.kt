@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +47,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -55,9 +57,10 @@ fun ChatsScreen(
     vm: ChatsViewModel = viewModel<ChatsViewModel>()
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.refresh()
+            if (event == Lifecycle.Event.ON_RESUME) scope.launch { vm.refresh() }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -66,20 +69,24 @@ fun ChatsScreen(
 
     val ctx = LocalContext.current
     val chats: List<ChatItem> by vm.chats.observeAsState(emptyList())
-    val groups = remember { mutableStateOf(GroupChatManager.loadGroups(ctx)) }
+    var groups by remember { mutableStateOf<List<GroupChat>>(emptyList()) }
+    LaunchedEffect(Unit) { groups = GroupChatManager.loadGroups(ctx) }
     // 每当界面恢复时重新加载群聊列表
-    LaunchedEffect(chats) { groups.value = GroupChatManager.loadGroups(ctx) }
+    LaunchedEffect(chats) { groups = GroupChatManager.loadGroups(ctx) }
 
     ChatsScreenContent(
         chats = chats,
-        groups = groups.value,
-        onSearchQueryChange = { vm.setSearchQuery(it) },
+        groups = groups,
+        onSearchQueryChange = { scope.launch { vm.setSearchQuery(it) } },
         onChatClick = onChatClick,
         onGroupClick = onGroupClick,
-        onTogglePin = { vm.togglePin(it) },
-        onDeleteChat = { vm.deleteChat(it) },
-        onGroupCreated = { groups.value = GroupChatManager.loadGroups(ctx) },
-        onDeleteGroup = { id -> GroupChatManager.deleteGroup(ctx, id); groups.value = GroupChatManager.loadGroups(ctx) },
+        onTogglePin = { scope.launch { vm.togglePin(it) } },
+        onDeleteChat = { scope.launch { vm.deleteChat(it) } },
+        onGroupCreated = { scope.launch { groups = GroupChatManager.loadGroups(ctx) } },
+        onDeleteGroup = { id -> scope.launch {
+            GroupChatManager.deleteGroup(ctx, id)
+            groups = GroupChatManager.loadGroups(ctx)
+        } },
         ctx = ctx
     )
 }
@@ -269,15 +276,16 @@ fun ChatsScreenContent(
 private fun ChatAvatar(avatarUri: String, avatarColor: Int, name: String) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Box(Modifier.size(48.dp).clip(CircleShape).background(Color(avatarColor)), contentAlignment = Alignment.Center) {
-        if (avatarUri.isNotEmpty()) {
-            val bmp = remember(avatarUri) {
+        // Task 2.5: 头像异步加载（BuiltInCharacterLoader.loadAvatarBitmap 已改 suspend，
+        // 内置 LruCache 命中时直接返回）
+        var bmp by remember { mutableStateOf<ImageBitmap?>(null) }
+        LaunchedEffect(avatarUri) {
+            bmp = if (avatarUri.isNotEmpty()) {
                 com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, avatarUri)?.asImageBitmap()
-            }
-            if (bmp != null) {
-                Image(bmp, null, Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-            } else {
-                Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
+            } else null
+        }
+        if (bmp != null) {
+            Image(bmp!!, null, Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
         } else {
             Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         }
@@ -293,7 +301,9 @@ private fun CreateGroupDialog(
     onDismiss: () -> Unit,
     onCreated: () -> Unit
 ) {
-    val members = remember { GroupChatManager.getAvailableMembers(ctx) }
+    val scope = rememberCoroutineScope()
+    var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    LaunchedEffect(Unit) { members = GroupChatManager.getAvailableMembers(ctx) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var groupName by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
@@ -355,14 +365,16 @@ private fun CreateGroupDialog(
                     groupName.isBlank() -> error = "请输入群聊名称"
                     selected.size < 2 -> error = "请至少选择 2 个成员"
                     else -> {
-                        GroupChatManager.saveGroup(ctx, GroupChat(
-                            id = "group_${System.currentTimeMillis()}",
-                            name = groupName.trim(),
-                            members = selected.toList(),
-                            time = "",
-                            lastMessage = ""
-                        ))
-                        onCreated()
+                        scope.launch {
+                            GroupChatManager.saveGroup(ctx, GroupChat(
+                                id = "group_${System.currentTimeMillis()}",
+                                name = groupName.trim(),
+                                members = selected.toList(),
+                                time = "",
+                                lastMessage = ""
+                            ))
+                            onCreated()
+                        }
                     }
                 }
             }) { Text("创建") }

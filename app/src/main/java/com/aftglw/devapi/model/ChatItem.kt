@@ -1,5 +1,8 @@
 package com.aftglw.devapi.model
 
+import androidx.compose.runtime.Immutable
+import java.util.UUID
+
 enum class GroupChatMode(
     val key: String,
     val title: String,
@@ -34,6 +37,7 @@ data class GroupChat(
 /**
  * 群聊气泡消息 — 比单聊多了 from 字段标识发言人。
  */
+@Immutable
 data class GroupChatMessage(
     val text: String,
     /** 发言人名字，"user" 表示玩家自己，其他为群成员名 */
@@ -44,7 +48,12 @@ data class GroupChatMessage(
     val imagePath: String? = null,
     val voicePath: String? = null,
     val voiceDuration: Int = 0,
-    val voiceTranscript: String? = null
+    val voiceTranscript: String? = null,
+    /** AI member reply failed; retained so the user can retry it later. */
+    val isError: Boolean = false,
+    val retryPrompt: String? = null,
+    /** LazyColumn 稳定 key：避免列表重组时复用错位 */
+    val id: String = UUID.randomUUID().toString()
 )
 
 class ChatItem(

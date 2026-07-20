@@ -79,8 +79,21 @@ class CloudTtsService(private val ctx: Context) {
                 val errBody = response.body?.string()?.take(200) ?: ""
                 throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
             }
-            val bytes = response.body?.bytes() ?: throw java.io.IOException("空响应体")
-            cacheFile.outputStream().use { it.write(bytes) }
+            val body = response.body ?: throw java.io.IOException("空响应体")
+            // 流式写盘：避免一次性 bytes() 把整段音频读进内存（大段 TTS 可达数 MB）
+            try {
+                body.byteStream().use { input ->
+                    cacheFile.outputStream().use { output ->
+                        input.copyTo(output, 64 * 1024)
+                    }
+                }
+            } catch (e: Exception) {
+                // 流式中途失败：删除半截文件，避免缓存污染
+                cacheFile.delete()
+                throw e
+            }
+            // 写入成功后执行 LRU 清理，保持 tts 缓存目录总大小 <= 50MB
+            enforceTtsCacheLimit(cacheDir)
             cacheFile.absolutePath
         } finally {
             response.close()
@@ -91,6 +104,21 @@ class CloudTtsService(private val ctx: Context) {
     fun clearCache() {
         val cacheDir = File(ctx.cacheDir, "tts")
         cacheDir.listFiles()?.forEach { it.delete() }
+    }
+
+    /**
+     * LRU 清理：保持 [cacheDir] 总大小 <= [maxBytes]（默认 50MB）。
+     * 按 lastModified 升序遍历，删除最旧的文件直到总大小达标。
+     * 在每次成功写入 cacheFile 后调用。
+     */
+    private fun enforceTtsCacheLimit(cacheDir: File, maxBytes: Long = 50 * 1024 * 1024) {
+        val files = cacheDir.listFiles()?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (f in files) {
+            if (total <= maxBytes) break
+            total -= f.length()
+            f.delete()
+        }
     }
 
     private fun sha1(input: String): String {

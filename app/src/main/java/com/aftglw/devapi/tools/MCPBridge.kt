@@ -2,6 +2,8 @@ package com.aftglw.devapi.tools
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -25,21 +27,15 @@ object MCPBridge {
     suspend fun refresh(ctx: Context) {
         withContext(Dispatchers.IO) {
             val clients = MCPClient.fromConfig(ctx)
-            // 清空旧的外部工具
-            val oldTools = externalTools.keys.toSet()
-            oldTools.forEach { name ->
-                externalTools.remove(name)
-                val old = ToolRegistry.get(name)
-                // 只移除由 MCP 注册的工具
-                if (old is MCPToolProxy) {
-                    // ToolRegistry 没有 remove 方法，只能跳过注册
-                }
-            }
+            // 先注销由 MCP 注册的旧工具，避免 stale 工具残留
+            ToolRegistry.unregisterByOwner { it is MCPToolProxy }
             externalTools.clear()
 
-            // 注册新的
-            for (client in clients) {
-                val result = client.listTools()
+            // 并行调用每个 MCP Server 的 tools/list
+            val results = clients.map { client ->
+                async { client to client.listTools() }
+            }.awaitAll()
+            for ((client, result) in results) {
                 if (result.isFailure) continue
                 for (info in result.getOrThrow()) {
                     val proxy = MCPToolProxy(info.name, info.description, info.inputSchema, client)

@@ -5,8 +5,17 @@ import android.util.Base64
 import android.util.Log
 import com.aftglw.devapi.core.security.SecureKeyStore
 import com.aftglw.devapi.network.HttpClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -18,6 +27,7 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import kotlin.coroutines.resume
 
 /**
  * 讯飞实时语音转写（RTASR）STT Provider：在线 WebSocket API。
@@ -98,103 +108,119 @@ class XfyunSttProvider(ctx: Context) : SttProvider {
         }
         val wsUrl = "wss://rtasr.xfyun.cn/v1/ws?appid=$appid&ts=$ts&signa=${java.net.URLEncoder.encode(signa, "UTF-8")}"
 
-        // 同步等待结果（withTimeout 保护）
+        // 用 suspendCancellableCoroutine + withTimeout 替代 CountDownLatch 阻塞等待
         val resultBuilder = StringBuilder()
-        val errorRef = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        val done = java.util.concurrent.CountDownLatch(1)
         val handshakeOk = AtomicBoolean(false)
 
         val request = Request.Builder().url(wsUrl).build()
-        val ws = HttpClient.client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket onOpen, streaming PCM...")
-                // 流式发送 PCM，每 1280 字节一帧
-                val chunkSize = 1280
-                var pos = 0
-                while (pos < pcmBytes.size) {
-                    val end = (pos + chunkSize).coerceAtMost(pcmBytes.size)
-                    val chunk = okio.ByteString.of(*pcmBytes.copyOfRange(pos, end))
-                    webSocket.send(chunk)
-                    pos = end
-                    // 40ms 节流，避免压垮服务端
-                    try { Thread.sleep(40) } catch (_: InterruptedException) {}
-                }
-                // 发送结束标识
-                webSocket.send("end")
-                Log.i(TAG, "PCM stream end sent")
-            }
+        // 独立的发送协程作用域：onOpen 回调中启动流式发送协程，delay(40) 非阻塞
+        val sendJob = Job()
+        val sendScope = CoroutineScope(Dispatchers.IO + sendJob)
+        var wsRef: WebSocket? = null
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val json = JSONObject(text)
-                    val action = json.optString("action")
-                    val code = json.optString("code")
-                    when (action) {
-                        "started" -> {
-                            if (code == "0") {
-                                handshakeOk.set(true)
-                                Log.i(TAG, "Handshake ok")
-                            } else {
-                                errorRef.set("讯飞握手失败 code=$code desc=${json.optString("desc")}")
-                                done.countDown()
-                            }
-                        }
-                        "result" -> {
-                            if (code == "0") {
-                                val data = json.optString("data")
-                                val seg = parseRtasrResult(data)
-                                if (seg.isNotEmpty()) {
-                                    resultBuilder.append(seg)
-                                    Log.d(TAG, "Seg: $seg, total=${resultBuilder}")
-                                }
-                            } else {
-                                Log.w(TAG, "result code=$code desc=${json.optString("desc")}")
-                            }
-                        }
-                        "error" -> {
-                            errorRef.set("讯飞错误 code=$code desc=${json.optString("desc")}")
-                            done.countDown()
+        var outcome: SttOutcome = SttOutcome.Failed("讯飞转写未启动")
+        try {
+            outcome = withTimeout(30_000L) {
+                suspendCancellableCoroutine<SttOutcome> { cont ->
+                    var resumed = false
+                    fun safeResume(o: SttOutcome) {
+                        if (!resumed && cont.isActive) {
+                            resumed = true
+                            cont.resume(o)
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "onMessage parse failed: $text", e)
+
+                    val ws = HttpClient.client.newWebSocket(request, object : WebSocketListener() {
+                        override fun onOpen(webSocket: WebSocket, response: Response) {
+                            Log.i(TAG, "WebSocket onOpen, streaming PCM...")
+                            // 流式发送 PCM，每 1280 字节一帧；协程内 delay(40) 非阻塞
+                            sendScope.launch {
+                                val chunkSize = 1280
+                                var pos = 0
+                                while (pos < pcmBytes.size && isActive) {
+                                    val end = (pos + chunkSize).coerceAtMost(pcmBytes.size)
+                                    // 用 vararg ByteString.of 发送 PCM 切片。
+                                    // okio 3.x 把三参 of(ByteArray, Int, Int) 标记为 ERROR 级别 deprecation（强制迁移到扩展函数），
+                                    // 而扩展函数 toByteString 在当前 OkHttp 4.12 transitive 依赖下无法解析。
+                                    // 1280 字节切片的 copyOfRange 开销可忽略（每 40ms 一次）。
+                                    val chunk = ByteString.of(*pcmBytes.copyOfRange(pos, end))
+                                    webSocket.send(chunk)
+                                    pos = end
+                                    // 40ms 节流，避免压垮服务端
+                                    delay(40)
+                                }
+                                // 发送结束标识
+                                webSocket.send("end")
+                                Log.i(TAG, "PCM stream end sent")
+                            }
+                        }
+
+                        override fun onMessage(webSocket: WebSocket, text: String) {
+                            try {
+                                val json = JSONObject(text)
+                                val action = json.optString("action")
+                                val code = json.optString("code")
+                                when (action) {
+                                    "started" -> {
+                                        if (code == "0") {
+                                            handshakeOk.set(true)
+                                            Log.i(TAG, "Handshake ok")
+                                        } else {
+                                            safeResume(SttOutcome.Failed("讯飞握手失败 code=$code desc=${json.optString("desc")}"))
+                                        }
+                                    }
+                                    "result" -> {
+                                        if (code == "0") {
+                                            val data = json.optString("data")
+                                            val seg = parseRtasrResult(data)
+                                            if (seg.isNotEmpty()) {
+                                                resultBuilder.append(seg)
+                                                Log.d(TAG, "Seg: $seg, total=${resultBuilder}")
+                                            }
+                                        } else {
+                                            Log.w(TAG, "result code=$code desc=${json.optString("desc")}")
+                                        }
+                                    }
+                                    "error" -> {
+                                        safeResume(SttOutcome.Failed("讯飞错误 code=$code desc=${json.optString("desc")}"))
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "onMessage parse failed: $text", e)
+                            }
+                        }
+
+                        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                            Log.i(TAG, "WebSocket onClosed: $code $reason")
+                            if (!handshakeOk.get()) {
+                                safeResume(SttOutcome.Failed("讯飞握手未完成"))
+                            } else {
+                                val text = resultBuilder.toString().trim()
+                                Log.i(TAG, "Final: '$text'")
+                                safeResume(SttOutcome.Success(text))
+                            }
+                        }
+
+                        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                            Log.e(TAG, "WebSocket onFailure", t)
+                            safeResume(SttOutcome.Failed("WebSocket 异常: ${t.message?.take(60)}", t))
+                        }
+                    })
+                    wsRef = ws
+
+                    cont.invokeOnCancellation {
+                        sendScope.cancel()
+                        try { ws.cancel() } catch (_: Exception) {}
+                    }
                 }
             }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket onClosed: $code $reason")
-                done.countDown()
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket onFailure", t)
-                errorRef.set("WebSocket 异常: ${t.message?.take(60)}")
-                done.countDown()
-            }
-        })
-
-        try {
-            // 总超时 30s（10s 等握手 + 20s 等结果）
-            if (!done.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
-                ws.cancel()
-                return@withContext SttOutcome.Failed("讯飞转写超时")
-            }
-            val err = errorRef.get()
-            if (err != null) {
-                return@withContext SttOutcome.Failed(err)
-            }
-            if (!handshakeOk.get()) {
-                return@withContext SttOutcome.Failed("讯飞握手未完成")
-            }
-            val text = resultBuilder.toString().trim()
-            Log.i(TAG, "Final: '$text'")
-            SttOutcome.Success(text)
-        } catch (e: InterruptedException) {
-            ws.cancel()
-            SttOutcome.Failed("讯飞转写被中断", e)
+        } catch (e: TimeoutCancellationException) {
+            outcome = SttOutcome.Failed("讯飞转写超时")
         } finally {
-            try { ws.close(1000, "done") } catch (_: Exception) {}
+            sendScope.cancel()
+            try { wsRef?.close(1000, "done") } catch (_: Exception) {}
         }
+        outcome
     }
 
     override fun stop() {

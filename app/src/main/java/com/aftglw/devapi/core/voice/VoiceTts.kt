@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 语音合成（TTS）：封装 Android 原生 TextToSpeech。
  *
  * 用法：
- *   val tts = VoiceTts(ctx)
+ *   val tts = VoiceTts.getInstance(ctx)  // 单例，避免重复 init TextToSpeech
  *   tts.initSync()              // 初始化（同步等待引擎就绪，超时 3s）
  *   tts.speak("你好", utteranceId, onStart = {}, onDone = {})
  *   tts.stop()
@@ -129,5 +129,26 @@ class VoiceTts(ctx: Context) {
         try { tts.shutdown() } catch (_: Exception) {}
         this.tts = null
         ready.set(false)
+    }
+
+    companion object {
+        @Volatile
+        private var instance: VoiceTts? = null
+
+        /**
+         * 获取共享 [VoiceTts] 实例（单例）。
+         *
+         * [TextToSpeech] 初始化耗时数百毫秒，全局复用避免每次进入聊天页 / 切换 TTS 引擎时
+         * 重复 init。使用 applicationContext 持有，避免 Activity 泄漏，可长期保留。
+         *
+         * 若前一个实例已 [shutdown]（tts 已释放），会自动创建新实例。
+         */
+        fun getInstance(ctx: Context): VoiceTts {
+            instance?.let { if (it.tts != null) return it }
+            return synchronized(this) {
+                instance?.let { if (it.tts != null) return it }
+                VoiceTts(ctx.applicationContext).also { instance = it }
+            }
+        }
     }
 }

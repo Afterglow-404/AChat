@@ -3,6 +3,7 @@ package com.aftglw.devapi.network
 import android.content.Context
 import com.aftglw.devapi.core.security.SecureKeyStore
 import com.aftglw.devapi.model.ChatMessage
+import com.aftglw.devapi.tools.ToolRegistry
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,9 +16,31 @@ class OpenAiService(context: Context) : AiService {
     /** 当前在飞的 OkHttp Call；供 [cancel] 使用 */
     @Volatile private var currentCall: okhttp3.Call? = null
 
+    /** token 计数内存累加缓冲：减少 SharedPreferences 磁盘写入次数 */
+    private var pendingTokenWrites = 0
+    @Volatile private var pendingTokenInDelta = 0
+    @Volatile private var pendingTokenOutDelta = 0
+
     override fun cancel() {
         currentCall?.cancel()
         currentCall = null
+    }
+
+    /** 批量 flush 累积的 token 计数到 SharedPreferences */
+    private fun flushTokenCounts() {
+        if (pendingTokenWrites == 0) return
+        prefs.edit()
+            .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pendingTokenInDelta)
+            .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + pendingTokenOutDelta)
+            .apply()
+        pendingTokenInDelta = 0
+        pendingTokenOutDelta = 0
+        pendingTokenWrites = 0
+    }
+
+    /** 退出前调用，确保累积 token 计数落盘 */
+    fun shutdown() {
+        flushTokenCounts()
     }
 
     /** 检测当前配置是否指向 DeepSeek API */
@@ -28,7 +51,7 @@ class OpenAiService(context: Context) : AiService {
     private fun isDeepSeekThinking(): Boolean =
         isDeepSeek() && prefs.getBoolean("ai_deepseek_thinking", false)
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
+    override suspend fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "gpt-3.5-turbo") ?: "gpt-3.5-turbo"
@@ -36,84 +59,86 @@ class OpenAiService(context: Context) : AiService {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
-            runBlocking {
-                HttpRetry.retrySuspend("OpenAi", maxRetries = requestMaxRetries(baseUrl)) {
-                    val messages = buildMessages(history, userMessage, systemPrompt)
-                    val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
-                    val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
-                        "Authorization" to "Bearer $apiKey")
-                    val call = HttpClient.clientFor(baseUrl).newCall(request)
-                    currentCall = call
-                    val response = try {
-                        call.execute()
-                    } finally {
-                        currentCall = null
-                    }
-                    val respBody = try {
-                        if (!response.isSuccessful) {
-                            val errBody = response.body?.string() ?: ""
-                            throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
-                        }
-                        response.body?.string() ?: ""
-                    } finally {
-                        response.close()
-                    }
-
-                    val json = JSONObject(respBody)
-                    val choices = json.getJSONArray("choices")
-                    if (choices.length() > 0) {
-                        val msgObj = choices.getJSONObject(0).getJSONObject("message")
-                        val reasoningContent = msgObj.optString("reasoning_content", "")
-                        if (reasoningContent.isNotEmpty()) {
-                            android.util.Log.d("OpenAi", "DeepSeek reasoning (${reasoningContent.length} chars)")
-                        }
-                        var reply = msgObj.optString("content", "").trim()
-                        val toolCalls = msgObj.optJSONArray("tool_calls")
-                        if (toolCalls != null && toolCalls.length() > 0) {
-                            if (toolCallsOut != null) {
-                                for (j in 0 until toolCalls.length()) {
-                                    val tc = toolCalls.getJSONObject(j)
-                                    val func = tc.getJSONObject("function")
-                                    val id = tc.optString("id", "")
-                                    toolCallsOut.add(com.aftglw.devapi.network.ToolCall(
-                                        name = func.getString("name"),
-                                        arguments = func.optString("arguments", "{}"),
-                                        id = id
-                                    ))
-                                }
-                            } else {
-                                val sb = StringBuilder(reply)
-                                for (j in 0 until toolCalls.length()) {
-                                    val func = toolCalls.getJSONObject(j).getJSONObject("function")
-                                    sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
-                                }
-                                reply = sb.toString().trim()
-                            }
-                        }
-                        val usage = json.optJSONObject("usage")
-                        if (usage != null) {
-                            val pt = usage.optInt("prompt_tokens", 0)
-                            val ct = usage.optInt("completion_tokens", 0)
-                            prefs.edit()
-                                .putInt("last_tokens_in", pt)
-                                .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pt)
-                                .putInt("last_tokens_out", ct)
-                                .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + ct)
-                                .apply()
-                        } else {
-                            val estIn = estimateTokenCount(systemPrompt, model) + messages.length() * 4 +
-                                estimateTokenCount(userMessage, model)
-                            val estOut = reply.length / 4
-                            prefs.edit()
-                                .putInt("last_tokens_in", estIn)
-                                .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
-                                .putInt("last_tokens_out", estOut)
-                                .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + estOut)
-                                .apply()
-                        }
-                        reply
-                    } else null
+            HttpRetry.retrySuspend("OpenAi", maxRetries = requestMaxRetries(baseUrl)) {
+                val messages = buildMessages(history, userMessage, systemPrompt)
+                val body = buildRequestBody(model, messages, streaming = false, tools = buildToolsArray())
+                val request = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
+                    "Authorization" to "Bearer $apiKey")
+                val call = HttpClient.clientFor(baseUrl).newCall(request)
+                currentCall = call
+                val response = try {
+                    call.execute()
+                } finally {
+                    currentCall = null
                 }
+                val respBody = try {
+                    if (!response.isSuccessful) {
+                        val errBody = response.body?.string() ?: ""
+                        throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
+                    }
+                    response.body?.string() ?: ""
+                } finally {
+                    response.close()
+                }
+
+                val json = JSONObject(respBody)
+                val choices = json.getJSONArray("choices")
+                if (choices.length() > 0) {
+                    val msgObj = choices.getJSONObject(0).getJSONObject("message")
+                    val reasoningContent = msgObj.optString("reasoning_content", "")
+                    if (reasoningContent.isNotEmpty()) {
+                        android.util.Log.d("OpenAi", "DeepSeek reasoning (${reasoningContent.length} chars)")
+                    }
+                    var reply = msgObj.optString("content", "").trim()
+                    val toolCalls = msgObj.optJSONArray("tool_calls")
+                    if (toolCalls != null && toolCalls.length() > 0) {
+                        if (toolCallsOut != null) {
+                            for (j in 0 until toolCalls.length()) {
+                                val tc = toolCalls.getJSONObject(j)
+                                val func = tc.getJSONObject("function")
+                                val id = tc.optString("id", "")
+                                toolCallsOut.add(com.aftglw.devapi.network.ToolCall(
+                                    name = func.getString("name"),
+                                    arguments = func.optString("arguments", "{}"),
+                                    id = id
+                                ))
+                            }
+                        } else {
+                            val sb = StringBuilder(reply)
+                            for (j in 0 until toolCalls.length()) {
+                                val func = toolCalls.getJSONObject(j).getJSONObject("function")
+                                sb.append("【tool:${func.getString("name")} ${func.optString("arguments", "{}")}】")
+                            }
+                            reply = sb.toString().trim()
+                        }
+                    }
+                    val usage = json.optJSONObject("usage")
+                    if (usage != null) {
+                        val pt = usage.optInt("prompt_tokens", 0)
+                        val ct = usage.optInt("completion_tokens", 0)
+                        prefs.edit()
+                            .putInt("last_tokens_in", pt)
+                            .putInt("last_tokens_out", ct)
+                            .apply()
+                        pendingTokenInDelta += pt
+                        pendingTokenOutDelta += ct
+                        pendingTokenWrites++
+                        if (pendingTokenWrites >= 10) flushTokenCounts()
+                    } else {
+                        val estIn = estimateTokenCount(systemPrompt, model) + messages.length() * 4 +
+                            estimateTokenCount(userMessage, model)
+                        val estOut = reply.length / 4
+                        prefs.edit()
+                            .putInt("last_tokens_in", estIn)
+                            .putInt("last_tokens_out", estOut)
+                            .apply()
+                        pendingTokenInDelta += estIn
+                        pendingTokenOutDelta += estOut
+                        pendingTokenWrites++
+                        if (pendingTokenWrites >= 10) flushTokenCounts()
+                    }
+                    reply
+                } else null
             }
         } catch (e: Exception) {
             // 协程取消透传：当外部 cancel 触发 call.cancel() 时，会抛 IOException("Canceled")
@@ -140,7 +165,8 @@ class OpenAiService(context: Context) : AiService {
 
         try {
             val result = runBlocking {
-                HttpRetry.retrySuspend("OpenAi", maxRetries = requestMaxRetries(baseUrl)) {
+                // 流式失败不重试，避免半句话+重新开始的 UX 问题
+                HttpRetry.retrySuspendNoRetry("OpenAi-stream") {
                     val messages = buildMessages(history, userMessage, systemPrompt)
                     val body = buildRequestBody(model, messages, streaming = true, tools = buildToolsArray())
                     val httpReq = HttpClient.postJson("$baseUrl/chat/completions", body.toString(),
@@ -278,22 +304,8 @@ class OpenAiService(context: Context) : AiService {
         if (tools != null) put("tools", tools)
     }
 
-    private fun buildToolsArray(): org.json.JSONArray? {
-        val allTools = com.aftglw.devapi.tools.ToolRegistry.getAll()
-        if (allTools.isEmpty()) return null
-        return org.json.JSONArray().apply {
-            for (tool in allTools) {
-                put(org.json.JSONObject().apply {
-                    put("type", "function")
-                    put("function", org.json.JSONObject().apply {
-                        put("name", tool.name)
-                        put("description", tool.description)
-                        put("parameters", tool.inputSchema)
-                    })
-                })
-            }
-        }
-    }
+    private fun buildToolsArray(): org.json.JSONArray? =
+        ToolRegistry.getToolsJson().takeIf { it.length() > 0 }
 
     private fun buildMessages(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String
@@ -350,13 +362,16 @@ class OpenAiService(context: Context) : AiService {
         }
     }
 
-    /** 读取图片文件并编码为 base64；失败返回 null */
+    /** 读取图片文件并流式编码为 base64；失败返回 null（避免大图占用 2x 内存） */
     private fun encodeImageBase64(path: String): String? {
         return try {
             val file = java.io.File(path)
             if (!file.exists() || file.length() == 0L) return null
-            val bytes = file.readBytes()
-            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val out = java.io.ByteArrayOutputStream(file.length().toInt().coerceAtMost(1024 * 1024))
+            android.util.Base64OutputStream(out, android.util.Base64.NO_WRAP).use { b64 ->
+                file.inputStream().use { it.copyTo(b64, 64 * 1024) }
+            }
+            out.toString(Charsets.US_ASCII.name())
         } catch (_: Exception) { null }
     }
 }

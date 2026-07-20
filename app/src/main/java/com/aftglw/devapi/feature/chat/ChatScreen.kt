@@ -73,13 +73,16 @@ import com.aftglw.devapi.network.AiServiceFactory
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 private fun now() = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
 
-data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null, val voicePath: String? = null, val voiceDuration: Int = 0, val voiceTranscript: String? = null, val imagePath: String? = null)
+data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null, val voicePath: String? = null, val voiceDuration: Int = 0, val voiceTranscript: String? = null, val imagePath: String? = null, val id: String = UUID.randomUUID().toString())
 
 private sealed class ChatSubPage {
     data object Chat : ChatSubPage()
@@ -115,18 +118,25 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
 
     val chatBgUri = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         .getString("chat_bg_uri", "")?.takeIf { it.isNotEmpty() }
-    val chatBgBitmap = remember(chatBgUri) {
-        chatBgUri?.let {
-            try { BitmapFactory.decodeFile(it)?.asImageBitmap() }
-            catch (_: Exception) { null }
+    // Task 2.6: 聊天背景改异步解码 + 下采样，避免主线程解码原图导致卡顿 / OOM
+    var chatBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(chatBgUri) {
+        val path = chatBgUri ?: return@LaunchedEffect
+        val dm = ctx.resources.displayMetrics
+        chatBgBitmap = withContext(Dispatchers.IO) {
+            com.aftglw.devapi.core.storage.decodeSampledBitmap(path, dm.widthPixels, dm.heightPixels)?.asImageBitmap()
         }
     }
 
     LaunchedEffect(Unit) {
-        MemoryStore.init(ctx)
-        MoodDetector.init(ctx, name)
-        com.aftglw.devapi.tools.ToolRegistry.init(ctx)
-        com.aftglw.devapi.core.sticker.StickerEngine.init(ctx)
+        // Task 1.9: 并行初始化四个模块（切 IO），全部完成后串行加载历史
+        val initDeferreds = listOf(
+            async(Dispatchers.IO) { MemoryStore.init(ctx) },
+            async(Dispatchers.IO) { MoodDetector.init(ctx, name) },
+            async(Dispatchers.IO) { com.aftglw.devapi.tools.ToolRegistry.init(ctx) },
+            async(Dispatchers.IO) { com.aftglw.devapi.core.sticker.StickerEngine.init(ctx) }
+        )
+        initDeferreds.awaitAll()
         // 一次性加载历史 + 触发归档检查（异步）
         val saved = ChatHistory.loadEntries(ctx, chatKey)
         bubbles.clear()
@@ -211,21 +221,21 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 } catch (_: Exception) {} /* 非关键 */
             }
         }
-        ChatHistory.saveEntries(
-            ctx,
-            chatKey,
-            bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
-                com.aftglw.devapi.core.storage.ChatHistoryEntry(
-                    text = it.text,
-                    isMe = it.isMe,
-                    time = it.time,
-                    imagePath = it.imagePath,
-                    voicePath = it.voicePath,
-                    voiceDuration = it.voiceDuration,
-                    voiceTranscript = it.voiceTranscript
-                )
-            }
-        )
+        // 先在主线程取出快照（避免协程内 bubbles 被并发修改），再切 IO 持久化
+        val entriesToSave = bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
+            com.aftglw.devapi.core.storage.ChatHistoryEntry(
+                text = it.text,
+                isMe = it.isMe,
+                time = it.time,
+                imagePath = it.imagePath,
+                voicePath = it.voicePath,
+                voiceDuration = it.voiceDuration,
+                voiceTranscript = it.voiceTranscript
+            )
+        }
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            ChatHistory.saveEntries(ctx, chatKey, entriesToSave)
+        }
     }
 
         // 长时记忆 + 人设浓缩：每 10 轮提取
@@ -293,9 +303,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     // 统一的用户消息发送逻辑：text 传入实际文字（给 AI），voiceBubble/imageBubble 非空时用对应气泡展示
     fun sendUserMessage(text: String, voiceBubble: Bubble? = null, imageBubble: Bubble? = null) {
         if (waiting) return
-        // 离线检测：非本地模式下若网络不可用，直接提示并不发送
-        val isLocalMode = prefs.getString("ai_protocol", "auto") == "local"
-        if (!isLocalMode && !com.aftglw.devapi.network.NetworkMonitor.isOnline) {
+        // 离线检测：网络不可用时直接提示并不发送（本地 GGUF 推理已下线，无需跳过）
+        if (!com.aftglw.devapi.network.NetworkMonitor.isOnline) {
             android.widget.Toast.makeText(ctx, com.aftglw.devapi.network.AiError.Offline.message, android.widget.Toast.LENGTH_SHORT).show()
             return
         }
@@ -646,7 +655,7 @@ fun ChatContent(
     val recorder = remember { VoiceRecorder(ctx) }
     val sttHelper = remember { VoiceSttHelper(ctx) }
     val voicePlayer = remember { VoicePlayer(ctx) }
-    val tts = remember { VoiceTts(ctx) }
+    val tts = remember { VoiceTts.getInstance(ctx) }
     val cloudTts = remember { CloudTtsService(ctx) }
     val ttsEngine = remember { prefs.getString("tts_engine", "local") ?: "local" }
     val sttEngine = remember { prefs.getString("stt_engine", "system") ?: "system" }
@@ -700,10 +709,15 @@ fun ChatContent(
     // 图片选择器：从相册选图，压缩后保存到 filesDir/chat_images/
     var pendingImagePath by remember { mutableStateOf<String?>(null) }
     var plusMenuExpanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(ctx, uri) { file ->
-                pendingImagePath = file.absolutePath
+            scope.launch {
+                com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(
+                    ctx, uri,
+                    onSaved = { file -> pendingImagePath = file.absolutePath },
+                    onError = { msg -> Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+                )
             }
         }
     }
@@ -716,8 +730,12 @@ fun ChatContent(
         val uri = pendingCameraUri
         if (success && uri != null) {
             // 拍照成功：把 Uri 内容压缩到内部存储
-            com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(ctx, uri) { file ->
-                pendingImagePath = file.absolutePath
+            scope.launch {
+                com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(
+                    ctx, uri,
+                    onSaved = { file -> pendingImagePath = file.absolutePath },
+                    onError = { msg -> Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+                )
             }
         }
         pendingCameraUri = null
@@ -743,7 +761,6 @@ fun ChatContent(
             launchCamera()
         }
     }
-    val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxSize()) {
         if (chatBgBitmap != null) {
             Image(chatBgBitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -764,14 +781,17 @@ fun ChatContent(
                         val resolvedAvatar = remember(characterFolder, MoodDetector.lastMood) {
                             com.aftglw.devapi.core.mood.MoodAvatarMapper.resolve(characterFolder, MoodDetector.lastMood) ?: avatarUri
                         }
-                        if (resolvedAvatar.isNotEmpty()) {
-                            val topBmp = remember(resolvedAvatar) {
+                        // Task 2.5: 头像异步加载（BuiltInCharacterLoader.loadAvatarBitmap 已改 suspend，
+                        // 内置 LruCache 命中时直接返回）
+                        var topBmp by remember { mutableStateOf<ImageBitmap?>(null) }
+                        LaunchedEffect(resolvedAvatar) {
+                            topBmp = if (resolvedAvatar.isNotEmpty()) {
                                 com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, resolvedAvatar)?.asImageBitmap()
-                            }
-                            if (topBmp != null) {
-                                Image(topBmp, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                                Spacer(Modifier.width(8.dp))
-                            }
+                            } else null
+                        }
+                        if (topBmp != null) {
+                            Image(topBmp!!, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                            Spacer(Modifier.width(8.dp))
                         }
                         Text(
                             if (waiting && bubbles.isNotEmpty()) "对方正在输入..." else name,
@@ -805,7 +825,7 @@ fun ChatContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                itemsIndexed(bubbles, key = { i, _ -> i }) { idx, b ->
+                itemsIndexed(bubbles, key = { _, b -> b.id }) { idx, b ->
                     var menuExpanded by remember { mutableStateOf(false) }
                     var showImagePreview by remember { mutableStateOf(false) }
                     val isNew = bubbles.size - idx <= 1
@@ -823,15 +843,15 @@ fun ChatContent(
                                 val bubbleAvatar = remember(characterFolder, MoodDetector.lastMood) {
                                     com.aftglw.devapi.core.mood.MoodAvatarMapper.resolve(characterFolder, MoodDetector.lastMood) ?: avatarUri
                                 }
-                                if (bubbleAvatar.isNotEmpty()) {
-                                    val bmp = remember(bubbleAvatar) {
+                                // Task 2.5: 头像异步加载（BuiltInCharacterLoader.loadAvatarBitmap 已改 suspend）
+                                var bmp by remember { mutableStateOf<ImageBitmap?>(null) }
+                                LaunchedEffect(bubbleAvatar) {
+                                    bmp = if (bubbleAvatar.isNotEmpty()) {
                                         com.aftglw.devapi.core.character.BuiltInCharacterLoader.loadAvatarBitmap(ctx, bubbleAvatar)?.asImageBitmap()
-                                    }
-                                    if (bmp != null) {
-                                        Image(bmp, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                                    } else {
-                                        Text(name.take(1), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    } else null
+                                }
+                                if (bmp != null) {
+                                    Image(bmp!!, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                                 } else {
                                     Text(name.take(1), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 }
@@ -903,23 +923,30 @@ fun ChatContent(
                                     DropdownMenuItem(
                                         text = { Text("保存到相册") },
                                         onClick = {
-                                            try {
-                                                val src = java.io.File(b.imagePath)
-                                                if (src.exists()) {
-                                                    val bis = java.io.BufferedInputStream(java.io.FileInputStream(src))
-                                                    val bitmap = android.graphics.BitmapFactory.decodeStream(bis)
-                                                    bis.close()
-                                                    if (bitmap != null) {
-                                                        android.provider.MediaStore.Images.Media.insertImage(
-                                                            ctx.contentResolver, bitmap, "wisp_${System.currentTimeMillis()}.jpg", "Wisp chat image"
-                                                        )
-                                                        Toast.makeText(ctx, "已保存到相册", Toast.LENGTH_SHORT).show()
+                                            menuExpanded = false
+                                            // Task 1.10: Bitmap 解码 + MediaStore 写入切 IO，避免阻塞主线程
+                                            scope.launch(Dispatchers.IO) {
+                                                try {
+                                                    val src = java.io.File(b.imagePath)
+                                                    if (src.exists()) {
+                                                        val bis = java.io.BufferedInputStream(java.io.FileInputStream(src))
+                                                        val bitmap = android.graphics.BitmapFactory.decodeStream(bis)
+                                                        bis.close()
+                                                        if (bitmap != null) {
+                                                            android.provider.MediaStore.Images.Media.insertImage(
+                                                                ctx.contentResolver, bitmap, "wisp_${System.currentTimeMillis()}.jpg", "Wisp chat image"
+                                                            )
+                                                            withContext(Dispatchers.Main) {
+                                                                Toast.makeText(ctx, "已保存到相册", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    }
+                                                } catch (_: Exception) {
+                                                    withContext(Dispatchers.Main) {
+                                                        Toast.makeText(ctx, "保存失败", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
-                                            } catch (_: Exception) {
-                                                Toast.makeText(ctx, "保存失败", Toast.LENGTH_SHORT).show()
                                             }
-                                            menuExpanded = false
                                         }
                                     )
                                 }
@@ -1146,15 +1173,21 @@ fun ChatContent(
                                 DropdownMenuItem(
                                     text = { Text("收藏") },
                                     onClick = {
-                                        val existing = com.aftglw.devapi.core.memory.MemoryStore.search(ctx, b.text, 1, "starred:$name")
-                                        if (existing.any { it.text == b.text }) {
-                                            com.aftglw.devapi.core.memory.MemoryStore.deleteByText(b.text, "starred:$name")
-                                            android.widget.Toast.makeText(ctx, "已取消收藏", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            com.aftglw.devapi.core.memory.MemoryStore.save(ctx, b.text, "starred:$name")
-                                            android.widget.Toast.makeText(ctx, "已收藏", Toast.LENGTH_SHORT).show()
-                                        }
                                         menuExpanded = false
+                                        scope.launch(Dispatchers.IO) {
+                                            val existing = com.aftglw.devapi.core.memory.MemoryStore.search(ctx, b.text, 1, "starred:$name")
+                                            if (existing.any { it.text == b.text }) {
+                                                com.aftglw.devapi.core.memory.MemoryStore.deleteByText(b.text, "starred:$name")
+                                                withContext(Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(ctx, "已取消收藏", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } else {
+                                                com.aftglw.devapi.core.memory.MemoryStore.save(ctx, b.text, "starred:$name")
+                                                withContext(Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(ctx, "已收藏", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
                                     }
                                 )
                             }

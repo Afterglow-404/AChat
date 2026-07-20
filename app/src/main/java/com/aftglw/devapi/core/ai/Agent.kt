@@ -67,13 +67,13 @@ class Agent(
                     toolCallsOut = nativeToolCalls
                 )
             } else {
-                val reply = withContext(Dispatchers.IO) {
-                    service.sendMessage(
-                        loopHistory.toList(), currentMsg, systemPrompt,
-                        onError = { err -> lastError = err },
-                        toolCallsOut = nativeToolCalls
-                    )
-                }
+                // service.sendMessage 自 Phase 3 起改为 suspend，内部已用 HttpRetry.retrySuspend；
+                // Agent.prompt() 调用方已在 Dispatchers.IO 协程中，此处无需再包 withContext(IO)
+                val reply = service.sendMessage(
+                    loopHistory.toList(), currentMsg, systemPrompt,
+                    onError = { err -> lastError = err },
+                    toolCallsOut = nativeToolCalls
+                )
                 if (reply != null) sb.append(reply)
                 latch.complete(if (reply.isNullOrEmpty()) null else reply)
             }

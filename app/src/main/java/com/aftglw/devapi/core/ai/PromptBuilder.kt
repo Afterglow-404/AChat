@@ -9,7 +9,7 @@ import android.content.Context
 object PromptBuilder {
     private val DATE_FMT = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
 
-    fun build(
+    suspend fun build(
         ctx: Context,
         name: String,
         persona: String,

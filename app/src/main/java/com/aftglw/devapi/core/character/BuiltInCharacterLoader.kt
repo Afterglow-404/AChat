@@ -1,8 +1,13 @@
 package com.aftglw.devapi.core.character
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
+import android.util.LruCache
 import com.aftglw.devapi.model.ChatItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.yaml.snakeyaml.Yaml
 
 /**
@@ -20,6 +25,17 @@ object BuiltInCharacterLoader {
     private const val TAG = "BuiltInChar"
     private const val ASSETS_ROOT = "characters"
     const val ASSET_PREFIX = "asset://"
+
+    /** listAll 内存缓存，避免每次扫描 assets 目录。内置角色不可变，无需失效。 */
+    @Volatile
+    private var listAllCache: List<ChatItem>? = null
+
+    /**
+     * 头像 Bitmap LruCache（容量 16MB）。
+     * LruCache 内部已用 synchronized 保护，多线程读写安全，无需额外同步。
+     * key = 头像 uri（asset:// 伪协议或文件路径），value = 解码后的 Bitmap。
+     */
+    private val avatarCache = LruCache<String, Bitmap>(16 * 1024 * 1024)
 
     /** assets/characters 下的角色文件夹列表 */
     fun listFolders(ctx: Context): List<String> {
@@ -68,9 +84,12 @@ object BuiltInCharacterLoader {
         }
     }
 
-    /** 列出全部内置角色 */
+    /** 列出全部内置角色（带内存缓存） */
     fun listAll(ctx: Context): List<ChatItem> {
-        return listFolders(ctx).mapNotNull { load(ctx, it) }
+        listAllCache?.let { return it }
+        val result = listFolders(ctx).mapNotNull { load(ctx, it) }
+        listAllCache = result
+        return result
     }
 
     /** 获取某个角色的情绪头像路径（moodName 为头像文件名，如"高兴"/"伤心"） */
@@ -89,17 +108,28 @@ object BuiltInCharacterLoader {
     /**
      * 统一头像加载：支持 asset:// 伪协议和普通文件路径。
      * 返回 Bitmap 或 null（失败时调用方用文字头像兜底）。
+     *
+     * Task 2.5: 改为 suspend，先查 [avatarCache]；未命中时切到 [Dispatchers.IO]
+     * 解码后写入缓存再返回。LruCache 内部已 synchronized，多线程安全。
      */
-    fun loadAvatarBitmap(ctx: Context, uri: String): android.graphics.Bitmap? {
+    suspend fun loadAvatarBitmap(ctx: Context, uri: String): Bitmap? {
         if (uri.isEmpty()) return null
-        return try {
-            if (isAssetUri(uri)) {
-                val path = assetUriToPath(uri)
-                ctx.assets.open(path).use { android.graphics.BitmapFactory.decodeStream(it) }
-            } else {
-                android.graphics.BitmapFactory.decodeFile(uri)
-            }
-        } catch (_: Exception) { null }
+        // 先查内存缓存：命中直接返回，避免重复解码
+        avatarCache.get(uri)?.let { return it }
+        // 未命中：切 IO 线程解码，避免阻塞主线程
+        val bmp = withContext(Dispatchers.IO) {
+            try {
+                if (isAssetUri(uri)) {
+                    val path = assetUriToPath(uri)
+                    ctx.assets.open(path).use { BitmapFactory.decodeStream(it) }
+                } else {
+                    BitmapFactory.decodeFile(uri)
+                }
+            } catch (_: Exception) { null }
+        } ?: return null
+        // 写入缓存供后续复用
+        avatarCache.put(uri, bmp)
+        return bmp
     }
 
     /** 默认头像：优先 "正常.webp"，其次 "头像.webp"，最后用 "高兴.webp" */

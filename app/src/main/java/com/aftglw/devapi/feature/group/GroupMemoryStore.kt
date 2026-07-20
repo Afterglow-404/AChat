@@ -41,13 +41,13 @@ object GroupMemoryStore {
     // ── 成员个人记忆 ──
 
     /** 保存一条记忆到 (groupId, memberName) 的个人命名空间 */
-    fun save(ctx: Context, groupId: String, memberName: String, text: String) {
+    suspend fun save(ctx: Context, groupId: String, memberName: String, text: String) {
         if (text.isBlank()) return
         MemoryStore.save(ctx, text, topicFor(groupId, memberName))
     }
 
     /** 检索 (groupId, memberName) 命名空间下与 [query] 最相关的 topK 条个人记忆 */
-    fun search(
+    suspend fun search(
         ctx: Context,
         groupId: String,
         memberName: String,
@@ -61,13 +61,13 @@ object GroupMemoryStore {
     // ── 群级共享记忆 ──
 
     /** 保存一条记忆到群级共享命名空间（所有成员可见） */
-    fun saveShared(ctx: Context, groupId: String, text: String) {
+    suspend fun saveShared(ctx: Context, groupId: String, text: String) {
         if (text.isBlank()) return
         MemoryStore.save(ctx, text, sharedTopicFor(groupId))
     }
 
     /** 检索群级共享记忆 */
-    fun searchShared(
+    suspend fun searchShared(
         ctx: Context,
         groupId: String,
         query: String,
@@ -86,7 +86,7 @@ object GroupMemoryStore {
      * @param mentionedMember 被用户 @ 的成员名（可为空）
      * @param text            用户输入文本
      */
-    fun saveUserMessage(ctx: Context, groupId: String, mentionedMember: String?, text: String) {
+    suspend fun saveUserMessage(ctx: Context, groupId: String, mentionedMember: String?, text: String) {
         if (text.isBlank()) return
         // 1. 群级共享：所有成员都能检索到
         saveShared(ctx, groupId, text)
@@ -101,7 +101,7 @@ object GroupMemoryStore {
      *
      * 用于 callMember 时给当前发言成员注入相关历史上下文。
      */
-    fun searchForMember(
+    suspend fun searchForMember(
         ctx: Context,
         groupId: String,
         memberName: String,

@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.chat
 import com.aftglw.devapi.core.memory.MemoryStore
+import com.aftglw.devapi.core.memory.MemoryItem
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 记忆页 — 搜索和管理角色的全部记忆。
@@ -27,7 +32,13 @@ import com.aftglw.devapi.ui.theme.*
 fun MemoryPage(name: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
     var query by remember { mutableStateOf("") }
-    var items by remember { mutableStateOf(MemoryStore.search(ctx, "", 100, "$name")) }
+    var items by remember { mutableStateOf<List<MemoryItem>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    // 用于在搜索输入变化时取消上一次未完成的搜索，避免乱序覆盖
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+    LaunchedEffect(name) {
+        items = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "", 100, "$name") }
+    }
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
             title = { Text("🧠 全部记忆", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
@@ -36,7 +47,14 @@ fun MemoryPage(name: String, onBack: () -> Unit) {
             modifier = Modifier.statusBarsPadding())
         HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
         OutlinedTextField(
-            value = query, onValueChange = { q -> query = q; items = MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name") },
+            value = query, onValueChange = { q ->
+                query = q
+                searchJob?.cancel()
+                searchJob = scope.launch(Dispatchers.IO) {
+                    val results = MemoryStore.search(ctx, q.ifBlank { "" }, 100, "$name")
+                    withContext(Dispatchers.Main) { items = results }
+                }
+            },
             modifier = Modifier.fillMaxWidth().padding(12.dp), placeholder = { Text("搜索记忆...", fontSize = 14.sp) },
             singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AchatTheme.colors.primary, unfocusedBorderColor = AchatTheme.colors.divider, focusedContainerColor = AchatTheme.colors.surface, unfocusedContainerColor = AchatTheme.colors.surface)
@@ -54,8 +72,11 @@ fun MemoryPage(name: String, onBack: () -> Unit) {
                             Text(m.text, fontSize = 13.sp, color = AchatTheme.colors.onSurface, maxLines = 3)
                         }
                         IconButton(onClick = {
-                            MemoryStore.deleteByText(m.text, "$name")
-                            items = MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
+                            scope.launch(Dispatchers.IO) {
+                                MemoryStore.deleteByText(m.text, "$name")
+                                val results = MemoryStore.search(ctx, query.ifBlank { "" }, 100, "$name")
+                                withContext(Dispatchers.Main) { items = results }
+                            }
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "删除", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
                         }

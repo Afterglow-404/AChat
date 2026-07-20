@@ -3,7 +3,6 @@ package com.aftglw.devapi.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
-import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,6 +38,8 @@ import com.aftglw.devapi.feature.group.GroupChatManager
 import com.aftglw.devapi.model.GroupChat
 import com.aftglw.devapi.ui.utils.AnimationUtils
 import com.aftglw.devapi.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val WeChatTheme = lightColorScheme(
     primary = Color(0xFF07C160),
@@ -104,10 +105,13 @@ fun WeChatApp() {
     })
 
     val bgPath = prefs.getString("main_bg_uri", "")?.takeIf { it.isNotEmpty() }
-    val bgBitmap = remember(bgPath) {
-        bgPath?.let {
-            try { BitmapFactory.decodeFile(it)?.asImageBitmap() }
-            catch (_: Exception) { null }
+    // Task 2.6: 主背景改异步解码 + 下采样，避免主线程解码原图导致卡顿 / OOM
+    var bgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(bgPath) {
+        val path = bgPath ?: return@LaunchedEffect
+        val dm = ctx.resources.displayMetrics
+        bgBitmap = withContext(Dispatchers.IO) {
+            com.aftglw.devapi.core.storage.decodeSampledBitmap(path, dm.widthPixels, dm.heightPixels)?.asImageBitmap()
         }
     }
 

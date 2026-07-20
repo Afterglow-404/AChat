@@ -27,7 +27,6 @@ fun DebugPage(
     debug: Boolean, onDebugChange: (Boolean) -> Unit,
     moodEnabled: Boolean, onMoodEnabledChange: (Boolean) -> Unit,
     affinityEnabled: Boolean, onAffinityEnabledChange: (Boolean) -> Unit,
-    localMode: Boolean, onLocalModeChange: (Boolean) -> Unit,
     openBookMode: Boolean, onOpenBookModeChange: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
@@ -67,7 +66,6 @@ fun DebugPage(
         }
         Spacer(Modifier.height(8.dp))
         ToggleRow("好感度系统", "AI 语气随相处变化(待完善)", affinityEnabled, onAffinityEnabledChange)
-        ToggleRow("本地模式", "用本地 Qwen 模型处理对话（需提前放置模型文件）", localMode, onLocalModeChange)
         Spacer(Modifier.height(8.dp))
         // 语音 TTS 设置
         var ttsEnabled by remember { mutableStateOf(sysPrefs.getBoolean("tts_enabled", false)) }

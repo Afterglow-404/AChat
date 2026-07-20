@@ -64,7 +64,6 @@ private sealed class SettingsPage {
     data object About : SettingsPage()
     data object McpServers : SettingsPage()
     data object ToolMarket : SettingsPage()
-    data object LocalModel : SettingsPage()
     data object ToolSecurity : SettingsPage()
     data object DataManagement : SettingsPage()
     data object MoodModel : SettingsPage()
@@ -128,7 +127,6 @@ private fun SettingsRoot(onBack: () -> Unit) {
     var hitokotoType by remember { mutableStateOf(prefs.getString("hitokoto_type", "") ?: "") }
     var moodEnabled by remember { mutableStateOf(prefs.getBoolean("mood_enabled", false)) }
     var affinityEnabled by remember { mutableStateOf(prefs.getBoolean("affinity_enabled", false)) }
-    var localMode by remember { mutableStateOf(prefs.getBoolean("local_mode", false)) }
     var openBookMode by remember { mutableStateOf(prefs.getBoolean("open_book_mode", false)) }
     LaunchedEffect(customFont) { typography.value = if (customFont) buildCustomTypography() else Typography() }
 
@@ -262,13 +260,11 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         },
                         moodEnabled, { moodEnabled = it; prefs.edit().putBoolean("mood_enabled", it).apply() },
                         affinityEnabled, { affinityEnabled = it; prefs.edit().putBoolean("affinity_enabled", it).apply() },
-                        localMode, { localMode = it; prefs.edit().putBoolean("local_mode", it).apply(); if (!it) com.aftglw.devapi.network.AiServiceFactory.unloadLocal() },
                         openBookMode, { openBookMode = it; prefs.edit().putBoolean("open_book_mode", it).apply() }
                     )
                     is SettingsPage.About -> AboutPage(onBack = goBack)
                     is SettingsPage.McpServers -> McpServersPage(onBack = goBack)
                     is SettingsPage.ToolMarket -> ToolMarketPage(onBack = goBack)
-                    is SettingsPage.LocalModel -> LocalModelPage(onBack = goBack)
                     is SettingsPage.ToolSecurity -> ToolSecurityPage(onBack = goBack)
                     is SettingsPage.DataManagement -> DataManagementPage(onBack = goBack)
                     is SettingsPage.MoodModel -> MoodModelPage(onBack = goBack)

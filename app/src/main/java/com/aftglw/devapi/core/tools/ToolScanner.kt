@@ -16,6 +16,7 @@ import java.io.File
  */
 object ToolScanner {
 
+    @Volatile
     private var scanned = false
 
     /** 已扫描到的工具描述 */

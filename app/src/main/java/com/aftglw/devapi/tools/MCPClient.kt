@@ -1,6 +1,8 @@
 package com.aftglw.devapi.tools
 
 import com.aftglw.devapi.network.HttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,7 +26,7 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
     )
 
     /** 调用 MCP 的 tools/list，返回工具列表 */
-    fun listTools(): Result<List<ToolInfo>> = runCatching {
+    suspend fun listTools(): Result<List<ToolInfo>> = runCatching {
         val resp = jsonRpcCall("tools/list", JSONObject())
         if (resp.has("error")) {
             val error = resp.optJSONObject("error")
@@ -49,7 +51,7 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
     }
 
     /** 调用 MCP 的 tools/call，返回工具执行结果 */
-    fun callTool(name: String, arguments: JSONObject): Result<String> = runCatching {
+    suspend fun callTool(name: String, arguments: JSONObject): Result<String> = runCatching {
         val params = JSONObject().apply {
             put("name", name)
             put("arguments", arguments)
@@ -69,7 +71,7 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
     }
 
     /** 发送 JSON-RPC 2.0 请求 */
-    private fun jsonRpcCall(method: String, params: JSONObject): JSONObject {
+    private suspend fun jsonRpcCall(method: String, params: JSONObject): JSONObject {
         val requestId = requestIdGen.incrementAndGet()
         val body = JSONObject().apply {
             put("jsonrpc", "2.0")
@@ -85,7 +87,7 @@ class MCPClient(val baseUrl: String, private val token: String = "") {
             builder.header("Authorization", "Bearer $token")
         }
         val request = builder.build()
-        val response = mcpHttpClient.newCall(request).execute()
+        val response = withContext(Dispatchers.IO) { mcpHttpClient.newCall(request).execute() }
         val respBody = response.body?.string() ?: "{}"
         val statusCode = response.code
         response.close()

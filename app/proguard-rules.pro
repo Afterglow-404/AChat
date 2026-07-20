@@ -54,11 +54,10 @@
 -dontwarn coil.**
 -keep class coil.** { *; }
 
-# --- LlamaEngine (JNI 桥接，native 方法名不能被混淆) ---
+# --- JNI native 方法名不能被混淆（sherpa-onnx 等仍需要） ---
 -keepclasseswithmembernames class * {
     native <methods>;
 }
--keep class com.aftglw.devapi.core.ai.LlamaEngine { *; }
 
 # --- WorkManager (后台任务，反射实例化 Worker) ---
 -keep class * extends androidx.work.Worker

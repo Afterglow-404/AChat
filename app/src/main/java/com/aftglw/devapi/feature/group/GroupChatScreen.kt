@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -62,8 +63,14 @@ import com.aftglw.devapi.tools.ToolRegistry
 import com.aftglw.devapi.ui.theme.AchatTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+
+private const val MAX_AUTO_REPLY_ROUNDS = 5
+private const val MAX_TURN_LLM_CALLS = 8
+private const val MAX_GROUP_TURN_DURATION_MS = 60_000L
 
 /**
  * 群聊聊天页面。
@@ -103,13 +110,15 @@ fun GroupChatScreen(
     }
 
     // 消息历史
-    var messages by remember { mutableStateOf(emptyList<GroupChatMessage>()) }
+    val messages = remember { mutableStateListOf<GroupChatMessage>() }
     var messagesLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(group.id) {
         messagesLoaded = false
-        messages = withContext(Dispatchers.IO) {
+        val loaded = withContext(Dispatchers.IO) {
             GroupChatManager.loadMessages(ctx, group.id)
         }
+        messages.clear()
+        messages.addAll(loaded)
         messagesLoaded = true
     }
 
@@ -120,6 +129,7 @@ fun GroupChatScreen(
     var inputText by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var sendJob by remember { mutableStateOf<Job?>(null) }
+    var retryingMessage by remember { mutableStateOf<GroupChatMessage?>(null) }
     /** 非空时表示某个成员正在打字（链式接话过程中显示） */
     var typingMember by remember { mutableStateOf<String?>(null) }
     /** debug 面板开关 */
@@ -154,8 +164,12 @@ fun GroupChatScreen(
     var plusMenuExpanded by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(ctx, uri) { file ->
-                pendingImagePath = file.absolutePath
+            scope.launch {
+                com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(
+                    ctx, uri,
+                    onSaved = { file -> pendingImagePath = file.absolutePath },
+                    onError = { msg -> Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+                )
             }
         }
     }
@@ -166,8 +180,12 @@ fun GroupChatScreen(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val uri = pendingCameraUri
         if (success && uri != null) {
-            com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(ctx, uri) { file ->
-                pendingImagePath = file.absolutePath
+            scope.launch {
+                com.aftglw.devapi.core.storage.ImageUtil.savePickedImage(
+                    ctx, uri,
+                    onSaved = { file -> pendingImagePath = file.absolutePath },
+                    onError = { msg -> Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
+                )
             }
         }
         pendingCameraUri = null
@@ -293,13 +311,24 @@ fun GroupChatScreen(
         voiceTranscript: String? = null
     ) {
         if ((text.isBlank() && imagePath == null && voicePath == null) || sending || !messagesLoaded) return
-        // 离线检测：非本地模式下若网络不可用，直接提示并不发送
-        val isLocalMode = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
-            .getString("ai_protocol", "auto") == "local"
-        if (!isLocalMode && !com.aftglw.devapi.network.NetworkMonitor.isOnline) {
+        // 离线检测：网络不可用时直接提示并不发送（本地 GGUF 推理已下线，无需跳过）
+        if (!com.aftglw.devapi.network.NetworkMonitor.isOnline) {
             android.widget.Toast.makeText(ctx, com.aftglw.devapi.network.AiError.Offline.message, android.widget.Toast.LENGTH_SHORT).show()
             return
         }
+
+        // Validate the turn before adding it to the visible history or database.
+        val preflightText = text.ifBlank { voiceTranscript.orEmpty() }
+        val preflightMention = MentionParser.firstMention(preflightText, activeMembers)
+        if (activeMembers.isEmpty()) {
+            android.widget.Toast.makeText(ctx, "请先添加至少一名启用的群成员", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (group.mode == GroupChatMode.MENTION_ONLY && preflightMention == null) {
+            android.widget.Toast.makeText(ctx, "请先 @ 一位群成员再发送", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         sending = true
         val t0 = System.currentTimeMillis()
 
@@ -318,35 +347,36 @@ fun GroupChatScreen(
             voiceDuration = voiceDuration,
             voiceTranscript = voiceTranscript
         )
-        val updatedMessages = messages + userMsg
-        messages = updatedMessages
+        messages.add(userMsg)
         inputText = ""
         pendingImagePath = null
 
         sendJob = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                GroupChatManager.saveMessages(ctx, group.id, updatedMessages)
+                GroupChatManager.appendMessage(ctx, group.id, userMsg)
                 }
+            val replied = mutableSetOf<String>()
+            var totalAutoRounds = 0
+            // Bound the complete automated turn, including delays and follow-up calls.
+            withTimeout(MAX_GROUP_TURN_DURATION_MS) {
             // @提及决定首位发言人：若用户文本中提及了某成员，则由其先回；
             // 否则按 round-robin 轮询。
             val mentioned = MentionParser.firstMention(displayText, activeMembers)
             if (activeMembers.isEmpty()) {
                 Toast.makeText(ctx, "群聊还没有成员", Toast.LENGTH_SHORT).show()
-                return@launch
+                return@withTimeout
             }
             if (group.mode == GroupChatMode.MENTION_ONLY && mentioned == null) {
                 Toast.makeText(ctx, "请 @ 一位群成员后再发送", Toast.LENGTH_SHORT).show()
-                return@launch
+                return@withTimeout
             }
             val firstSpeaker = when (group.mode) {
                 GroupChatMode.ROUND_ROBIN -> activeMembers[roundRobinIndex.value % activeMembers.size]
                 else -> mentioned ?: activeMembers[roundRobinIndex.value % activeMembers.size]
             }
-            val replied = mutableSetOf<String>()
             var lastSpeaker = firstSpeaker
             var lastReply: String? = null
-            var totalAutoRounds = 0
 
             android.util.Log.d("GroupChat", "Turn start: firstSpeaker=$firstSpeaker, mentioned=$mentioned, members=${group.members}, roundIdx=${roundRobinIndex.value}")
 
@@ -354,9 +384,9 @@ fun GroupChatScreen(
             val r1 = callMember(firstSpeaker, displayText)
             if (r1 != null) {
                 val msg1 = GroupChatMessage(r1, firstSpeaker, GroupChatManager.now())
-                messages = messages + msg1
+                messages.add(msg1)
                 withContext(Dispatchers.IO) {
-                    GroupChatManager.saveMessages(ctx, group.id, messages)
+                    GroupChatManager.appendMessage(ctx, group.id, msg1)
                 }
                 replied.add(firstSpeaker)
                 lastReply = r1
@@ -374,13 +404,12 @@ fun GroupChatScreen(
 
                 // 继续判断其他人是否需要接话（最多 5 轮自动推进）
                 var autoRounds = 0
-                val MAX_AUTO = 5
                 // LLM 调用预算：每轮最多 8 次（首位 callMember + 5 自动轮 decide/callMember + 余量）。
                 // decide 与 callMember 各消耗 1 次，超出则停止链式推进，防止刷屏与 30-60s 阻塞。
                 // 预留 2 次（1 次 decide + 1 次 callMember），不足 2 则停止。
-                var llmCallBudget = 8
+                var llmCallBudget = MAX_TURN_LLM_CALLS
                 val WILLINGNESS_THRESHOLD = SpeakerDecision.DEFAULT_WILLINGNESS_THRESHOLD
-                while (group.mode == GroupChatMode.FREE && autoRounds < MAX_AUTO && llmCallBudget >= 2) {
+                while (group.mode == GroupChatMode.FREE && autoRounds < MAX_AUTO_REPLY_ROUNDS && llmCallBudget >= 2) {
                     llmCallBudget--  // decide 占用 1 次
                     typingMember = "判断中…"
                     val decision: SpeakerDecision = withContext(Dispatchers.IO) {
@@ -423,15 +452,41 @@ fun GroupChatScreen(
                     val rN = callMember(next, contextPrompt)
                     if (rN != null) {
                         val msgN = GroupChatMessage(rN, next, GroupChatManager.now())
-                        messages = messages + msgN
+                        messages.add(msgN)
                         withContext(Dispatchers.IO) {
-                            GroupChatManager.saveMessages(ctx, group.id, messages)
+                            GroupChatManager.appendMessage(ctx, group.id, msgN)
                         }
                         replied.add(next)
                         lastSpeaker = next
                         lastReply = rN
-                    } else break
+                    } else {
+                        val failed = GroupChatMessage(
+                            text = "\u56de\u590d\u5931\u8d25",
+                            from = next,
+                            time = GroupChatManager.now(),
+                            isError = true,
+                            retryPrompt = contextPrompt
+                        )
+                        messages.add(failed)
+                        withContext(Dispatchers.IO) {
+                            GroupChatManager.appendMessage(ctx, group.id, failed)
+                        }
+                        break
+                    }
                 }
+            } else {
+                val failed = GroupChatMessage(
+                    text = "\u56de\u590d\u5931\u8d25",
+                    from = firstSpeaker,
+                    time = GroupChatManager.now(),
+                    isError = true,
+                    retryPrompt = displayText
+                )
+                messages.add(failed)
+                withContext(Dispatchers.IO) {
+                    GroupChatManager.appendMessage(ctx, group.id, failed)
+                }
+            }
             }
 
             // 更新群聊摘要
@@ -446,6 +501,10 @@ fun GroupChatScreen(
                 roundRobinIndex.value = (roundRobinIndex.value + 1) % activeMembers.size
                 val total = System.currentTimeMillis() - t0
                 android.util.Log.d("GroupChat", "Turn done: replied=${replied.toList()}, autoRounds=$totalAutoRounds, ${total}ms")
+            } catch (e: TimeoutCancellationException) {
+                try { AiServiceFactory.getService().cancel() } catch (_: Exception) { }
+                android.util.Log.w("GroupChat", "Turn timed out after ${MAX_GROUP_TURN_DURATION_MS}ms")
+                Toast.makeText(ctx, "\u7fa4\u804a\u56de\u590d\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5", Toast.LENGTH_SHORT).show()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 android.util.Log.d("GroupChat", "Turn cancelled")
                 throw e
@@ -453,6 +512,48 @@ fun GroupChatScreen(
                 android.util.Log.w("GroupChat", "Turn failed", e)
                 Toast.makeText(ctx, "群聊回复失败，请稍后重试", Toast.LENGTH_SHORT).show()
             } finally {
+                sending = false
+                typingMember = null
+            }
+        }
+    }
+
+    /** Retry one persisted member failure without resending the user's message. */
+    fun retryMember(failed: GroupChatMessage) {
+        val prompt = failed.retryPrompt?.takeIf { it.isNotBlank() } ?: return
+        if (!failed.isError || sending) return
+
+        sending = true
+        retryingMessage = failed
+        sendJob = scope.launch {
+            var succeeded = false
+            try {
+                withTimeout(MAX_GROUP_TURN_DURATION_MS) {
+                    val reply = callMember(failed.from, prompt)
+                    if (!reply.isNullOrBlank()) {
+                        val message = GroupChatMessage(reply, failed.from, GroupChatManager.now())
+                        withContext(Dispatchers.IO) {
+                            GroupChatManager.deleteFailedMessage(ctx, group.id, failed)
+                            GroupChatManager.appendMessage(ctx, group.id, message)
+                        }
+                        messages.remove(failed)
+                        messages.add(message)
+                        succeeded = true
+                    }
+                }
+                if (!succeeded) {
+                    Toast.makeText(ctx, "\u91cd\u8bd5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: TimeoutCancellationException) {
+                try { AiServiceFactory.getService().cancel() } catch (_: Exception) { }
+                Toast.makeText(ctx, "\u91cd\u8bd5\u8d85\u65f6\uff0c\u5931\u8d25\u6d88\u606f\u4ecd\u4fdd\u7559", Toast.LENGTH_SHORT).show()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChat", "Retry failed for ${failed.from}", e)
+                Toast.makeText(ctx, "\u91cd\u8bd5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5", Toast.LENGTH_SHORT).show()
+            } finally {
+                retryingMessage = null
                 sending = false
                 typingMember = null
             }
@@ -483,13 +584,25 @@ fun GroupChatScreen(
                 val reply = callMember(speaker, spontaneousHint)
                 if (!reply.isNullOrBlank()) {
                     val msg = GroupChatMessage(reply, speaker, GroupChatManager.now())
-                    messages = messages + msg
+                    messages.add(msg)
                     withContext(Dispatchers.IO) {
-                        GroupChatManager.saveMessages(ctx, group.id, messages)
+                        GroupChatManager.appendMessage(ctx, group.id, msg)
                     }
                     val summary = "${speaker}: ${reply.take(30)}"
                     withContext(Dispatchers.IO) {
                         GroupChatManager.saveGroup(ctx, group.copy(lastMessage = summary, time = msg.time))
+                    }
+                } else {
+                    val failed = GroupChatMessage(
+                        text = "\u56de\u590d\u5931\u8d25",
+                        from = speaker,
+                        time = GroupChatManager.now(),
+                        isError = true,
+                        retryPrompt = spontaneousHint
+                    )
+                    messages.add(failed)
+                    withContext(Dispatchers.IO) {
+                        GroupChatManager.appendMessage(ctx, group.id, failed)
                     }
                 }
             } catch (e: Exception) {
@@ -568,14 +681,16 @@ fun GroupChatScreen(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             state = listState
         ) {
-            items(messages, key = { "${it.from}_${it.time}_${it.text.hashCode()}" }) { msg ->
+            items(messages, key = { it.id }) { msg ->
                 GroupChatBubble(
                     message = msg,
                     memberAvatar = memberAvatars[msg.from],
                     allMembers = activeMembers,
                     voicePlayer = voicePlayer,
                     playingVoicePath = playingVoicePath,
-                    onPlayingVoicePathChange = { playingVoicePath = it }
+                    onPlayingVoicePathChange = { playingVoicePath = it },
+                    onRetry = msg.takeIf { it.isError }?.let { failed -> { retryMember(failed) } },
+                    retrying = retryingMessage == msg
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -846,11 +961,14 @@ private fun GroupChatBubble(
     allMembers: List<String>,
     voicePlayer: VoicePlayer,
     playingVoicePath: String?,
-    onPlayingVoicePathChange: (String?) -> Unit
+    onPlayingVoicePathChange: (String?) -> Unit,
+    onRetry: (() -> Unit)?,
+    retrying: Boolean
 ) {
     val isMe = message.isMe
     val alignment = if (isMe) Alignment.End else Alignment.Start
     val bubbleColor = if (isMe) AchatTheme.colors.primary.copy(alpha = 0.15f)
+        else if (message.isError) Color(0xFFFFF0F0)
         else AchatTheme.colors.surface
     val textColor = AchatTheme.colors.onSurface
     val ctx = LocalContext.current
@@ -1035,6 +1153,33 @@ private fun GroupChatBubble(
                             color = textColor,
                             lineHeight = 20.sp
                         )
+                    }
+                }
+                if (message.isError) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    ) {
+                        if (retrying) {
+                            Text(
+                                "\u6b63\u5728\u91cd\u8bd5\u2026",
+                                fontSize = 11.sp,
+                                color = Color(0xFFD14343)
+                            )
+                        }
+                        if (!retrying && onRetry != null) {
+                            IconButton(
+                                onClick = onRetry,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Refresh,
+                                    contentDescription = "\u91cd\u8bd5",
+                                    tint = Color(0xFFD14343),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
                 // 时间戳

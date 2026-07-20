@@ -10,7 +10,6 @@ import com.aftglw.devapi.model.GroupChatMessage
 import com.aftglw.devapi.model.GroupChatMode
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,7 +24,8 @@ import java.util.Locale
  * - 群列表 → [GroupDao]（groups 表）
  * - 群历史 → [MessageDao]（messages 表，is_group=1）
  *
- * 公共 API 保持同步签名，内部通过 `runBlocking(Dispatchers.IO)` 切到 IO 线程调用 Room。
+ * 公共 API 均为 `suspend fun`，调用方需在协程中调用。
+ * Room 的同步 DAO 方法内部用 `withContext(Dispatchers.IO)` 切到 IO 线程。
  *
  * 注：成员角色（persona / avatarUri）查询仍读自 `chats` 表（单聊列表），因为群成员
  * 复用单聊角色定义；未命中则回退到内置角色。
@@ -36,13 +36,11 @@ object GroupChatManager {
 
     // ── 群聊列表 ──
 
-    fun loadGroups(ctx: Context): List<GroupChat> = runBlocking {
-        withContext(Dispatchers.IO) {
-            AppDatabase.get(ctx).groupDao().getAll().map { it.toModel() }
-        }
+    suspend fun loadGroups(ctx: Context): List<GroupChat> = withContext(Dispatchers.IO) {
+        AppDatabase.get(ctx).groupDao().getAll().map { it.toModel() }
     }
 
-    fun saveGroups(ctx: Context, groups: List<GroupChat>) = runBlocking {
+    suspend fun saveGroups(ctx: Context, groups: List<GroupChat>) {
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).groupDao()
             dao.deleteAll()
@@ -50,14 +48,14 @@ object GroupChatManager {
         }
     }
 
-    fun saveGroup(ctx: Context, group: GroupChat) = runBlocking {
+    suspend fun saveGroup(ctx: Context, group: GroupChat) {
         withContext(Dispatchers.IO) {
             AppDatabase.get(ctx).groupDao().upsert(group.toEntity())
         }
         android.util.Log.i(TAG, "Saved group: id=${group.id}, name=${group.name}, members=${group.members}")
     }
 
-    fun deleteGroup(ctx: Context, groupId: String) = runBlocking {
+    suspend fun deleteGroup(ctx: Context, groupId: String) {
         withContext(Dispatchers.IO) {
             android.util.Log.i(TAG, "Deleting group: $groupId")
             val db = AppDatabase.get(ctx)
@@ -71,7 +69,7 @@ object GroupChatManager {
     // ── 群信息编辑 ──
 
     /** 重命名群聊 */
-    fun renameGroup(ctx: Context, groupId: String, newName: String) = runBlocking {
+    suspend fun renameGroup(ctx: Context, groupId: String, newName: String) {
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).groupDao()
             val e = dao.getById(groupId) ?: return@withContext
@@ -80,56 +78,41 @@ object GroupChatManager {
     }
 
     /** 添加成员；若已在群则返回 false */
-    fun addMember(ctx: Context, groupId: String, memberName: String): Boolean = runBlocking {
-        withContext(Dispatchers.IO) {
-            val dao = AppDatabase.get(ctx).groupDao()
-            val e = dao.getById(groupId) ?: return@withContext false
-            val members = parseMembers(e.members)
-            if (members.contains(memberName)) return@withContext false
-            dao.upsert(e.copy(members = JSONArray(members + memberName).toString()))
-            true
-        }
+    suspend fun addMember(ctx: Context, groupId: String, memberName: String): Boolean = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.get(ctx).groupDao()
+        val e = dao.getById(groupId) ?: return@withContext false
+        val members = parseMembers(e.members)
+        if (members.contains(memberName)) return@withContext false
+        dao.upsert(e.copy(members = JSONArray(members + memberName).toString()))
+        true
     }
 
     /** 移除成员；若不在群则返回 false。成员数 < 2 时建议解散群 */
-    fun removeMember(ctx: Context, groupId: String, memberName: String): Boolean = runBlocking {
-        withContext(Dispatchers.IO) {
-            val dao = AppDatabase.get(ctx).groupDao()
-            val e = dao.getById(groupId) ?: return@withContext false
-            val members = parseMembers(e.members)
-            if (!members.contains(memberName)) return@withContext false
-            dao.upsert(e.copy(members = JSONArray(members.filter { it != memberName }).toString()))
-            true
-        }
+    suspend fun removeMember(ctx: Context, groupId: String, memberName: String): Boolean = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.get(ctx).groupDao()
+        val e = dao.getById(groupId) ?: return@withContext false
+        val members = parseMembers(e.members)
+        if (!members.contains(memberName)) return@withContext false
+        dao.upsert(e.copy(members = JSONArray(members.filter { it != memberName }).toString()))
+        true
     }
 
     // ── 历史消息 ──
 
-    fun loadMessages(ctx: Context, groupId: String): List<GroupChatMessage> = runBlocking {
-        withContext(Dispatchers.IO) {
-            AppDatabase.get(ctx).messageDao()
-                .getMessages(groupId, isGroup = true)
-                .map { it.toGroupMessage() }
-        }
+    suspend fun loadMessages(ctx: Context, groupId: String): List<GroupChatMessage> = withContext(Dispatchers.IO) {
+        AppDatabase.get(ctx).messageDao()
+            .getMessages(groupId, isGroup = true)
+            .map { it.toGroupMessage() }
     }
 
-    fun saveMessages(ctx: Context, groupId: String, messages: List<GroupChatMessage>) = runBlocking {
+    suspend fun saveMessages(ctx: Context, groupId: String, messages: List<GroupChatMessage>) {
         withContext(Dispatchers.IO) {
             val db = AppDatabase.get(ctx)
             db.withTransaction {
                 val mDao = db.messageDao()
                 mDao.deleteForChat(groupId, isGroup = true)
                 if (messages.isNotEmpty()) {
-                    mDao.insertAll(messages.map {
-                        MessageEntity(
-                            chatId = groupId, isGroup = true, isMe = it.isMe,
-                            text = it.text, time = it.time, imagePath = it.imagePath,
-                            voicePath = it.voicePath,
-                            voiceDuration = it.voiceDuration,
-                            voiceTranscript = it.voiceTranscript,
-                            fromName = it.from
-                        )
-                    })
+                    mDao.insertAll(messages.map { it.toEntity(groupId) })
                 }
                 // 同步更新 groups 中的 lastMessage 和 time，避免 loadGroups 时扫历史
                 val lastMsg = messages.lastOrNull()
@@ -143,49 +126,71 @@ object GroupChatManager {
         }
     }
 
+    /** Append one message without rewriting the entire group history. */
+    suspend fun appendMessage(ctx: Context, groupId: String, message: GroupChatMessage) {
+        withContext(Dispatchers.IO) {
+            val db = AppDatabase.get(ctx)
+            db.withTransaction {
+                db.messageDao().insert(message.toEntity(groupId))
+                val displayText = if (message.from.isNotEmpty() && message.from != "user")
+                    "${message.from}: ${message.text}" else message.text
+                db.groupDao().getById(groupId)?.let { group ->
+                    db.groupDao().upsert(group.copy(lastMessage = displayText, time = message.time))
+                }
+            }
+        }
+    }
+
+    /** Remove one persisted failed reply before retrying it. */
+    suspend fun deleteFailedMessage(ctx: Context, groupId: String, message: GroupChatMessage) {
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).messageDao().deleteGroupMessage(
+                chatId = groupId,
+                fromName = message.from,
+                time = message.time,
+                text = message.text,
+                isError = true
+            )
+        }
+    }
+
     // ── 辅助 ──
 
     /** 读取指定成员的角色人设；先查 chats 表，未命中则查内置角色 */
-    fun getMemberPersona(ctx: Context, memberName: String): String = runBlocking {
-        withContext(Dispatchers.IO) {
-            val e = AppDatabase.get(ctx).chatDao().getAll().firstOrNull { it.name == memberName }
-            e?.persona?.takeIf { it.isNotEmpty() }
-                ?: BuiltInCharacterLoader.listAll(ctx)
-                    .firstOrNull { it.name == memberName }
-                    ?.persona ?: ""
-        }
+    suspend fun getMemberPersona(ctx: Context, memberName: String): String = withContext(Dispatchers.IO) {
+        val e = AppDatabase.get(ctx).chatDao().getAll().firstOrNull { it.name == memberName }
+        e?.persona?.takeIf { it.isNotEmpty() }
+            ?: BuiltInCharacterLoader.listAll(ctx)
+                .firstOrNull { it.name == memberName }
+                ?.persona ?: ""
     }
 
     /** 读取指定成员的头像路径；先查 chats 表，未命中则查内置角色 */
-    fun getMemberAvatarUri(ctx: Context, memberName: String): String = runBlocking {
-        withContext(Dispatchers.IO) {
-            val e = AppDatabase.get(ctx).chatDao().getAll().firstOrNull { it.name == memberName }
-            e?.avatarUri?.takeIf { it.isNotEmpty() }
-                ?: BuiltInCharacterLoader.listAll(ctx)
-                    .firstOrNull { it.name == memberName }
-                    ?.avatarUri ?: ""
-        }
+    suspend fun getMemberAvatarUri(ctx: Context, memberName: String): String = withContext(Dispatchers.IO) {
+        val e = AppDatabase.get(ctx).chatDao().getAll().firstOrNull { it.name == memberName }
+        e?.avatarUri?.takeIf { it.isNotEmpty() }
+            ?: BuiltInCharacterLoader.listAll(ctx)
+                .firstOrNull { it.name == memberName }
+                ?.avatarUri ?: ""
     }
 
     /** 获取所有可用作群成员的角色（单聊角色 + 内置角色，按 name 去重） */
-    fun getAvailableMembers(ctx: Context): List<Pair<String, String>> = runBlocking {
-        withContext(Dispatchers.IO) {
-            val seen = mutableSetOf<String>()
-            val result = mutableListOf<Pair<String, String>>()
-            // 1) chats 表中的自定义角色
-            for (c in AppDatabase.get(ctx).chatDao().getAll()) {
-                if (c.name.isNotEmpty() && c.persona.isNotEmpty() && seen.add(c.name)) {
-                    result.add(c.name to c.persona)
-                }
+    suspend fun getAvailableMembers(ctx: Context): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val seen = mutableSetOf<String>()
+        val result = mutableListOf<Pair<String, String>>()
+        // 1) chats 表中的自定义角色
+        for (c in AppDatabase.get(ctx).chatDao().getAll()) {
+            if (c.name.isNotEmpty() && c.persona.isNotEmpty() && seen.add(c.name)) {
+                result.add(c.name to c.persona)
             }
-            // 2) 内置角色
-            for (item in BuiltInCharacterLoader.listAll(ctx)) {
-                if (item.name.isNotEmpty() && item.persona.isNotEmpty() && seen.add(item.name)) {
-                    result.add(item.name to item.persona)
-                }
-            }
-            result
         }
+        // 2) 内置角色
+        for (item in BuiltInCharacterLoader.listAll(ctx)) {
+            if (item.name.isNotEmpty() && item.persona.isNotEmpty() && seen.add(item.name)) {
+                result.add(item.name to item.persona)
+            }
+        }
+        result
     }
 
     fun now(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
@@ -245,6 +250,21 @@ private fun parseMemberEnabled(raw: String): Map<String, Boolean> {
     }
 }
 
+private fun GroupChatMessage.toEntity(groupId: String): MessageEntity = MessageEntity(
+    chatId = groupId,
+    isGroup = true,
+    isMe = isMe,
+    text = text,
+    time = time,
+    imagePath = imagePath,
+    voicePath = voicePath,
+    voiceDuration = voiceDuration,
+    voiceTranscript = voiceTranscript,
+    fromName = from,
+    isError = isError,
+    retryPrompt = retryPrompt
+)
+
 private fun MessageEntity.toGroupMessage(): GroupChatMessage = GroupChatMessage(
     text = text,
     from = fromName ?: "",
@@ -253,7 +273,9 @@ private fun MessageEntity.toGroupMessage(): GroupChatMessage = GroupChatMessage(
     imagePath = imagePath,
     voicePath = voicePath,
     voiceDuration = voiceDuration,
-    voiceTranscript = voiceTranscript
+    voiceTranscript = voiceTranscript,
+    isError = isError,
+    retryPrompt = retryPrompt
 )
 
 /**

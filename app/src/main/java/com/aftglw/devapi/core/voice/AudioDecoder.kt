@@ -77,7 +77,8 @@ object AudioDecoder {
             decoder.configure(inputFormat, null, null, 0)
             decoder.start()
 
-            val pcmOut = ByteArrayOutputStream()
+            // 预分配 1MB，避免每次写入触发扩容+拷贝（PCM 通常远大于默认 32 字节）
+            val pcmOut = ByteArrayOutputStream(1024 * 1024)
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false

@@ -5,7 +5,6 @@ import com.aftglw.devapi.core.security.SecureKeyStore
 
 object AiServiceFactory {
     private var appContext: Context? = null
-    private var localService: LocalAiService? = null
     private var cachedService: AiService? = null
     private var cachedConfigHash: Int = 0
 
@@ -23,17 +22,8 @@ object AiServiceFactory {
         val hash = protocol.hashCode() * 31 + url.hashCode() + key.hashCode()
         if (hash != cachedConfigHash) { cachedService = null; cachedConfigHash = hash }
 
-        // 本地模式：llama.cpp JNI 尚未真正集成，为避免调用 stub 返回误导性错误，
-        // 这里将 "local" 回退为 MockAiService（如已配置 URL/Key 则使用配置）。
-        // 等真正接入 llama.cpp 后移除此回退即可恢复 LocalAiService 路径。
-        if (protocol == "local") {
-            if (url.isEmpty() || key.isEmpty()) return MockAiService(ctx)
-            // 已有云端配置时退回 OpenAI/Claude，避免用户被 stub 体验困扰
-            return cachedService ?: when {
-                url.contains("claude", ignoreCase = true) || url.contains("anthropic", ignoreCase = true) -> ClaudeAiService(ctx)
-                else -> OpenAiService(ctx)
-            }.also { cachedService = it }
-        }
+        // 本地 GGUF 推理已下线（llama.cpp 未真实集成），local 协议回退到 Mock
+        if (protocol == "local") return MockAiService(ctx)
         if (url.isEmpty() || key.isEmpty()) return MockAiService(ctx)
 
         // 缓存命中
@@ -68,14 +58,8 @@ object AiServiceFactory {
         }
     }
 
-    fun unloadLocal() {
-        localService?.unload()
-        localService = null
-    }
-
     /** 测试用：重置所有缓存状态 */
     fun resetForTest() {
         cachedService = null; cachedConfigHash = 0
-        unloadLocal()
     }
 }

@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.buildCustomTypography
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -67,6 +70,7 @@ fun ManageRolesPage(
                 placeholder = { Text("角色人设，例如：你是一个傲娇的猫娘喵，说话带喵...") }, maxLines = 5,
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF07C160), unfocusedBorderColor = Color(0xFFE0E0E0)))
             Spacer(Modifier.height(4.dp))
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
             val importSkillLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
@@ -87,8 +91,14 @@ fun ManageRolesPage(
                         val memories = memoryText.lines().filter { it.trim().startsWith("- ") || it.trim().startsWith("• ") }
                             .map { it.trim().removePrefix("- ").removePrefix("• ") }.filter { it.length > 5 }
                         com.aftglw.devapi.core.memory.MemoryStore.init(ctx)
-                        memories.take(15).forEach { com.aftglw.devapi.core.memory.MemoryStore.save(ctx, it, "skill:$chatName") }
-                        android.widget.Toast.makeText(ctx, "Skill 导入成功（${memories.size} 条记忆）", Toast.LENGTH_SHORT).show()
+                        // MemoryStore.save 已 suspend 化（含 embedding 网络调用），切 IO 异步执行
+                        val memoriesToSave = memories.take(15)
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                memoriesToSave.forEach { com.aftglw.devapi.core.memory.MemoryStore.save(ctx, it, "skill:$chatName") }
+                            }
+                            android.widget.Toast.makeText(ctx, "Skill 导入成功（${memories.size} 条记忆）", Toast.LENGTH_SHORT).show()
+                        }
                     } catch (_: Exception) { android.widget.Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show() }
                 }
             }

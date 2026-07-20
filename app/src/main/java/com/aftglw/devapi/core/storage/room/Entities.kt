@@ -50,7 +50,9 @@ data class MessageEntity(
     @ColumnInfo(name = "voice_duration") val voiceDuration: Int = 0,
     @ColumnInfo(name = "voice_transcript") val voiceTranscript: String? = null,
     /** 群聊发言人名；单聊恒为 null */
-    @ColumnInfo(name = "from_name") val fromName: String? = null
+    @ColumnInfo(name = "from_name") val fromName: String? = null,
+    @ColumnInfo(name = "is_error") val isError: Boolean = false,
+    @ColumnInfo(name = "retry_prompt") val retryPrompt: String? = null
 )
 
 /**

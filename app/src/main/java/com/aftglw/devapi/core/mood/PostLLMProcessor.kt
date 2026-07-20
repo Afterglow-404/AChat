@@ -8,7 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 object PostLLMProcessor {
-    fun process(ctx: Context, name: String, userMessage: String, aiReply: String) {
+    suspend fun process(ctx: Context, name: String, userMessage: String, aiReply: String) {
         // ① 存用户输入 → 轻量上下文记忆
         MemoryStore.save(ctx, userMessage, "turn:$name")
 

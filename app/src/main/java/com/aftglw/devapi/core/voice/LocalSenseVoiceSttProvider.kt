@@ -41,13 +41,9 @@ class LocalSenseVoiceSttProvider(ctx: Context) : SttProvider {
 
     private val ctx = ctx.applicationContext
 
-    @Volatile
-    private var recognizer: OfflineRecognizer? = null
-
-    @Volatile
-    private var loadedSignature: String? = null
-
-    private val inferMutex = Mutex()
+    // recognizer / loadedSignature / inferMutex 已移至 companion object 跨实例共享，
+    // 避免 SttProviderManager.configure 重建实例时反复 init/release ~250MB native 内存。
+    // 详见 [Companion.recognizer]。
 
     private val dir: File
         get() = File(ctx.filesDir, "sensevoice").apply { mkdirs() }
@@ -110,14 +106,21 @@ class LocalSenseVoiceSttProvider(ctx: Context) : SttProvider {
         }
         val rec = recognizer ?: return@withContext SttOutcome.Failed("SenseVoice 未初始化")
 
+        // 解码音频为 16kHz mono float[]（解码不需要互斥，放在 mutex 外可与其他推理并行）
+        val samples = try {
+            AudioDecoder.decodeToPcmFloat(audioPath)
+        } catch (e: Exception) {
+            Log.e(TAG, "SenseVoice 解码异常", e)
+            return@withContext SttOutcome.Failed("SenseVoice 解码异常: ${e.message?.take(60)}", e)
+        }
+        if (samples.isEmpty()) {
+            return@withContext SttOutcome.Failed("音频解码失败: $audioPath")
+        }
+        Log.d(TAG, "Decoded ${samples.size} samples (${samples.size / 16000f}s), recognizing...")
+
+        // 推理（OfflineRecognizer 非线程安全，加锁串行化）
         try {
             inferMutex.withLock {
-                val samples = AudioDecoder.decodeToPcmFloat(audioPath)
-                if (samples.isEmpty()) {
-                    return@withLock SttOutcome.Failed("音频解码失败: $audioPath")
-                }
-                Log.d(TAG, "Decoded ${samples.size} samples (${samples.size / 16000f}s), recognizing...")
-
                 val stream = rec.createStream()
                 try {
                     stream.acceptWaveform(samples, 16000)
@@ -141,9 +144,8 @@ class LocalSenseVoiceSttProvider(ctx: Context) : SttProvider {
     }
 
     override fun shutdown() {
-        try { recognizer?.release() } catch (_: Exception) {}
-        recognizer = null
-        loadedSignature = null
+        // 释放共享 native recognizer（~250MB），委托给 companion
+        releaseNative()
     }
 
     private fun findModelFile(): File? {
@@ -174,6 +176,36 @@ class LocalSenseVoiceSttProvider(ctx: Context) : SttProvider {
 
     companion object {
         private const val TAG = "LocalSenseVoiceSttProvider"
+
+        /**
+         * 共享 Recognizer 实例（~250MB native 内存）。跨所有 [LocalSenseVoiceSttProvider] 实例
+         * 单例，避免 [SttProviderManager.configure] 重建实例时反复 init/release native 资源。
+         */
+        @Volatile
+        private var recognizer: OfflineRecognizer? = null
+
+        /** 已加载的模型签名（避免重复加载） */
+        @Volatile
+        private var loadedSignature: String? = null
+
+        /** 推理互斥锁（OfflineRecognizer 非线程安全） */
+        private val inferMutex = Mutex()
+
+        /**
+         * 释放共享 native recognizer（~250MB native 内存）。
+         *
+         * 调用时机：
+         * - [com.aftglw.devapi.WispApplication.onTrimMemory] 收到 TRIM_MEMORY_MODERATE 时（系统内存压力）
+         * - 实例 [shutdown]（[SttProviderManager] 切换引擎/退出时）
+         *
+         * 幂等，多次调用安全。
+         */
+        @JvmStatic
+        fun releaseNative() {
+            try { recognizer?.release() } catch (_: Exception) {}
+            recognizer = null
+            loadedSignature = null
+        }
 
         /**
          * SAF 导入 SenseVoice 模型文件到 filesDir/sensevoice/。

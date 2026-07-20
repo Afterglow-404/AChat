@@ -8,11 +8,13 @@ import com.aftglw.devapi.network.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 
 data class MemoryItem(
     val id: Long = 0,
@@ -32,13 +34,10 @@ class MemoryDB(ctx: Context) : SQLiteOpenHelper(ctx, "memory.db", null, 1) {
 
 object MemoryStore {
     private var db: SQLiteDatabase? = null
-    /** embed 缓存：text.hashCode() -> (timestamp, vector)，线程安全 */
-    private val embedCache = object : LinkedHashMap<Int, Pair<Long, FloatArray>>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<Long, FloatArray>>): Boolean {
-            return size > EMBED_CACHE_MAX_SIZE
-        }
-    }
+    /** embed 缓存：text.hashCode() -> (timestamp, vector)，线程安全（ConcurrentHashMap） */
+    private val embedCache = ConcurrentHashMap<Int, Pair<Long, FloatArray>>()
     private const val EMBED_CACHE_MAX_SIZE = 500
+    private const val EMBED_CACHE_TTL_MS = 300_000L
 
     fun init(context: Context) {
         if (db == null) {
@@ -51,18 +50,16 @@ object MemoryStore {
         }
     }
 
-    fun embed(ctx: Context, text: String): FloatArray? {
+    suspend fun embed(ctx: Context, text: String): FloatArray? {
         val hash = text.hashCode()
 
-        // 线程安全缓存读 + 惰性淘汰（只移除单个过期条目，不扫描全表）
-        synchronized(embedCache) {
-            val cached = embedCache[hash]
-            if (cached != null) {
-                if (System.currentTimeMillis() - cached.first < 300_000L) {
-                    return cached.second  // accessOrder=true 自动更新 LRU 顺序
-                }
-                embedCache.remove(hash)  // 惰性淘汰：只移除这一个过期条目
+        // 线程安全缓存读 + 惰性淘汰（ConcurrentHashMap，只移除单个过期条目）
+        val cached = embedCache[hash]
+        if (cached != null) {
+            if (System.currentTimeMillis() - cached.first < EMBED_CACHE_TTL_MS) {
+                return cached.second
             }
+            embedCache.remove(hash)  // 惰性淘汰：只移除这一个过期条目
         }
 
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
@@ -75,26 +72,29 @@ object MemoryStore {
             baseUrl.contains("dashscope", ignoreCase = true) || baseUrl.contains("aliyun", ignoreCase = true) -> "text-embedding-v1"
             else -> prefs.getString("embedding_model", "text-embedding-v2") ?: "text-embedding-v2"
         }
-        return try {
-            val body = """{"model":"$embedModel","input":${JSONObject.quote(text)}}"""
-            val request = okhttp3.Request.Builder()
-                .url("$baseUrl/embeddings")
-                .header("Authorization", "Bearer $apiKey")
-                .post(body.toRequestBody(HttpClient.JSON_MEDIA_TYPE))
-                .build()
-            val response = HttpClient.client.newCall(request).execute()
-            val resp = response.body?.string() ?: "{}"
-            response.close()
-            val arr = JSONObject(resp).optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")
-            val result = if (arr != null) FloatArray(arr.length()) { arr.optDouble(it, 0.0).toFloat() } else null
-            if (result != null) {
-                synchronized(embedCache) {
+        return withContext(Dispatchers.IO) {
+            try {
+                val body = """{"model":"$embedModel","input":${JSONObject.quote(text)}}"""
+                val request = okhttp3.Request.Builder()
+                    .url("$baseUrl/embeddings")
+                    .header("Authorization", "Bearer $apiKey")
+                    .post(body.toRequestBody(HttpClient.JSON_MEDIA_TYPE))
+                    .build()
+                val response = HttpClient.client.newCall(request).execute()
+                val resp = response.body?.string() ?: "{}"
+                response.close()
+                val arr = JSONObject(resp).optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")
+                val result = if (arr != null) FloatArray(arr.length()) { arr.optDouble(it, 0.0).toFloat() } else null
+                if (result != null) {
                     embedCache[hash] = System.currentTimeMillis() to result
-                    // removeEldestEntry 在 put 后自动处理容量上限淘汰
+                    // 手动 size 检查：超限时移除时间戳最老的条目（替代原 LRU removeEldestEntry）
+                    if (embedCache.size > EMBED_CACHE_MAX_SIZE) {
+                        embedCache.minByOrNull { it.value.first }?.key?.let { embedCache.remove(it) }
+                    }
                 }
-            }
-            result
-        } catch (_: Exception) { null }
+                result
+            } catch (_: Exception) { null }
+        }
     }
 
     @androidx.annotation.VisibleForTesting
@@ -104,13 +104,13 @@ object MemoryStore {
         return if (na > 0 && nb > 0) dot / (sqrt(na) * sqrt(nb)) else 0f
     }
 
-    fun deleteByText(text: String, topic: String? = null) {
+    suspend fun deleteByText(text: String, topic: String? = null) {
         val where = if (topic != null) "text = ? AND topic LIKE ?" else "text = ?"
         val args = if (topic != null) arrayOf(text, "%$topic%") else arrayOf(text)
         db?.delete("memories", where, args)
     }
 
-    fun save(ctx: Context, text: String, topic: String = "") {
+    suspend fun save(ctx: Context, text: String, topic: String = "") {
         val vec = embed(ctx, text)
         val cv = ContentValues().apply {
             put("text", text); put("topic", topic); put("timestamp", System.currentTimeMillis())
@@ -126,7 +126,7 @@ object MemoryStore {
         }
     }
 
-    fun search(ctx: Context, query: String, topK: Int = 5, topicFilter: String? = null): List<MemoryItem> {
+    suspend fun search(ctx: Context, query: String, topK: Int = 5, topicFilter: String? = null): List<MemoryItem> {
         val qVec = embed(ctx, query)
         val now = System.currentTimeMillis()
         val sql = if (topicFilter != null) "SELECT * FROM memories WHERE topic LIKE ? ORDER BY timestamp DESC LIMIT 1000"

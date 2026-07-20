@@ -43,38 +43,6 @@ object HttpRetry {
     }
 
     /**
-     * 以指数退避方式执行 [block]。
-     * - 成功 → 返回 block 的返回值
-     * - 不可重试的异常 → 直接抛出
-     * - 可重试且超过最大次数 → 抛出最后一次异常
-     *
-     * 注意：此方法同步阻塞，会占用线程；协程环境请使用 [retrySuspend]。
-     */
-    fun <T> retry(
-        tag: String = "HttpRetry",
-        block: () -> T
-    ): T {
-        var delayMs = INITIAL_DELAY_MS
-        var lastEx: Exception? = null
-
-        for (attempt in 0..MAX_RETRIES) {
-            try {
-                return block()
-            } catch (e: Exception) {
-                lastEx = e
-                if (attempt == MAX_RETRIES || !isRetryable(e)) {
-                    android.util.Log.w(tag, "Final failure after $attempt retries: ${e.message}")
-                    throw e
-                }
-                android.util.Log.w(tag, "Attempt ${attempt + 1}/$MAX_RETRIES failed, retry in ${delayMs}ms: ${e.message}")
-                try { Thread.sleep(delayMs) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw e }
-                delayMs *= 2
-            }
-        }
-        throw lastEx ?: Exception("retry failed")
-    }
-
-    /**
      * 协程版指数退避重试，使用 [delay] 而非 Thread.sleep，不阻塞线程。
      *
      * - 成功 → 返回 block 的返回值
@@ -91,6 +59,7 @@ object HttpRetry {
         var delayMs = initialDelayMs
         var lastEx: Exception? = null
 
+        // 0..maxRetries = 首次尝试 + maxRetries 次重试（共 maxRetries+1 次尝试）
         for (attempt in 0..maxRetries) {
             try {
                 return block()
@@ -111,8 +80,15 @@ object HttpRetry {
     }
 
     /**
+     * 不重试版本：直接执行 [block]，失败即抛出。
+     *
+     * 用于流式响应等不适合重试的场景（避免半句话 + 重新开始的 UX 问题）。
+     */
+    suspend fun <T> retrySuspendNoRetry(tag: String = "HttpRetry", block: suspend () -> T): T = block()
+
+    /**
      * 检查 HttpURLConnection 的响应码，在非 2xx 时抛出 IOException。
-     * 在 retry block 中调用此方法可让 [retry] 识别 429/5xx 并重试。
+     * 在 retrySuspend block 中调用此方法可让 [retrySuspend] 识别 429/5xx 并重试。
      */
     fun checkResponse(conn: HttpURLConnection): HttpURLConnection {
         val code = conn.responseCode

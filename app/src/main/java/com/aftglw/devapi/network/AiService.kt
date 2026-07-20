@@ -30,7 +30,11 @@ fun estimateTokenCount(text: String, modelHint: String = ""): Int {
 }
 
 interface AiService {
-    fun sendMessage(
+    /**
+     * 非流式发送。Phase 3 起改为 `suspend`，调用方需在协程中调用；
+     * service 内部已用 OkHttp/HttpRetry 的 suspend 链路，不再 `runBlocking`。
+     */
+    suspend fun sendMessage(
         history: List<ChatMessage>, userMessage: String, systemPrompt: String = "",
         onError: ((String) -> Unit)? = null,
         /** 输出参数：原生 tool_calls 收集器（为 null 时兼容旧调用方） */
@@ -38,8 +42,11 @@ interface AiService {
     ): String?
 
     /**
-     * SSE 流式接口。
-     * 默认实现回退到 [sendMessage] 一次吐完整文本。
+     * SSE 流式接口（callback 风格）。
+     *
+     * 默认实现回退到 [sendMessage] 一次吐完整文本；用 `runBlocking` 包装是因为本接口仍是
+     * 非 suspend 的回调风格，而 [sendMessage] 自 Phase 3 起改为 `suspend`。
+     * Task 3.2 会把本接口改为 `Flow<String>`，届时移除此 `runBlocking`。
      */
     fun sendMessageStream(
         history: List<ChatMessage>,
@@ -50,7 +57,7 @@ interface AiService {
         onError: ((String) -> Unit)? = null,
         toolCallsOut: MutableList<ToolCall>? = null
     ) {
-        val reply = sendMessage(history, userMessage, systemPrompt, onError, toolCallsOut) ?: ""
+        val reply = kotlinx.coroutines.runBlocking { sendMessage(history, userMessage, systemPrompt, onError, toolCallsOut) } ?: ""
         if (reply.isNotEmpty()) onChunk(reply)
         onDone(reply)
     }

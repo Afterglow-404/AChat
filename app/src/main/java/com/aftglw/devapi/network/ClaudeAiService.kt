@@ -15,72 +15,95 @@ class ClaudeAiService(context: Context) : AiService {
     /** 当前在飞的 OkHttp Call；供 [cancel] 使用 */
     @Volatile private var currentCall: okhttp3.Call? = null
 
+    /** token 计数内存累加缓冲：减少 SharedPreferences 磁盘写入次数 */
+    private var pendingTokenWrites = 0
+    @Volatile private var pendingTokenInDelta = 0
+    @Volatile private var pendingTokenOutDelta = 0
+
     override fun cancel() {
         currentCall?.cancel()
         currentCall = null
     }
 
-    override fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
+    /** 批量 flush 累积的 token 计数到 SharedPreferences */
+    private fun flushTokenCounts() {
+        if (pendingTokenWrites == 0) return
+        prefs.edit()
+            .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + pendingTokenInDelta)
+            .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + pendingTokenOutDelta)
+            .apply()
+        pendingTokenInDelta = 0
+        pendingTokenOutDelta = 0
+        pendingTokenWrites = 0
+    }
+
+    /** 退出前调用，确保累积 token 计数落盘 */
+    fun shutdown() {
+        flushTokenCounts()
+    }
+
+    override suspend fun sendMessage(history: List<ChatMessage>, userMessage: String, systemPrompt: String, onError: ((String) -> Unit)?, toolCallsOut: MutableList<com.aftglw.devapi.network.ToolCall>?): String? {
         val baseUrl = prefs.getString("ai_api_url", "")?.trimEnd('/') ?: ""
         val apiKey = SecureKeyStore.getString(appCtx, "ai_api_key")
         val model = prefs.getString("ai_model", "claude-3-5-sonnet") ?: "claude-3-5-sonnet"
         if (baseUrl.isEmpty() || apiKey.isEmpty()) return null
 
         return try {
-            runBlocking {
-                HttpRetry.retrySuspend("Claude") {
-                    val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false, tools = buildToolsArray())
-                    val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
-                        "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
-                    val call = HttpClient.client.newCall(request)
-                    currentCall = call
-                    val response = try {
-                        call.execute()
-                    } finally {
-                        currentCall = null
+            HttpRetry.retrySuspend("Claude") {
+                val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = false, tools = buildToolsArray())
+                val request = HttpClient.postJson("$baseUrl/messages", body.toString(),
+                    "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+                val call = HttpClient.client.newCall(request)
+                currentCall = call
+                val response = try {
+                    call.execute()
+                } finally {
+                    currentCall = null
+                }
+                val respBody = try {
+                    if (!response.isSuccessful) {
+                        val errBody = response.body?.string() ?: ""
+                        throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
                     }
-                    val respBody = try {
-                        if (!response.isSuccessful) {
-                            val errBody = response.body?.string() ?: ""
-                            throw java.io.IOException("HTTP ${response.code} - ${response.message} - $errBody")
-                        }
-                        response.body?.string() ?: ""
-                    } finally {
-                        response.close()
-                    }
-                    val json = JSONObject(respBody)
-                    val contentArr = json.optJSONArray("content")
-                    var reply = ""
-                    if (contentArr != null) {
-                        val sb = StringBuilder()
-                        for (i in 0 until contentArr.length()) {
-                            val block = contentArr.getJSONObject(i)
-                            val type = block.optString("type", "")
-                            if (type == "text") {
-                                sb.append(block.optString("text", ""))
-                            } else if (type == "tool_use") {
-                                val name = block.getString("name")
-                                val args = block.optJSONObject("input")?.toString() ?: "{}"
-                                if (toolCallsOut != null) {
-                                    toolCallsOut.add(ToolCall(name, args, ""))
-                                } else {
-                                    sb.append("【tool:${name} ${args}】")
-                                }
+                    response.body?.string() ?: ""
+                } finally {
+                    response.close()
+                }
+                val json = JSONObject(respBody)
+                val contentArr = json.optJSONArray("content")
+                var reply = ""
+                if (contentArr != null) {
+                    val sb = StringBuilder()
+                    for (i in 0 until contentArr.length()) {
+                        val block = contentArr.getJSONObject(i)
+                        val type = block.optString("type", "")
+                        if (type == "text") {
+                            sb.append(block.optString("text", ""))
+                        } else if (type == "tool_use") {
+                            val name = block.getString("name")
+                            val args = block.optJSONObject("input")?.toString() ?: "{}"
+                            if (toolCallsOut != null) {
+                                toolCallsOut.add(ToolCall(name, args, ""))
+                            } else {
+                                sb.append("【tool:${name} ${args}】")
                             }
                         }
-                        reply = sb.toString().trim()
                     }
-                    if (reply.isNotBlank()) {
-                        val estIn = estimateTokenCount(systemPrompt, model) + messagesLength(body) + estimateTokenCount(userMessage, model)
-                        prefs.edit()
-                            .putInt("last_tokens_in", estIn)
-                            .putInt("total_tokens_in", prefs.getInt("total_tokens_in", 0) + estIn)
-                            .putInt("last_tokens_out", reply.length / 4)
-                            .putInt("total_tokens_out", prefs.getInt("total_tokens_out", 0) + reply.length / 4)
-                            .apply()
-                        reply.trim()
-                    } else null
+                    reply = sb.toString().trim()
                 }
+                if (reply.isNotBlank()) {
+                    val estIn = estimateTokenCount(systemPrompt, model) + messagesLength(body) + estimateTokenCount(userMessage, model)
+                    val estOut = reply.length / 4
+                    prefs.edit()
+                        .putInt("last_tokens_in", estIn)
+                        .putInt("last_tokens_out", estOut)
+                        .apply()
+                    pendingTokenInDelta += estIn
+                    pendingTokenOutDelta += estOut
+                    pendingTokenWrites++
+                    if (pendingTokenWrites >= 10) flushTokenCounts()
+                    reply.trim()
+                } else null
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -102,7 +125,8 @@ class ClaudeAiService(context: Context) : AiService {
 
         try {
             val result = runBlocking {
-                HttpRetry.retrySuspend("Claude") {
+                // 流式失败不重试，避免半句话+重新开始的 UX 问题
+                HttpRetry.retrySuspendNoRetry("Claude-stream") {
                     val body = buildRequestBody(history, userMessage, systemPrompt, model, streaming = true, tools = buildToolsArray())
                     val httpReq = HttpClient.postJson("$baseUrl/messages", body.toString(),
                         "x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
@@ -263,8 +287,11 @@ class ClaudeAiService(context: Context) : AiService {
         return try {
             val file = java.io.File(path)
             if (!file.exists() || file.length() == 0L) return null
-            val bytes = file.readBytes()
-            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val out = java.io.ByteArrayOutputStream(file.length().toInt().coerceAtMost(1024 * 1024))
+            android.util.Base64OutputStream(out, android.util.Base64.NO_WRAP).use { b64 ->
+                file.inputStream().use { it.copyTo(b64, 64 * 1024) }
+            }
+            out.toString(Charsets.US_ASCII.name())
         } catch (_: Exception) { null }
     }
 
@@ -283,4 +310,4 @@ class ClaudeAiService(context: Context) : AiService {
     }
 }
 
-private fun messagesLength(body: JSONObject) = body.optJSONArray("messages")?.length() ?: 0 * 4
+private fun messagesLength(body: JSONObject) = (body.optJSONArray("messages")?.length() ?: 0) * 4

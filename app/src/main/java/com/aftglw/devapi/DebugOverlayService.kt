@@ -18,6 +18,10 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DebugOverlayService : Service() {
 
@@ -156,14 +160,26 @@ class DebugOverlayService : Service() {
         val hint = MoodDetector.lastHint
         val src = MoodDetector.lastSource
         val activeChat = prefs.getString("last_active_chat", "") ?: ""
-        val aiEmo = if (activeChat.isNotEmpty()) com.aftglw.devapi.core.memory.MemoryStore.search(this, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: "" else ""
-        tvEmoResult.text = when {
+        val baseEmoResult = when {
             !emoEnabled -> "off"
             MoodDetector.feedCount == 0 -> "not triggered"
             last == null -> "waiting..."
             hint != null -> "$last(${hint.take(20)})" + " | via API"
             else -> last
-        } + if (aiEmo.isNotEmpty()) " | AI:$aiEmo" else ""
+        }
+        // MemoryStore.search 已 suspend 化，先同步显示基础结果，再异步补 AI 情绪记忆
+        tvEmoResult.text = baseEmoResult
+        if (activeChat.isNotEmpty()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val aiEmo = try {
+                    com.aftglw.devapi.core.memory.MemoryStore.search(this@DebugOverlayService, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: ""
+                } catch (_: Exception) { "" }
+                val finalText = baseEmoResult + if (aiEmo.isNotEmpty()) " | AI:$aiEmo" else ""
+                withContext(Dispatchers.Main) {
+                    tvEmoResult.text = finalText
+                }
+            }
+        }
         val affPrefs = getSharedPreferences("wechat_settings", MODE_PRIVATE)
         val chatName = affPrefs.getString("last_active_chat", "") ?: ""
         tvChatId.text = if (chatName.isNotEmpty()) chatName else "(none)"

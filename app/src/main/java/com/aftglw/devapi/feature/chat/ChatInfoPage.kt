@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.network.AiServiceFactory
 import com.aftglw.devapi.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 对话详情页 — 角色信息、人设编辑、主动关怀、偏好设置、情绪可视化、记忆入口。
@@ -148,7 +150,10 @@ fun ChatInfoPage(
             Spacer(Modifier.height(8.dp))
             Text("记忆", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
-                val diaryCount = MemoryStore.search(ctx, "日记", 1, "diary:$name").size
+                var diaryCount by remember { mutableIntStateOf(0) }
+                LaunchedEffect(name) {
+                    diaryCount = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 1, "diary:$name").size }
+                }
                 Row(Modifier.fillMaxWidth().clickable { onNavigateToDiary() }, verticalAlignment = Alignment.CenterVertically) {
                     Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
@@ -161,7 +166,10 @@ fun ChatInfoPage(
             // 世界书入口
             Spacer(Modifier.height(8.dp))
             Text("世界书", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-            val worldbookCount = com.aftglw.devapi.core.worldbook.WorldbookStore.load(ctx, name).size
+            var worldbookCount by remember { mutableIntStateOf(0) }
+            LaunchedEffect(name) {
+                worldbookCount = withContext(Dispatchers.IO) { com.aftglw.devapi.core.worldbook.WorldbookStore.load(ctx, name).size }
+            }
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).clickable { onNavigateToWorldbook() }.padding(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("🌍 世界书 ($worldbookCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))
