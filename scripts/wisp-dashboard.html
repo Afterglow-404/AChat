@@ -80,6 +80,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   <div id="sidebar">
     <h3>📱 待回复请求</h3>
     <div id="sessionList"><div class="emptyState">暂无请求</div></div>
+    <div id="historySection" style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">
+      <h3 style="cursor:pointer" onclick="document.getElementById('historyList').style.display = document.getElementById('historyList').style.display === 'none' ? 'block' : 'none';this.querySelector('span').textContent = document.getElementById('historyList').style.display === 'none' ? '▶' : '▼'">📋 已处理 <span>▶</span></h3>
+      <div id="historyList" style="display:none;padding:0 8px"><div class="emptyState">暂无</div></div>
+    </div>
   </div>
 
   <!-- Center -->
@@ -132,8 +136,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 <script>
 const params = new URLSearchParams(location.search);
 const WS_URL = `ws://${location.host}/dashboard/ws` + (params.get('token') ? `?token=${encodeURIComponent(params.get('token'))}` : '');
-let ws, selectedSessionId = null;
+let ws, selectedSessionId = null, sendingReply = false;
 let sessions = new Map();
+let history = []; // completed sessions with result
 
 function connect() {
   ws = new WebSocket(WS_URL);
@@ -170,11 +175,18 @@ function handleMsg(msg) {
     renderSessions();
   }
   if (msg.type === 'session.completed') {
+    const s = sessions.get(msg.requestId);
+    if (s) {
+      s.resolvedStatus = msg.status || 'completed';
+      s.resolvedAt = Date.now();
+      history.unshift(s);
+      if (history.length > 50) history.pop();
+    }
     sessions.delete(msg.requestId);
-    if (selectedSessionId === msg.requestId) deselectSession();
+    if (selectedSessionId === msg.requestId) { sendingReply = false; deselectSession(); }
     renderSessions();
+    renderHistory();
     updateStats();
-    // Show brief toast for timeout/cancelled
     if (msg.status === 'timeout') showToast('⚠ 请求超时 (已自动跳过)');
     if (msg.status === 'cancelled') showToast('✕ 请求已取消');
   }
@@ -234,46 +246,54 @@ function selectSession(id) {
 
 function deselectSession() {
   selectedSessionId = null;
+  sendingReply = false;
   document.getElementById('selectedId').textContent = '选择一个请求开始回复';
   document.getElementById('selectedPrompt').textContent = '👈 从左侧列表选择一条消息';
   document.getElementById('replyInput').disabled = true;
   document.getElementById('replyInput').value = '';
   document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnSend').textContent = '发送 (Ctrl+Enter)';
   document.getElementById('btnCancel').disabled = true;
   document.getElementById('btnSticker').disabled = true;
   renderSessions();
 }
 
 function sendReply() {
-  if (!selectedSessionId) return;
+  if (!selectedSessionId || sendingReply) return;
   const content = document.getElementById('replyInput').value.trim();
   if (!content) return;
+  sendingReply = true;
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnSend').textContent = '发送中…';
   sendWs({ type: 'reply.send', requestId: selectedSessionId, content });
-  deselectSession();
+  // deselectSession happens when session.completed arrives
 }
 
 function cancelReply() {
-  if (!selectedSessionId) return;
+  if (!selectedSessionId || sendingReply) return;
   sendWs({ type: 'reply.cancel', requestId: selectedSessionId });
   deselectSession();
 }
 
 function sendSticker(tag) {
-  if (!selectedSessionId) return;
+  if (!selectedSessionId || sendingReply) return;
   const t = tag || prompt('输入贴纸标签 (如 "开心"):');
   if (!t) return;
-  // Use first pack that has this tag, or first pack overall
   const pack = stickerPacks.find(p => (p.tags || []).includes(t))?.pack || stickerPacks[0]?.pack;
   if (!pack) { alert('没有可用的贴纸包'); return; }
   const marker = '【sticker:' + pack + ':' + t + '】';
+  sendingReply = true;
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnSend').textContent = '发送中…';
   sendWs({ type: 'reply.send', requestId: selectedSessionId, content: marker });
-  deselectSession();
 }
 
 function quickReply(text) {
-  if (!selectedSessionId) return;
+  if (!selectedSessionId || sendingReply) return;
+  sendingReply = true;
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnSend').textContent = '发送中…';
   sendWs({ type: 'reply.send', requestId: selectedSessionId, content: text });
-  deselectSession();
 }
 
 function testTts() {
@@ -292,9 +312,35 @@ function addVoiceItem(voice) {
   const item = document.createElement('div');
   item.className = 'voiceItem';
   item.innerHTML = `<div style="font-size:10px;color:var(--text2)">${voice.receivedAt ? new Date(voice.receivedAt).toLocaleTimeString() : ''} · ${(voice.size / 1024).toFixed(1)}KB</div><div class="vtext">${escHtml(voice.text)}</div>`;
-  item.onclick = () => { window.open(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`, '_blank'); };
+  // Left-click to play, right-click to download
+  item.onclick = () => {
+    const player = document.getElementById('audioPlayer');
+    player.src = `/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`;
+    player.play().catch(() => showToast('无法播放该音频'));
+  };
+  item.oncontextmenu = (e) => { e.preventDefault(); window.open(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`, '_blank'); };
+  item.title = '点击播放 · 右键下载';
   div.insertBefore(item, div.firstChild);
   if (div.children.length > 20) div.removeChild(div.lastChild);
+}
+
+function renderHistory() {
+  const container = document.getElementById('historyList');
+  if (!container) return;
+  if (history.length === 0) {
+    container.innerHTML = '<div class="emptyState">暂无</div>';
+    return;
+  }
+  container.innerHTML = history.slice(0, 20).map(s => {
+    const age = Math.floor((Date.now() - s.resolvedAt) / 1000);
+    const ageStr = age < 60 ? `${age}s前` : `${Math.floor(age / 60)}m前`;
+    const statusLabel = s.resolvedStatus === 'timeout' ? '⏱ 超时' : s.resolvedStatus === 'cancelled' ? '✕ 已取消' : '✓ 已回复';
+    const statusColor = s.resolvedStatus === 'timeout' ? 'var(--warn)' : s.resolvedStatus === 'cancelled' ? 'var(--accent)' : 'var(--green)';
+    return `<div class="sessionCard" style="opacity:0.7;border-color:transparent">
+      <div class="userText">${escHtml((s.userText || '(空)').substring(0, 40))}</div>
+      <div class="meta">${ageStr} <span style="color:${statusColor}">${statusLabel}</span></div>
+    </div>`;
+  }).join('');
 }
 
 function showToast(msg) {
