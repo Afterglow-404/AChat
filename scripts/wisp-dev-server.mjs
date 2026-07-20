@@ -73,6 +73,7 @@ const state = {
   stickers: new Map(),
   interactiveSessions: new Map(),
   voiceInbox: [],
+  imageCache: new Map(), // requestId → [{ id, mime }]
 }
 
 const schema = (properties, required = []) => ({
@@ -366,6 +367,15 @@ function lastUserText(messages) {
   return ''
 }
 
+/** Extract base64 data URIs from the last user message's image_url parts */
+function lastUserImages(messages) {
+  const message = [...(Array.isArray(messages) ? messages : [])].reverse().find((item) => item?.role === 'user')
+  if (!message || !Array.isArray(message.content)) return []
+  return message.content
+    .filter(part => part?.type === 'image_url' && part?.image_url?.url)
+    .map(part => part.image_url.url)
+}
+
 function chooseSticker() {
   const pack = process.env.WISP_STICKER_PACK || [...state.stickers.keys()][0]
   const tag = process.env.WISP_STICKER_TAG || '开心'
@@ -492,9 +502,11 @@ async function sendChatCompletion(response, requestBody, request, url) {
 function createInteractiveSession(requestBody) {
   let resolveReply
   const reply = new Promise((resolve) => { resolveReply = resolve })
+  const images = lastUserImages(requestBody.messages)
   const session = {
     requestId: `wisp_interactive_${randomUUID()}`,
     userText: lastUserText(requestBody.messages),
+    userImages: images,
     model: requestBody.model || 'wisp-debug',
     stream: requestBody.stream === true,
     createdAt: Date.now(),
@@ -503,7 +515,17 @@ function createInteractiveSession(requestBody) {
     reply,
     resolveReply,
   }
+  // Cache images for Dashboard preview
+  if (images.length > 0) {
+    const cached = images.map((url, i) => {
+      const imgId = `img_${session.requestId}_${i}`
+      state.imageCache.set(imgId, url)
+      return imgId
+    })
+    session.userImages = cached
+  }
   state.interactiveSessions.set(session.requestId, session)
+  wsBroadcast({ type: 'session.new', session: interactiveSessionInfo(session) })
   return session
 }
 
@@ -532,6 +554,10 @@ async function waitForInteractiveReply(response, requestBody) {
     return writeCompletion(response, textCompletion(requestBody, result.content), session.stream)
   } finally {
     clearTimeout(timer)
+    // Clean up cached images
+    for (const key of state.imageCache.keys()) {
+      if (key.startsWith(`img_${session.requestId}_`)) state.imageCache.delete(key)
+    }
     state.interactiveSessions.delete(session.requestId)
     wsBroadcast({ type: 'session.completed', requestId: session.requestId, status: session.status })
   }
@@ -541,6 +567,7 @@ function interactiveSessionInfo(session) {
   return {
     requestId: session.requestId,
     userText: session.userText,
+    userImages: session.userImages || [],
     model: session.model,
     stream: session.stream,
     status: session.status,
@@ -934,6 +961,16 @@ async function handle(request, response) {
   if (request.method === 'GET' && url.pathname === '/api/v1/tools') return jsonResponse(response, 200, { tools: toolList() })
   if (request.method === 'GET' && url.pathname === '/api/v1/stickers') {
     return jsonResponse(response, 200, { packs: [...state.stickers.entries()].map(([pack, entries]) => ({ pack, tags: [...new Set(entries.flatMap((entry) => entry.tags || []))] })) })
+  }
+  // Image proxy for Dashboard: GET /api/v1/debug/images/:id
+  if (request.method === 'GET' && url.pathname.startsWith('/api/v1/debug/images/')) {
+    const imgId = url.pathname.split('/')[5]
+    const dataUrl = state.imageCache.get(imgId)
+    if (!dataUrl) return jsonResponse(response, 404, { error: { message: 'Image not found or expired' } })
+    const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/)
+    if (!match) return rawResponse(response, 200, Buffer.from(dataUrl, 'utf8'), 'text/plain')
+    const buf = Buffer.from(match[2], 'base64')
+    return rawResponse(response, 200, buf, match[1])
   }
 
   let payload = {}

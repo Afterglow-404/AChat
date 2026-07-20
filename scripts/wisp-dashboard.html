@@ -225,8 +225,11 @@ function renderSessions() {
   list.innerHTML = sorted.map(s => {
     const age = Math.floor((Date.now() - s.createdAt) / 1000);
     const ageStr = age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`;
+    const imgTags = (s.userImages || []).map(id => `<img src="/api/v1/debug/images/${encodeURIComponent(id)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin:2px">`).join('');
+    const label = s.userText || (imgTags ? '📷 图片消息' : '(空消息)');
     return `<div class="sessionCard ${s.requestId === selectedSessionId ? 'active' : ''}" onclick="selectSession('${s.requestId}')">
-      <div class="userText">${escHtml(s.userText || '(图片/语音)')}</div>
+      <div class="userText">${escHtml(label)}</div>
+      ${imgTags ? `<div style="margin-top:4px">${imgTags}</div>` : ''}
       <div class="meta">${ageStr} 前 <span class="status ${s.status}">${s.status === 'pending' ? '待处理' : '回复中'}</span></div>
     </div>`;
   }).join('');
@@ -245,7 +248,8 @@ function selectSession(id) {
   const s = sessions.get(id);
   if (!s) return;
   document.getElementById('selectedId').textContent = id;
-  document.getElementById('selectedPrompt').textContent = s.userText || '(图片/语音消息)';
+  const imgs = (s.userImages || []).map(imgId => `<img src="/api/v1/debug/images/${encodeURIComponent(imgId)}" style="max-width:200px;max-height:200px;border-radius:8px;margin:4px">`).join('');
+  document.getElementById('selectedPrompt').innerHTML = (s.userText ? escHtml(s.userText) : '') + (imgs ? `<div style="margin-top:8px">${imgs}</div>` : '') || '👈 从左侧列表选择一条消息';
   document.getElementById('replyInput').disabled = false;
   document.getElementById('replyInput').value = '';
   document.getElementById('replyInput').focus();
@@ -261,7 +265,7 @@ function deselectSession() {
   selectedSessionId = null;
   sendingReply = false;
   document.getElementById('selectedId').textContent = '选择一个请求开始回复';
-  document.getElementById('selectedPrompt').textContent = '👈 从左侧列表选择一条消息';
+  document.getElementById('selectedPrompt').innerHTML = '👈 从左侧列表选择一条消息';
   document.getElementById('replyInput').disabled = true;
   document.getElementById('replyInput').value = '';
   document.getElementById('btnSend').disabled = true;
