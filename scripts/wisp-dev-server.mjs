@@ -382,6 +382,14 @@ function chooseSticker() {
   return findSticker(pack, tag)
 }
 
+/** Parse 【sticker:pack:tag】 marker from text, returns { pack, tag, file } or null */
+function parseStickerMarker(text) {
+  const m = String(text || '').match(/【sticker:([^:】]+):([^】]+)】/)
+  if (!m) return null
+  const found = findSticker(m[1], m[2])
+  return found ? { pack: found.pack, tag: found.tag, file: found.file } : null
+}
+
 function parseScenario(request, url) {
   const header = request.headers['x-wisp-scenario']
   return String(header || url.searchParams.get('scenario') || defaultScenario).trim().toLowerCase()
@@ -524,6 +532,9 @@ function createInteractiveSession(requestBody) {
     })
     session.userImages = cached
   }
+  // Detect sticker marker
+  const sticker = parseStickerMarker(session.userText)
+  if (sticker) session.sticker = sticker
   state.interactiveSessions.set(session.requestId, session)
   wsBroadcast({ type: 'session.new', session: interactiveSessionInfo(session) })
   return session
@@ -568,6 +579,7 @@ function interactiveSessionInfo(session) {
     requestId: session.requestId,
     userText: session.userText,
     userImages: session.userImages || [],
+    sticker: session.sticker || null,
     model: session.model,
     stream: session.stream,
     status: session.status,
@@ -961,6 +973,20 @@ async function handle(request, response) {
   if (request.method === 'GET' && url.pathname === '/api/v1/tools') return jsonResponse(response, 200, { tools: toolList() })
   if (request.method === 'GET' && url.pathname === '/api/v1/stickers') {
     return jsonResponse(response, 200, { packs: [...state.stickers.entries()].map(([pack, entries]) => ({ pack, tags: [...new Set(entries.flatMap((entry) => entry.tags || []))] })) })
+  }
+  // Sticker image file: GET /api/v1/stickers/:pack/:file
+  if (request.method === 'GET' && url.pathname.startsWith('/api/v1/stickers/') && url.pathname.split('/').length === 6) {
+    const [, , , , pack, file] = url.pathname.split('/')
+    const safeFile = path.basename(file)
+    const imgPath = path.join(root, 'app', 'src', 'main', 'assets', 'stickers', pack, safeFile)
+    try {
+      const data = await fs.readFile(imgPath)
+      const ext = path.extname(safeFile).toLowerCase()
+      const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/png'
+      return rawResponse(response, 200, data, mime)
+    } catch {
+      return jsonResponse(response, 404, { error: { message: 'Sticker not found' } })
+    }
   }
   // Image proxy for Dashboard: GET /api/v1/debug/images/:id
   if (request.method === 'GET' && url.pathname.startsWith('/api/v1/debug/images/')) {

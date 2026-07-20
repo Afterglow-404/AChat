@@ -226,10 +226,12 @@ function renderSessions() {
     const age = Math.floor((Date.now() - s.createdAt) / 1000);
     const ageStr = age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`;
     const imgTags = (s.userImages || []).map(id => `<img src="/api/v1/debug/images/${encodeURIComponent(id)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin:2px">`).join('');
-    const label = s.userText || (imgTags ? '📷 图片消息' : '(空消息)');
+    const stickerTag = s.sticker ? `<img src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="width:48px;height:48px;object-fit:contain;margin:2px" title="${escHtml(s.sticker.tag)}">` : '';
+    const label = s.userText || (imgTags ? '📷 图片消息' : stickerTag ? '🎭 贴纸' : '(空消息)');
     return `<div class="sessionCard ${s.requestId === selectedSessionId ? 'active' : ''}" onclick="selectSession('${s.requestId}')">
       <div class="userText">${escHtml(label)}</div>
-      ${imgTags ? `<div style="margin-top:4px">${imgTags}</div>` : ''}
+      ${stickerTag ? `<div>${stickerTag}</div>` : ''}
+      ${!stickerTag && imgTags ? `<div style="margin-top:4px">${imgTags}</div>` : ''}
       <div class="meta">${ageStr} 前 <span class="status ${s.status}">${s.status === 'pending' ? '待处理' : '回复中'}</span></div>
     </div>`;
   }).join('');
@@ -248,8 +250,9 @@ function selectSession(id) {
   const s = sessions.get(id);
   if (!s) return;
   document.getElementById('selectedId').textContent = id;
+  const stickerHtml = s.sticker ? `<div style="margin-top:8px"><img src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="max-width:120px;max-height:120px;border-radius:8px" title="${escHtml(s.sticker.tag)}"><div style="font-size:10px;color:var(--text2)">🎭 ${escHtml(s.sticker.pack)} · ${escHtml(s.sticker.tag)}</div></div>` : '';
   const imgs = (s.userImages || []).map(imgId => `<img src="/api/v1/debug/images/${encodeURIComponent(imgId)}" style="max-width:200px;max-height:200px;border-radius:8px;margin:4px">`).join('');
-  document.getElementById('selectedPrompt').innerHTML = (s.userText ? escHtml(s.userText) : '') + (imgs ? `<div style="margin-top:8px">${imgs}</div>` : '') || '👈 从左侧列表选择一条消息';
+  document.getElementById('selectedPrompt').innerHTML = (s.userText ? escHtml(s.userText) : '') + stickerHtml + (imgs && !s.sticker ? `<div style="margin-top:8px">${imgs}</div>` : '') || '👈 从左侧列表选择一条消息';
   document.getElementById('replyInput').disabled = false;
   document.getElementById('replyInput').value = '';
   document.getElementById('replyInput').focus();
