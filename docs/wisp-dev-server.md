@@ -154,13 +154,18 @@ python -m pip install -r scripts\requirements-qwen3-tts.txt
 然后启动：
 
 ```powershell
-$env:QWEN3_TTS_MODEL = 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
+$env:QWEN3_TTS_MODEL = 'H:\\qwen3-tts-models\\Qwen3-TTS-12Hz-0.6B-CustomVoice'
 $env:QWEN3_TTS_DEVICE = 'cuda:0'
-$env:QWEN3_TTS_SPEAKER = 'Vivian'
+$env:QWEN3_TTS_DTYPE = 'float32'
+$env:QWEN3_TTS_DO_SAMPLE = '1'
+$env:QWEN3_TTS_SUBTALKER_DOSAMPLE = '1'
+$env:QWEN3_TTS_MAX_NEW_TOKENS = '512'
 python scripts\qwen3_tts_server.py
 ```
 
-模型默认在第一次 `/tts` 请求时加载；如果希望启动时加载，可设置 `$env:QWEN3_TTS_LOAD_ON_START = '1'`。模型下载、显存占用和 CUDA/PyTorch 版本由电脑端环境负责，Wisp Android 端不需要安装这些依赖。
+本机 RTX 2070 实测使用 0.6B 模型、CUDA、`float32`、采样开启和 512 个最大音频 token，短句约 2 到 4 秒返回，显存约 4.8GB。模型默认在第一次 `/tts` 请求时加载；启动脚本会设置 `$env:QWEN3_TTS_LOAD_ON_START = '1'` 预加载模型。模型下载、显存占用和 CUDA/PyTorch 版本由电脑端环境负责，Wisp Android 端不需要安装这些依赖。
+
+本项目还提供了 `D:\deepseek-reasonix-SandBox\qwen3-tts-start.ps1`，它会固定使用 `H:\qwen3-tts-models` 中的模型和 CUDA 配置。启动成功后，Wisp 代理配置为 `$env:WISP_QWEN3_TTS_URL = 'http://127.0.0.1:8000'`，手机端则填写 Wisp 根地址 `http://<computer-ip>:17890`。
 
 `send_message`、内置设备工具和表情调用均为模拟执行。表情调用仍会解析真实的 Wisp 资源，并生成准确的 `【sticker:pack:tag】` 标记。基于 HTTP 的 `.wsptool` 条目会执行其配置的请求，除非设置了 `WISP_DEBUG_NO_NETWORK=1`。Shell、脚本和 Kotlin 实现会被 Node 调试器报告为不支持。
 

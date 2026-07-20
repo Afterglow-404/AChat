@@ -130,7 +130,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 <audio id="audioPlayer" style="display:none" controls></audio>
 
 <script>
-const WS_URL = `ws://${location.host}/dashboard/ws`;
+const params = new URLSearchParams(location.search);
+const WS_URL = `ws://${location.host}/dashboard/ws` + (params.get('token') ? `?token=${encodeURIComponent(params.get('token'))}` : '');
 let ws, selectedSessionId = null;
 let sessions = new Map();
 
@@ -173,16 +174,16 @@ function handleMsg(msg) {
     if (selectedSessionId === msg.requestId) deselectSession();
     renderSessions();
     updateStats();
+    // Show brief toast for timeout/cancelled
+    if (msg.status === 'timeout') showToast('⚠ 请求超时 (已自动跳过)');
+    if (msg.status === 'cancelled') showToast('✕ 请求已取消');
   }
   if (msg.type === 'voice.new') {
     addVoiceItem(msg.voice);
     updateStats();
   }
   if (msg.type === 'tts.audio') {
-    const player = document.getElementById('audioPlayer');
-    const blob = new Blob([Uint8Array.from(atob(msg.data), c => c.charCodeAt(0))], { type: 'audio/' + (msg.format || 'wav') });
-    player.src = URL.createObjectURL(blob);
-    player.play();
+    // Deprecated: TTS now uses HTTP proxy. Removing base64 path.
   }
   if (msg.type === 'error') {
     alert('错误: ' + (msg.message || '未知'));
@@ -279,7 +280,10 @@ function testTts() {
   const text = document.getElementById('ttsText').value.trim();
   const engine = document.getElementById('ttsEngine').value;
   if (!text) return;
-  sendWs({ type: 'tts.test', text, engine });
+  const params = new URLSearchParams({ engine, text });
+  const player = document.getElementById('audioPlayer');
+  player.src = `/api/v1/tts/proxy?${params}`;
+  player.play().catch(() => showToast('TTS 播放失败'));
 }
 
 function addVoiceItem(voice) {
@@ -288,15 +292,18 @@ function addVoiceItem(voice) {
   const item = document.createElement('div');
   item.className = 'voiceItem';
   item.innerHTML = `<div style="font-size:10px;color:var(--text2)">${voice.receivedAt ? new Date(voice.receivedAt).toLocaleTimeString() : ''} · ${(voice.size / 1024).toFixed(1)}KB</div><div class="vtext">${escHtml(voice.text)}</div>`;
-  item.onclick = () => {
-    // Download voice file via server
-    const a = document.createElement('a');
-    a.href = '/api/v1/debug/voices';
-    a.target = '_blank';
-    a.click();
-  };
+  item.onclick = () => { window.open(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`, '_blank'); };
   div.insertBefore(item, div.firstChild);
   if (div.children.length > 20) div.removeChild(div.lastChild);
+}
+
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:60px;right:20px;background:var(--surface2);color:var(--text);padding:8px 16px;border-radius:var(--radius);font-size:13px;z-index:999;opacity:0;transition:opacity 0.3s';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2500);
 }
 
 function sendWs(data) {

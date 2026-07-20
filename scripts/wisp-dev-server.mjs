@@ -50,6 +50,7 @@ const qwen3TtsUrl = (process.env.WISP_QWEN3_TTS_URL || '').replace(/\/$/, '')
 const defaultScenario = process.env.WISP_AI_SCENARIO || 'echo'
 const interactiveMode = ['1', 'true'].includes(String(process.env.WISP_INTERACTIVE || '').toLowerCase())
 const interactiveTimeoutMs = Number.parseInt(process.env.WISP_INTERACTIVE_TIMEOUT_MS || '180000', 10)
+const dashboardToken = process.env.WISP_DASHBOARD_TOKEN || ''
 const voiceDir = path.resolve(process.env.WISP_VOICE_DIR || path.join(root, 'wisp-voice-inbox'))
 
 const builtInTools = [
@@ -515,12 +516,14 @@ async function waitForInteractiveReply(response, requestBody) {
     })
     const result = await Promise.race([session.reply, timeout])
     if (result?.timeout) {
+      session.status = 'timeout'
       return jsonResponse(response, 504, {
         error: { message: `Interactive reply timed out after ${interactiveTimeoutMs}ms`, type: 'interactive_timeout' },
         requestId: session.requestId,
       })
     }
     if (result?.cancelled) {
+      session.status = 'cancelled'
       return jsonResponse(response, 499, {
         error: { message: 'Interactive reply was cancelled', type: 'interactive_cancelled' },
         requestId: session.requestId,
@@ -900,6 +903,47 @@ async function handle(request, response) {
   if (request.method === 'GET' && url.pathname === '/api/v1/debug/voices') {
     return jsonResponse(response, 200, { voices: state.voiceInbox })
   }
+  // Voice file download: GET /api/v1/debug/voices/:id/download
+  if (request.method === 'GET' && url.pathname.startsWith('/api/v1/debug/voices/') && url.pathname.endsWith('/download')) {
+    const voiceId = url.pathname.split('/')[5]
+    const voice = state.voiceInbox.find(v => v.id === voiceId)
+    if (!voice) return jsonResponse(response, 404, { error: { message: 'Voice not found' } })
+    try {
+      const data = await fs.readFile(voice.storedPath)
+      return rawResponse(response, 200, data, voice.contentType || 'application/octet-stream')
+    } catch {
+      return jsonResponse(response, 404, { error: { message: 'Voice file missing' } })
+    }
+  }
+  // TTS audio proxy for Dashboard: GET /api/v1/tts/proxy?engine=...&text=...
+  if (request.method === 'GET' && url.pathname === '/api/v1/tts/proxy') {
+    const engine = url.searchParams.get('engine') || 'gptsovits'
+    const text = url.searchParams.get('text') || '你好'
+    try {
+      let resp
+      if (engine === 'qwen3' && qwen3TtsUrl) {
+        resp = await fetch(`${qwen3TtsUrl}/tts`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text, language: url.searchParams.get('language') || 'Chinese', speaker: url.searchParams.get('voice') || 'Vivian', instruct: url.searchParams.get('instruct') || '', response_format: 'wav' }),
+          signal: AbortSignal.timeout(15000),
+        })
+      } else if (gptSovitsUrl) {
+        resp = await fetch(`${gptSovitsUrl}/tts`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text, voice: url.searchParams.get('voice') || 'default', prompt_lang: 'zh', text_lang: 'zh', response_format: 'wav' }),
+          signal: AbortSignal.timeout(15000),
+        })
+      } else {
+        return jsonResponse(response, 503, { error: { message: 'No TTS upstream configured' } })
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const buf = Buffer.from(await resp.arrayBuffer())
+      const ct = resp.headers.get('content-type') || 'audio/wav'
+      return rawResponse(response, 200, buf, ct)
+    } catch (e) {
+      return jsonResponse(response, 502, { error: { message: 'TTS proxy failed: ' + e.message } })
+    }
+  }
   if (request.method === 'GET' && (url.pathname === '/v1/models' || url.pathname === '/models')) {
     return jsonResponse(response, 200, {
       object: 'list',
@@ -1050,6 +1094,13 @@ server.on('upgrade', (request, socket) => {
     'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
     'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
   )
+
+  // Dashboard WebSocket: token auth via query param ?token=xxx
+  if (dashboardToken && url.searchParams.get('token') !== dashboardToken) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+    socket.destroy()
+    return
+  }
 
   wsClients.add(socket)
   // Send current state snapshot
