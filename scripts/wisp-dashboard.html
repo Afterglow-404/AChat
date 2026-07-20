@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wisp Dashboard</title>
+<style>
+:root {
+  --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+  --text: #e0e0e0; --text2: #a0a0b0; --accent: #e94560;
+  --green: #4ecca3; --warn: #f0a500; --border: #2a2a4a;
+  --radius: 8px; --font: system-ui, -apple-system, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+/* Top bar */
+#topbar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#topbar h1 { font-size: 16px; color: var(--accent); }
+#topbar .stat { font-size: 12px; color: var(--text2); }
+#topbar .stat span { color: var(--text); font-weight: bold; }
+#topbar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+#topbar .dot.offline { background: var(--accent); }
+/* Main layout */
+#main { display: flex; flex: 1; overflow: hidden; }
+/* Left: session list */
+#sidebar { width: 280px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+#sidebar h3 { padding: 12px 16px 8px; font-size: 13px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+#sessionList { flex: 1; overflow-y: auto; padding: 0 8px; }
+.sessionCard { padding: 10px 12px; margin-bottom: 6px; background: var(--surface2); border-radius: var(--radius); cursor: pointer; border: 1px solid transparent; transition: border-color 0.15s; }
+.sessionCard:hover { border-color: var(--accent); }
+.sessionCard.active { border-color: var(--accent); background: var(--surface2); box-shadow: 0 0 8px rgba(233,69,96,0.2); }
+.sessionCard .userText { font-size: 13px; margin-bottom: 4px; line-height: 1.4; word-break: break-all; }
+.sessionCard .meta { font-size: 11px; color: var(--text2); }
+.sessionCard .status { font-size: 10px; padding: 1px 6px; border-radius: 4px; display: inline-block; margin-left: 6px; }
+.sessionCard .status.pending { background: var(--warn); color: #000; }
+.sessionCard .status.replying { background: var(--green); color: #000; }
+.emptyState { padding: 24px 16px; text-align: center; color: var(--text2); font-size: 13px; }
+/* Center: reply area */
+#center { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+#replyHeader { padding: 16px 20px 8px; flex-shrink: 0; }
+#replyHeader .requestId { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+#replyHeader .prompt { font-size: 14px; background: var(--surface); padding: 12px; border-radius: var(--radius); line-height: 1.5; word-break: break-all; max-height: 80px; overflow-y: auto; }
+#replyArea { flex: 1; display: flex; flex-direction: column; padding: 12px 20px; overflow: hidden; }
+#replyInput { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 12px; font-size: 14px; font-family: var(--font); resize: none; min-height: 80px; }
+#replyInput:focus { outline: none; border-color: var(--accent); }
+#stickerBar { display: flex; gap: 6px; padding: 8px 0; flex-wrap: wrap; overflow-y: auto; max-height: 100px; }
+#stickerBar button { padding: 4px 10px; font-size: 11px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; white-space: nowrap; }
+#stickerBar button:hover { border-color: var(--accent); background: var(--surface); }
+#btnRow { display: flex; gap: 8px; padding: 8px 0; flex-shrink: 0; }
+#btnRow button { padding: 8px 20px; font-size: 13px; border: none; border-radius: var(--radius); cursor: pointer; font-weight: bold; }
+#btnRow .btnSend { background: var(--accent); color: #fff; }
+#btnRow .btnSend:hover { opacity: 0.85; }
+#btnRow .btnCancel { background: var(--surface2); color: var(--text); }
+#btnRow .btnCancel:hover { background: #444; }
+/* Right: panels */
+#right { width: 260px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 12px; flex-direction: column; display: flex; gap: 12px; }
+#right h3 { font-size: 12px; color: var(--text2); text-transform: uppercase; margin-bottom: 4px; }
+.voiceItem { font-size: 11px; padding: 6px 8px; background: var(--surface2); border-radius: var(--radius); margin-bottom: 4px; cursor: pointer; }
+.voiceItem:hover { background: var(--accent); color: #fff; }
+.voiceItem .vtext { font-size: 12px; margin-top: 2px; color: var(--text); }
+#ttsPanel input, #ttsPanel select { width: 100%; padding: 6px 8px; font-size: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); margin-bottom: 6px; }
+#ttsPanel button { width: 100%; padding: 6px; font-size: 12px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); cursor: pointer; }
+#quickReplies { display: flex; flex-wrap: wrap; gap: 4px; }
+#quickReplies button { font-size: 11px; padding: 4px 8px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+#quickReplies button:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="dot" id="wsDot"></div>
+  <h1>Wisp Dashboard</h1>
+  <div class="stat">待处理: <span id="statPending">0</span></div>
+  <div class="stat">语音: <span id="statVoices">0</span></div>
+  <div style="flex:1"></div>
+  <div class="stat" id="wsStatus">连接中…</div>
+</div>
+
+<div id="main">
+  <!-- Left sidebar -->
+  <div id="sidebar">
+    <h3>📱 待回复请求</h3>
+    <div id="sessionList"><div class="emptyState">暂无请求</div></div>
+  </div>
+
+  <!-- Center -->
+  <div id="center">
+    <div id="replyHeader">
+      <div class="requestId" id="selectedId">选择一个请求开始回复</div>
+      <div class="prompt" id="selectedPrompt">👈 从左侧列表选择一条消息</div>
+    </div>
+    <div id="replyArea">
+      <div id="stickerBar"></div>
+      <textarea id="replyInput" placeholder="输入回复内容…Ctrl+Enter 发送" disabled></textarea>
+      <div id="btnRow">
+        <button class="btnSend" id="btnSend" disabled onclick="sendReply()">发送 (Ctrl+Enter)</button>
+        <button class="btnCancel" id="btnCancel" disabled onclick="cancelReply()">跳过 / 取消</button>
+        <button class="btnCancel" onclick="sendSticker()" id="btnSticker" disabled>📎 贴纸</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right panels -->
+  <div id="right">
+    <div>
+      <h3>⚡ 快捷回复</h3>
+      <div id="quickReplies">
+        <button onclick="quickReply('你好呀~')">你好呀~</button>
+        <button onclick="quickReply('今天天气不错呢')">天气不错</button>
+        <button onclick="quickReply('在忙什么呢？')">在忙什么</button>
+        <button onclick="quickReply('好的，我知道了')">好的</button>
+        <button onclick="quickReply('哈哈，有意思')">哈哈</button>
+        <button onclick="quickReply('👍')">👍</button>
+      </div>
+    </div>
+    <div>
+      <h3>🔊 TTS 试听</h3>
+      <div id="ttsPanel">
+        <input id="ttsText" placeholder="输入试听文字…" value="你好，测试语音">
+        <select id="ttsEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select>
+        <button onclick="testTts()">▶ 试听</button>
+      </div>
+    </div>
+    <div>
+      <h3>🎙 语音收件箱</h3>
+      <div id="voiceList"><div class="emptyState">暂无</div></div>
+    </div>
+  </div>
+</div>
+
+<audio id="audioPlayer" style="display:none" controls></audio>
+
+<script>
+const WS_URL = `ws://${location.host}/dashboard/ws`;
+let ws, selectedSessionId = null;
+let sessions = new Map();
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('wsDot').className = 'dot';
+    document.getElementById('wsStatus').textContent = '已连接';
+  };
+  ws.onclose = () => {
+    document.getElementById('wsDot').className = 'dot offline';
+    document.getElementById('wsStatus').textContent = '断开 — 3s后重连';
+    setTimeout(connect, 3000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    try { handleMsg(JSON.parse(e.data)); } catch {}
+  };
+}
+
+function handleMsg(msg) {
+  if (msg.type === 'init') {
+    sessions.clear();
+    for (const s of msg.sessions || []) sessions.set(s.requestId, s);
+    renderSessions();
+    renderStickers(msg.stickers || []);
+    updateStats();
+  }
+  if (msg.type === 'session.new') {
+    sessions.set(msg.session.requestId, msg.session);
+    renderSessions();
+    updateStats();
+  }
+  if (msg.type === 'session.updated') {
+    sessions.set(msg.session.requestId, msg.session);
+    renderSessions();
+  }
+  if (msg.type === 'session.completed') {
+    sessions.delete(msg.requestId);
+    if (selectedSessionId === msg.requestId) deselectSession();
+    renderSessions();
+    updateStats();
+  }
+  if (msg.type === 'voice.new') {
+    addVoiceItem(msg.voice);
+    updateStats();
+  }
+  if (msg.type === 'tts.audio') {
+    const player = document.getElementById('audioPlayer');
+    const blob = new Blob([Uint8Array.from(atob(msg.data), c => c.charCodeAt(0))], { type: 'audio/' + (msg.format || 'wav') });
+    player.src = URL.createObjectURL(blob);
+    player.play();
+  }
+  if (msg.type === 'error') {
+    alert('错误: ' + (msg.message || '未知'));
+  }
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessionList');
+  if (sessions.size === 0) {
+    list.innerHTML = '<div class="emptyState">暂无待回复请求<br><small>等待手机发送消息…</small></div>';
+    return;
+  }
+  const sorted = [...sessions.values()].sort((a, b) => b.createdAt - a.createdAt);
+  list.innerHTML = sorted.map(s => {
+    const age = Math.floor((Date.now() - s.createdAt) / 1000);
+    const ageStr = age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`;
+    return `<div class="sessionCard ${s.requestId === selectedSessionId ? 'active' : ''}" onclick="selectSession('${s.requestId}')">
+      <div class="userText">${escHtml(s.userText || '(图片/语音)')}</div>
+      <div class="meta">${ageStr} 前 <span class="status ${s.status}">${s.status === 'pending' ? '待处理' : '回复中'}</span></div>
+    </div>`;
+  }).join('');
+}
+
+let stickerPacks = [];
+function renderStickers(stickers) {
+  stickerPacks = stickers;
+  const bar = document.getElementById('stickerBar');
+  const tags = [...new Set(stickers.flatMap(p => (p.tags || []).slice(0, 5)))].slice(0, 20);
+  bar.innerHTML = tags.map(t => `<button onclick="sendSticker('${escHtml(t)}')">${escHtml(t)}</button>`).join('') || '<span style="font-size:11px;color:var(--text2)">无贴纸包</span>';
+}
+
+function selectSession(id) {
+  selectedSessionId = id;
+  const s = sessions.get(id);
+  if (!s) return;
+  document.getElementById('selectedId').textContent = id;
+  document.getElementById('selectedPrompt').textContent = s.userText || '(图片/语音消息)';
+  document.getElementById('replyInput').disabled = false;
+  document.getElementById('replyInput').value = '';
+  document.getElementById('replyInput').focus();
+  document.getElementById('btnSend').disabled = false;
+  document.getElementById('btnCancel').disabled = false;
+  document.getElementById('btnSticker').disabled = false;
+  renderSessions();
+  // Auto claim session
+  sendWs({ type: 'reply.start', requestId: id });
+}
+
+function deselectSession() {
+  selectedSessionId = null;
+  document.getElementById('selectedId').textContent = '选择一个请求开始回复';
+  document.getElementById('selectedPrompt').textContent = '👈 从左侧列表选择一条消息';
+  document.getElementById('replyInput').disabled = true;
+  document.getElementById('replyInput').value = '';
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('btnCancel').disabled = true;
+  document.getElementById('btnSticker').disabled = true;
+  renderSessions();
+}
+
+function sendReply() {
+  if (!selectedSessionId) return;
+  const content = document.getElementById('replyInput').value.trim();
+  if (!content) return;
+  sendWs({ type: 'reply.send', requestId: selectedSessionId, content });
+  deselectSession();
+}
+
+function cancelReply() {
+  if (!selectedSessionId) return;
+  sendWs({ type: 'reply.cancel', requestId: selectedSessionId });
+  deselectSession();
+}
+
+function sendSticker(tag) {
+  if (!selectedSessionId) return;
+  const t = tag || prompt('输入贴纸标签 (如 "开心"):');
+  if (!t) return;
+  // Use first pack that has this tag, or first pack overall
+  const pack = stickerPacks.find(p => (p.tags || []).includes(t))?.pack || stickerPacks[0]?.pack;
+  if (!pack) { alert('没有可用的贴纸包'); return; }
+  const marker = '【sticker:' + pack + ':' + t + '】';
+  sendWs({ type: 'reply.send', requestId: selectedSessionId, content: marker });
+  deselectSession();
+}
+
+function quickReply(text) {
+  if (!selectedSessionId) return;
+  sendWs({ type: 'reply.send', requestId: selectedSessionId, content: text });
+  deselectSession();
+}
+
+function testTts() {
+  const text = document.getElementById('ttsText').value.trim();
+  const engine = document.getElementById('ttsEngine').value;
+  if (!text) return;
+  sendWs({ type: 'tts.test', text, engine });
+}
+
+function addVoiceItem(voice) {
+  const div = document.getElementById('voiceList');
+  if (div.querySelector('.emptyState')) div.innerHTML = '';
+  const item = document.createElement('div');
+  item.className = 'voiceItem';
+  item.innerHTML = `<div style="font-size:10px;color:var(--text2)">${voice.receivedAt ? new Date(voice.receivedAt).toLocaleTimeString() : ''} · ${(voice.size / 1024).toFixed(1)}KB</div><div class="vtext">${escHtml(voice.text)}</div>`;
+  item.onclick = () => {
+    // Download voice file via server
+    const a = document.createElement('a');
+    a.href = '/api/v1/debug/voices';
+    a.target = '_blank';
+    a.click();
+  };
+  div.insertBefore(item, div.firstChild);
+  if (div.children.length > 20) div.removeChild(div.lastChild);
+}
+
+function sendWs(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+}
+
+function updateStats() {
+  document.getElementById('statPending').textContent = sessions.size;
+  document.getElementById('statVoices').textContent = document.getElementById('voiceList').children.length;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.getElementById('replyInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendReply(); }
+});
+
+connect();
+</script>
+</body>
+</html>

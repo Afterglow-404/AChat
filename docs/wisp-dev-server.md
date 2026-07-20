@@ -29,6 +29,17 @@ $env:WISP_CLI_TTS_VOICE = 'default'
 node scripts/wisp-dev-cli.mjs
 ```
 
+CLI 默认通过 GPT-SoVITS 代理试听。测试 Qwen3-TTS 时可以改用：
+
+```powershell
+$env:WISP_CLI_TTS = '1'
+$env:WISP_CLI_TTS_ENGINE = 'qwen3'
+$env:WISP_CLI_TTS_VOICE = 'Vivian'
+$env:WISP_CLI_TTS_LANGUAGE = 'Chinese'
+$env:WISP_CLI_TTS_INSTRUCT = '温柔、亲切地说'
+node scripts/wisp-dev-cli.mjs
+```
+
 ## 手机端 AI API
 
 将 Wisp 的 OpenAI 兼容 AI 接口地址设置为：
@@ -82,6 +93,74 @@ http://<computer-ip>:17890/v1/audio/speech
 代理接受 `{ "model": "gpt-sovits", "input": "你好", "voice": "default", "response_format": "wav" }`，并转发为兼容 GPT-SoVITS 的 `POST /tts` 请求。默认 `prompt_lang` 和 `text_lang` 都是 `zh`，可通过请求字段或环境变量 `WISP_GSV_PROMPT_LANG`、`WISP_GSV_TEXT_LANG` 覆盖。其他可选的转发设置包括 `WISP_GSV_REF_AUDIO_PATH`、`WISP_GSV_PROMPT_TEXT` 和 `WISP_GSV_MEDIA_TYPE`。
 
 手机端 GPT-SoVITS 支持按角色选择 `text_lang`：全局默认语言可在 TTS 设置中配置，角色详情页可以选择“继承全局默认”、中文 `zh`、英语 `en`、日语 `ja`、韩语 `ko` 或粤语 `yue`。角色设置优先于全局设置；系统 TTS 和云端 OpenAI TTS 不使用此语言参数。
+
+### Qwen3-TTS
+
+Qwen3-TTS 由电脑端 GPU 服务运行，Wisp 负责把手机请求转发给它。建议让手机连接 Wisp 地址，而不是直接连接模型进程：
+
+```powershell
+$env:WISP_DEBUG_HOST = '0.0.0.0'
+$env:WISP_QWEN3_TTS_URL = 'http://127.0.0.1:8000'
+node scripts/wisp-dev-server.mjs
+```
+
+`WISP_QWEN3_TTS_URL` 是电脑端 Qwen3-TTS 适配服务地址。上游服务需要提供：
+
+- `GET /healthz`：适配服务存活时返回 2xx，并通过 `ready` 表示模型是否已经加载。
+- `GET /speakers`：返回 `["Vivian", "Ryan"]`，也可以返回 `{ "speakers": [...] }`。
+- `POST /tts`：接收 JSON 并返回 WAV 或其他音频二进制数据。
+
+请求格式：
+
+```json
+{
+  "text": "你好，这是 Wisp 的语音测试。",
+  "language": "Chinese",
+  "speaker": "Vivian",
+  "instruct": "温柔、亲切地说",
+  "response_format": "wav"
+}
+```
+
+手机端 TTS 设置选择“PC Qwen3-TTS”，服务地址填写 Wisp 根地址：
+
+```text
+http://<computer-ip>:17890
+```
+
+角色详情页可以分别设置音色、语言和语气指令；留空时继承全局设置。当前支持中文、英语、日语、韩语、德语、法语、俄语、葡萄牙语、西班牙语、意大利语和自动识别。Qwen3-TTS 不可用时，Wisp 会按 `Qwen3-TTS → GPT-SoVITS → 云端 TTS → 系统 TTS` 自动降级。
+
+Wisp 代理接口为 `GET /qwen3/healthz`、`GET /qwen3/speakers` 和 `POST /qwen3/tts`。可以这样验证：
+
+```powershell
+Invoke-WebRequest -Uri http://127.0.0.1:17890/qwen3/healthz
+Invoke-RestMethod -Uri http://127.0.0.1:17890/qwen3/speakers
+Invoke-WebRequest -Method Post -Uri http://127.0.0.1:17890/qwen3/tts `
+  -ContentType 'application/json' `
+  -Body '{"text":"你好","language":"Chinese","speaker":"Vivian","response_format":"wav"}' `
+  -OutFile .\qwen3-test.wav
+```
+
+Wisp 不内置 Qwen3-TTS 模型权重和 Python 推理环境。电脑端适配服务可以使用 Qwen3-TTS 官方仓库的 `CustomVoice` 推理代码，把模型调用封装成上述 HTTP 协议。
+
+本项目提供了一个最小适配服务脚本。先在电脑端创建 Python 环境并安装依赖：
+
+```powershell
+python -m venv .venv-qwen3
+.\.venv-qwen3\Scripts\Activate.ps1
+python -m pip install -r scripts\requirements-qwen3-tts.txt
+```
+
+然后启动：
+
+```powershell
+$env:QWEN3_TTS_MODEL = 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
+$env:QWEN3_TTS_DEVICE = 'cuda:0'
+$env:QWEN3_TTS_SPEAKER = 'Vivian'
+python scripts\qwen3_tts_server.py
+```
+
+模型默认在第一次 `/tts` 请求时加载；如果希望启动时加载，可设置 `$env:QWEN3_TTS_LOAD_ON_START = '1'`。模型下载、显存占用和 CUDA/PyTorch 版本由电脑端环境负责，Wisp Android 端不需要安装这些依赖。
 
 `send_message`、内置设备工具和表情调用均为模拟执行。表情调用仍会解析真实的 Wisp 资源，并生成准确的 `【sticker:pack:tag】` 标记。基于 HTTP 的 `.wsptool` 条目会执行其配置的请求，除非设置了 `WISP_DEBUG_NO_NETWORK=1`。Shell、脚本和 Kotlin 实现会被 Node 调试器报告为不支持。
 
@@ -137,3 +216,33 @@ reply end
 ```
 
 `sticker list` 会列出服务端已加载的表情包及其标签，不需要先执行 `reply start`。文本行和表情标记会合并为一条 assistant 消息。`reply end` 会释放等待中的 OpenAI 兼容请求，让手机收到最终的普通聊天响应，并将其渲染为 assistant 消息气泡。`reply_cancel` 会向手机返回取消错误。交互式模式需要主动启用，不会改变默认的 echo 行为。
+
+### Dashboard 浏览器控制面板
+
+交互模式也可以通过浏览器 Dashboard 操作，无需 CLI：
+
+```powershell
+$env:WISP_DEBUG_HOST = '0.0.0.0'
+$env:WISP_INTERACTIVE = '1'
+node scripts/wisp-dev-server.mjs
+```
+
+浏览器打开 `http://<computer-ip>:17890/dashboard`：
+
+- 左侧列表实时显示手机发来的待回复请求
+- 点击请求可输入回复文字、选择贴纸，Ctrl+Enter 发送
+- 右侧面板提供快捷回复、TTS 试听、语音收件箱
+- 多个 Dashboard 客户端可同时连接，会话状态实时同步
+
+Dashboard 通过 WebSocket (`/dashboard/ws`) 与服务器通信，协议：
+
+```
+Server → Dashboard:  { type: "session.new", session: {...} }
+Server → Dashboard:  { type: "session.completed", requestId }
+Server → Dashboard:  { type: "voice.new", voice: {...} }
+Server → Dashboard:  { type: "init", sessions, voices, stickers, tools }
+Dashboard → Server:  { type: "reply.start", requestId }
+Dashboard → Server:  { type: "reply.send", requestId, content }
+Dashboard → Server:  { type: "reply.cancel", requestId }
+Dashboard → Server:  { type: "tts.test", engine, text, voice }
+```
