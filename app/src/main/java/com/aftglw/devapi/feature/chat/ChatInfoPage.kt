@@ -118,6 +118,35 @@ fun ChatInfoPage(
             InfoRow("AI 模型", model); InfoRow("API 地址", apiUrl)
             InfoRow("API 密钥", if (hasKey) "已配置 🔒" else "未配置")
             InfoRow("通信协议", AiServiceFactory.getProtocolName()); InfoRow("消息总数", "$msgCount 条")
+            // 当前角色的 GPT-SoVITS 语言覆盖；空值表示继承全局默认语言。
+            if (prefs.getString("tts_engine", "local") == "gpt_sovits") {
+                Spacer(Modifier.height(8.dp))
+                Text("TTS 语言", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                val languageOptions = listOf("" to "继承全局默认", "zh" to "中文", "en" to "英语", "ja" to "日语", "ko" to "韩语", "yue" to "粤语")
+                val languageKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.languagePrefsKey("gpt_sovits", name)
+                var selectedLanguage by remember(name) { mutableStateOf(prefs.getString(languageKey, "") ?: "") }
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("角色语言", Modifier.weight(1f), fontSize = 14.sp, color = AchatTheme.colors.onSurface)
+                        val languageExpanded = remember { mutableStateOf(false) }
+                        Box {
+                            Text(languageOptions.find { it.first == selectedLanguage }?.second ?: "继承全局默认", fontSize = 14.sp, color = AchatTheme.colors.primary, modifier = Modifier.clickable { languageExpanded.value = true })
+                            DropdownMenu(expanded = languageExpanded.value, onDismissRequest = { languageExpanded.value = false }) {
+                                languageOptions.forEach { (code, label) ->
+                                    DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = {
+                                        selectedLanguage = code
+                                        prefs.edit().apply {
+                                            if (code.isEmpty()) remove(languageKey) else putString(languageKey, code)
+                                        }.apply()
+                                        languageExpanded.value = false
+                                    })
+                                }
+                            }
+                        }
+                    }
+                    Text("用于 GPT-SoVITS 的 text_lang 参数；未覆盖时使用全局默认值。", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.padding(top = 6.dp))
+                }
+            }
             // 主动关怀
             Spacer(Modifier.height(8.dp))
             Text("主动关怀", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))

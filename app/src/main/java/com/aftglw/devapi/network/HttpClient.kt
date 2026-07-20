@@ -28,9 +28,10 @@ object HttpClient {
     private val debugClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(20, TimeUnit.SECONDS)
-            .callTimeout(30, TimeUnit.SECONDS)
+            // Interactive desktop replies may wait while a tool or sticker is selected.
+            .readTimeout(180, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(190, TimeUnit.SECONDS)
             .connectionPool(okhttp3.ConnectionPool(1, 5, TimeUnit.SECONDS))
             .retryOnConnectionFailure(false)
             .build()

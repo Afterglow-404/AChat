@@ -22,7 +22,7 @@ fun AboutPage(onBack: () -> Unit) {
             Text("Pre-Alpha (Dev)", fontSize = 13.sp, color = Color.Gray)
             Spacer(Modifier.height(12.dp))
             Text("WeChat 的拙劣模仿品，你能在「Wisp」中与 AI 模型聊天。", fontSize = 12.sp, color = Color(0xFF888888))
-            Text("支持 OpenAI 兼容 API 对话，支持自定义对话人设。", fontSize = 12.sp, color = Color(0xFF888888))
+            Text("支持 OpenAI API or Anthropic API 对话，支持自定义对话人设。", fontSize = 12.sp, color = Color(0xFF888888))
             Spacer(Modifier.height(8.dp))
             Text("💗 爱来自 AFTGLW 与 Deepseek-Reasonix 💗", fontSize = 11.sp, color = Color(0xFFBBBBBB))
         }

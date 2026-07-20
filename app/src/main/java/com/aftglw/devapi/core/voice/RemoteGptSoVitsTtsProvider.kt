@@ -81,6 +81,7 @@ class RemoteGptSoVitsTtsProvider(ctx: Context) : TtsProvider {
         text: String,
         voiceId: String,
         utteranceId: String,
+        language: String,
         onStart: () -> Unit,
         onDone: (Boolean) -> Unit
     ): TtsOutcome {
@@ -90,7 +91,8 @@ class RemoteGptSoVitsTtsProvider(ctx: Context) : TtsProvider {
 
         // 1. 命中缓存直接播放
         val cacheDir = File(ctx.cacheDir, "tts").apply { mkdirs() }
-        val hash = sha1("$voiceId|$text")
+        val textLanguage = language.ifBlank { "zh" }
+        val hash = sha1("$voiceId|$textLanguage|$text")
         // PC 端 GPT-SoVITS api.py 默认返回 wav，bridge 透传 wav
         val cacheFile = File(cacheDir, "gptsovits_$hash.wav")
         val audioPath = if (cacheFile.exists() && cacheFile.length() > 0) {
@@ -101,6 +103,7 @@ class RemoteGptSoVitsTtsProvider(ctx: Context) : TtsProvider {
             val jsonBody = JSONObject().apply {
                 put("text", text)
                 put("voice", voice)
+                put("text_lang", textLanguage)
             }.toString()
 
             val request = Request.Builder()

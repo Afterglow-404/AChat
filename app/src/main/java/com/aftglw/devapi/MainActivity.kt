@@ -33,10 +33,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val prefs = remember { getSharedPreferences("wechat_settings", MODE_PRIVATE) }
             val skipDialog = remember { prefs.getBoolean("skip_startup_dialog", false) }
-            var agreed by remember { mutableStateOf(skipDialog) }
+            var agreed by rememberSaveable { mutableStateOf(skipDialog) }
             var neverShowAgain by rememberSaveable { mutableStateOf(false) }
             val onBoarded = remember { prefs.getBoolean("onboarding_done", false) }
-            var onboardingDone by remember { mutableStateOf(onBoarded) }
+            var onboardingDone by rememberSaveable { mutableStateOf(onBoarded) }
 
             if (agreed && (onboardingDone || onBoarded)) {
                 WeChatApp()

@@ -52,7 +52,9 @@ data class MessageEntity(
     /** 群聊发言人名；单聊恒为 null */
     @ColumnInfo(name = "from_name") val fromName: String? = null,
     @ColumnInfo(name = "is_error") val isError: Boolean = false,
-    @ColumnInfo(name = "retry_prompt") val retryPrompt: String? = null
+    @ColumnInfo(name = "retry_prompt") val retryPrompt: String? = null,
+    /** 贴纸消息路径（assets 内相对路径）；非贴纸消息为 null */
+    @ColumnInfo(name = "sticker_path") val stickerPath: String? = null
 )
 
 /**

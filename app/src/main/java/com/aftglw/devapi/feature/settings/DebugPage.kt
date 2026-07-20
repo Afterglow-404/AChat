@@ -137,6 +137,21 @@ fun DebugPage(
             // PC GPT-SoVITS 配置
             if (ttsEngine == "gpt_sovits") {
                 TextFieldRow("PC 服务地址", "如 http://192.168.1.10:9880", sysPrefs.getString("tts_gptsovits_url", "") ?: "") { v -> sysPrefs.edit().putString("tts_gptsovits_url", v).apply() }
+                val gptLanguageKey = com.aftglw.devapi.core.voice.TtsVoiceRouter.languageEnginePrefsKey("gpt_sovits")
+                var gptLanguage by remember { mutableStateOf(sysPrefs.getString(gptLanguageKey, "zh") ?: "zh") }
+                val languageOptions = listOf("zh" to "中文", "en" to "英语", "ja" to "日语", "ko" to "韩语", "yue" to "粤语")
+                Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("默认语言", Modifier.width(72.dp), fontSize = 13.sp, color = Color(0xFF888888))
+                    val languageExpanded = remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.weight(1f)) {
+                        Text(languageOptions.find { it.first == gptLanguage }?.second ?: gptLanguage, fontSize = 14.sp, color = Color(0xFF1A1A1A), modifier = Modifier.clickable { languageExpanded.value = true })
+                        DropdownMenu(expanded = languageExpanded.value, onDismissRequest = { languageExpanded.value = false }) {
+                            languageOptions.forEach { (code, label) ->
+                                DropdownMenuItem(text = { Text(label, fontSize = 13.sp) }, onClick = { gptLanguage = code; sysPrefs.edit().putString(gptLanguageKey, code).apply(); languageExpanded.value = false })
+                            }
+                        }
+                    }
+                }
                 // 探活按钮 + 状态显示（availableVoices 随引擎切换重置，避免上一次引擎残留）
                 var healthStatus by remember { mutableStateOf("") }
                 var checking by remember { mutableStateOf(false) }

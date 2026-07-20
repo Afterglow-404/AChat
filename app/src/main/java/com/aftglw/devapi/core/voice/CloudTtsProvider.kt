@@ -42,6 +42,7 @@ class CloudTtsProvider(ctx: Context) : TtsProvider {
         text: String,
         voiceId: String,
         utteranceId: String,
+        language: String,
         onStart: () -> Unit,
         onDone: (Boolean) -> Unit
     ): TtsOutcome {

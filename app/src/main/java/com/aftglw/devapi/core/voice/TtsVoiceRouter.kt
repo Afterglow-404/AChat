@@ -23,6 +23,9 @@ package com.aftglw.devapi.core.voice
  */
 object TtsVoiceRouter {
 
+    /** GPT-SoVITS 的 text_lang 可选值（与官方推理接口保持一致）。 */
+    val GPT_SOVITS_LANGUAGES = listOf("zh", "en", "ja", "ko", "yue")
+
     /** 各引擎默认音色（硬编码兜底） */
     val DEFAULT_VOICE = mapOf(
         "system" to "",        // SystemTts 忽略 voiceId
@@ -42,6 +45,13 @@ object TtsVoiceRouter {
      */
     fun prefsKey(engine: String, characterName: String): String =
         "tts_voice_${engine}_${characterName}"
+
+    /** 引擎级语言配置 key，例如 tts_lang_gpt_sovits。 */
+    fun languageEnginePrefsKey(engine: String): String = "tts_lang_$engine"
+
+    /** 角色级语言配置 key，例如 tts_lang_gpt_sovits_钦灵。 */
+    fun languagePrefsKey(engine: String, characterName: String): String =
+        "tts_lang_${engine}_${characterName}"
 
     /**
      * 纯函数路由：根据引擎 + 已合并的 storedVoice 返回 voiceId。
@@ -66,4 +76,15 @@ object TtsVoiceRouter {
      * 系统级默认音色（不区分角色）。
      */
     fun defaultFor(engine: String): String = DEFAULT_VOICE[engine] ?: ""
+
+    /** 各引擎默认语言；系统和 OpenAI 云 TTS 不使用此参数。 */
+    fun defaultLanguageFor(engine: String): String = if (engine == "gpt_sovits") "zh" else ""
+
+    /** 根据角色级 > 引擎级 > 默认值解析 TTS 语言。 */
+    fun resolveLanguage(engine: String, characterLanguage: String?, engineLanguage: String?): String {
+        if (engine != "gpt_sovits") return ""
+        return characterLanguage?.takeIf { it in GPT_SOVITS_LANGUAGES }
+            ?: engineLanguage?.takeIf { it in GPT_SOVITS_LANGUAGES }
+            ?: defaultLanguageFor(engine)
+    }
 }

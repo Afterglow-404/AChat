@@ -141,6 +141,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         val saved = ChatHistory.loadEntries(ctx, chatKey)
         bubbles.clear()
         saved.forEach { e ->
+            if (!e.stickerPath.isNullOrEmpty()) {
+                bubbles.add(Bubble("", e.isMe, e.time, label = "sticker", stickerPath = e.stickerPath))
+                return@forEach
+            }
             val parts = e.text.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
             if (parts.size > 1) {
                 parts.forEach { bubbles.add(Bubble(it, e.isMe, e.time, imagePath = e.imagePath)) }
@@ -160,8 +164,11 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         }
         history.addAll(saved.map { e ->
             val role = if (e.isMe) "user" else "assistant"
-            val content = (e.voiceTranscript?.takeIf { it.isNotBlank() } ?: e.text)
-                .replace("【顿】", "").trim()
+            val content = when {
+                !e.stickerPath.isNullOrEmpty() -> "[表情]"
+                !e.voiceTranscript.isNullOrEmpty() -> e.voiceTranscript
+                else -> e.text
+            }.replace("【顿】", "").trim()
             val images = if (!e.imagePath.isNullOrEmpty()) listOf(e.imagePath) else emptyList()
             ChatMessage(role, content, images = images)
         })
@@ -222,7 +229,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             }
         }
         // 先在主线程取出快照（避免协程内 bubbles 被并发修改），再切 IO 持久化
-        val entriesToSave = bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
+        val entriesToSave = bubbles.filter { it.label != "system" }.map {
             com.aftglw.devapi.core.storage.ChatHistoryEntry(
                 text = it.text,
                 isMe = it.isMe,
@@ -230,7 +237,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 imagePath = it.imagePath,
                 voicePath = it.voicePath,
                 voiceDuration = it.voiceDuration,
-                voiceTranscript = it.voiceTranscript
+                voiceTranscript = it.voiceTranscript,
+                stickerPath = it.stickerPath
             )
         }
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
@@ -362,12 +370,23 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
 
             if (finalReply != null) {
                 PostLLMProcessor.process(ctx, name, text, finalReply)
-                val saveText = finalReply.replace(Regex("【sticker:[^】]+:[^】]+】"), "").trim()
-                val historyText = saveText.ifEmpty { "[表情]" }
+                val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
+                val saveText = finalReply.replace(stickerRegex, "").trim()
+                // 本轮 AI 回复拆分为文本条目 + 贴纸条目分别持久化
+                val aiEntries = mutableListOf<com.aftglw.devapi.core.storage.ChatHistoryEntry>()
+                if (saveText.isNotEmpty()) {
+                    aiEntries += com.aftglw.devapi.core.storage.ChatHistoryEntry(saveText, false, now())
+                }
+                stickerRegex.findAll(finalReply).forEach { sm ->
+                    val path = com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2])
+                    if (path != null) {
+                        aiEntries += com.aftglw.devapi.core.storage.ChatHistoryEntry("", false, now(), stickerPath = path)
+                    }
+                }
                 ChatHistory.saveEntries(
                     ctx,
                     chatKey,
-                    bubbles.filter { it.label != "system" && it.label != "sticker" }.map {
+                    bubbles.filter { it.label != "system" }.map {
                         com.aftglw.devapi.core.storage.ChatHistoryEntry(
                             text = it.text,
                             isMe = it.isMe,
@@ -375,9 +394,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             imagePath = it.imagePath,
                             voicePath = it.voicePath,
                             voiceDuration = it.voiceDuration,
-                            voiceTranscript = it.voiceTranscript
+                            voiceTranscript = it.voiceTranscript,
+                            stickerPath = it.stickerPath
                         )
-                    } + com.aftglw.devapi.core.storage.ChatHistoryEntry(historyText, false, now())
+                    } + aiEntries
                 )
 
                 withContext(Dispatchers.Main) {

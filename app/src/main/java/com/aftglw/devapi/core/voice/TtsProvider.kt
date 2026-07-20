@@ -44,6 +44,7 @@ interface TtsProvider {
         text: String,
         voiceId: String,
         utteranceId: String,
+        language: String = "",
         onStart: () -> Unit = {},
         onDone: (success: Boolean) -> Unit = {}
     ): TtsOutcome
@@ -161,6 +162,7 @@ object TtsProviderManager {
         utteranceId: String,
         characterName: String? = null,
         voiceOverride: String? = null,
+        languageOverride: String? = null,
         onStart: () -> Unit = {},
         onDone: (success: Boolean) -> Unit = {}
     ): TtsOutcome = withContext(Dispatchers.IO) {
@@ -205,11 +207,18 @@ object TtsProviderManager {
                 val merged = characterStored?.takeIf { it.isNotBlank() }
                     ?: engineStored?.takeIf { it.isNotBlank() }
                 val providerVoice = voiceOverride ?: router.resolve(characterName, provider.id, merged)
+                val characterLanguage = if (characterName != null) {
+                    prefs.getString(TtsVoiceRouter.languagePrefsKey(provider.id, characterName), null)
+                } else null
+                val engineLanguage = prefs.getString(TtsVoiceRouter.languageEnginePrefsKey(provider.id), null)
+                val providerLanguage = languageOverride
+                    ?: TtsVoiceRouter.resolveLanguage(provider.id, characterLanguage, engineLanguage)
 
                 val outcome = provider.speak(
                     text = text,
                     voiceId = providerVoice,
                     utteranceId = utteranceId,
+                    language = providerLanguage,
                     onStart = { safeStart() },
                     onDone = { success ->
                         // Provider 内部完成时回调；只有 success=true 才立即转发到 UI
