@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -39,6 +40,8 @@ import androidx.core.graphics.toColorInt
 import androidx.compose.ui.graphics.graphicsLayer
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.utils.StaggeredEntrance
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MeScreen(vm: MeViewModel = viewModel<MeViewModel>()) {
@@ -112,12 +115,16 @@ fun MeScreenContent(
                                 ) {
                                     Box(Modifier.size(60.dp).clip(CircleShape).background(clr), contentAlignment = Alignment.Center) {
                                         if (avt.isNotEmpty()) {
-                                            val bmp = remember(avt) {
-                                                try { BitmapFactory.decodeFile(avt)?.asImageBitmap() }
-                                                catch (_: Exception) { null }
+                                            var bmp by remember(avt) { mutableStateOf<ImageBitmap?>(null) }
+                                            LaunchedEffect(avt) {
+                                                bmp = withContext(Dispatchers.IO) {
+                                                    try { BitmapFactory.decodeFile(avt)?.asImageBitmap() }
+                                                    catch (_: Exception) { null }
+                                                }
                                             }
-                                            if (bmp != null) {
-                                                Image(bmp, null, Modifier.size(60.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                            val bmpVal = bmp
+                                            if (bmpVal != null) {
+                                                Image(bmpVal, null, Modifier.size(60.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                                             } else {
                                                 Text(name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 28.sp, fontFamily = AchatTheme.typography.title)
                                             }

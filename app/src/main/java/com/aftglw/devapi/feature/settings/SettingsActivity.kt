@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -83,6 +84,7 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 private fun SettingsRoot(onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val prefs = remember { ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE) }
     val initialCustom = prefs.getBoolean("custom_font", false)
     val typography = remember { mutableStateOf(if (initialCustom) buildCustomTypography() else Typography()) }
@@ -224,9 +226,17 @@ private fun SettingsRoot(onBack: () -> Unit) {
                         onCreateChat = {
                             val name = newChatName.trim()
                             if (name.isNotBlank()) {
-                                addChat(ctx, name, newChatPersona.trim(), newChatAvatarUri)
+                                val persona = newChatPersona.trim()
+                                val avatar = newChatAvatarUri
                                 newChatName = ""; newChatPersona = ""; newChatAvatarUri = ""
                                 Toast.makeText(ctx, "已添加喵~", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    try { addChat(ctx, name, persona, avatar) }
+                                    catch (e: Exception) {
+                                        Log.e("SettingsActivity", "addChat failed", e)
+                                        Toast.makeText(ctx, "创建失败: ${e.message?.take(60)}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         }
                     )
@@ -283,18 +293,16 @@ private fun savePickedImage(ctx: android.content.Context, uri: Uri, fileName: St
     } catch (_: Exception) {}
 }
 
-private fun addChat(ctx: android.content.Context, name: String, persona: String, avatarUri: String) {
-    kotlinx.coroutines.runBlocking {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            com.aftglw.devapi.core.storage.room.AppDatabase.get(ctx).chatDao().upsert(
-                com.aftglw.devapi.core.storage.room.ChatEntity(
-                    id = java.util.UUID.randomUUID().toString(),
-                    name = name,
-                    persona = persona,
-                    avatarUri = avatarUri
-                )
+private suspend fun addChat(ctx: android.content.Context, name: String, persona: String, avatarUri: String) {
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        com.aftglw.devapi.core.storage.room.AppDatabase.get(ctx).chatDao().upsert(
+            com.aftglw.devapi.core.storage.room.ChatEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name,
+                persona = persona,
+                avatarUri = avatarUri
             )
-        }
+        )
     }
 }
 

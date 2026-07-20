@@ -20,7 +20,9 @@ object ToolRegistry {
 
     /** 注册一个工具 */
     fun register(tool: AiTool) {
-        tools[tool.name] = tool
+        synchronized(tools) {
+            tools[tool.name] = tool
+        }
         invalidateToolsCache()
     }
 
@@ -46,27 +48,32 @@ object ToolRegistry {
     }
 
     /** 按名称获取工具 */
-    fun get(name: String): AiTool? = tools[name]
+    fun get(name: String): AiTool? = synchronized(tools) { tools[name] }
 
     /** 获取所有已注册工具 */
-    fun getAll(): List<AiTool> = tools.values.toList()
+    fun getAll(): List<AiTool> = synchronized(tools) { tools.values.toList() }
 
     /**
      * 返回 OpenAI 兼容的 tools JSON 数组（带缓存）。
      * 命中 cache 零开销；register/unregister 后自动 invalidate。
+     *
+     * 关键：未命中时遍历 [tools] 必须加 synchronized，避免与 [register] 并发导致
+     * LinkedHashMap ConcurrentModificationException（闪退根因之一）。
      */
     fun getToolsJson(): JSONArray {
         toolsJsonCache?.let { return it }
         val arr = JSONArray()
-        for (tool in tools.values) {
-            arr.put(org.json.JSONObject().apply {
-                put("type", "function")
-                put("function", org.json.JSONObject().apply {
-                    put("name", tool.name)
-                    put("description", tool.description)
-                    put("parameters", tool.inputSchema)
+        synchronized(tools) {
+            for (tool in tools.values) {
+                arr.put(org.json.JSONObject().apply {
+                    put("type", "function")
+                    put("function", org.json.JSONObject().apply {
+                        put("name", tool.name)
+                        put("description", tool.description)
+                        put("parameters", tool.inputSchema)
+                    })
                 })
-            })
+            }
         }
         toolsJsonCache = arr
         return arr
@@ -79,15 +86,19 @@ object ToolRegistry {
 
     /** 测试用：清空所有注册的工具 */
     fun resetForTest() {
-        tools.clear()
+        synchronized(tools) { tools.clear() }
         invalidateToolsCache()
     }
 
     /** 输出 MCP tools/list 格式的 JSON 数组 */
-    fun listToolsJson(): JSONArray = JSONArray().apply {
-        for (tool in tools.values) {
-            put(tool.toMcpToolJson())
+    fun listToolsJson(): JSONArray {
+        val arr = JSONArray()
+        synchronized(tools) {
+            for (tool in tools.values) {
+                arr.put(tool.toMcpToolJson())
+            }
         }
+        return arr
     }
 
     /**
@@ -95,7 +106,8 @@ object ToolRegistry {
      * 格式：工具名: 描述 | 参数名(类型,必填): 说明
      */
     fun getDescriptions(): String {
-        return tools.values.joinToString("\n") { tool ->
+        val snapshot = synchronized(tools) { tools.values.toList() }
+        return snapshot.joinToString("\n") { tool ->
             val params = tool.inputSchema.optJSONObject("properties") ?: JSONObject()
             val required = buildSet {
                 val arr = tool.inputSchema.optJSONArray("required") ?: return@buildSet
@@ -122,7 +134,7 @@ object ToolRegistry {
         val m = Regex("""【tool:(\w+)\s*(.*?)】""").find(callText) ?: return null
         val toolName = m.groupValues[1]
         val rawArgs = m.groupValues[2].trim()
-        val tool = tools[toolName] ?: return "未知工具：$toolName"
+        val tool = synchronized(tools) { tools[toolName] } ?: return "未知工具：$toolName"
         val args = tool.parseTextArgs(rawArgs)
         return try {
             tool.execute(ctx, args)
@@ -133,7 +145,7 @@ object ToolRegistry {
 
     /** 执行 JSON 格式的工具调用 */
     suspend fun executeJson(ctx: android.content.Context, name: String, args: JSONObject): String? {
-        val tool = tools[name] ?: return "未知工具：$name"
+        val tool = synchronized(tools) { tools[name] } ?: return "未知工具：$name"
         return try {
             tool.execute(ctx, args)
         } catch (e: Exception) {
@@ -143,7 +155,7 @@ object ToolRegistry {
 
     /** 初始化（自动注册内置工具） */
     fun init(ctx: android.content.Context) {
-        if (tools.isNotEmpty()) return
+        synchronized(tools) { if (tools.isNotEmpty()) return }
         register(TimeTool())
         register(NoteTool())
         register(RecallTool())

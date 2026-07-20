@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.ui.theme.*
 import com.aftglw.devapi.ui.buildCustomTypography
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,8 +53,14 @@ fun ProfilePage(
         ) {
             Box(Modifier.size(56.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
                 if (profileAvatarUri.isNotEmpty()) {
-                    val bmp = remember(profileAvatarUri) { try { BitmapFactory.decodeFile(profileAvatarUri)?.asImageBitmap() } catch (_: Exception) { null } }
-                    if (bmp != null) Image(bmp, null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                    var bmp by remember(profileAvatarUri) { mutableStateOf<ImageBitmap?>(null) }
+                    LaunchedEffect(profileAvatarUri) {
+                        bmp = withContext(Dispatchers.IO) {
+                            try { BitmapFactory.decodeFile(profileAvatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                        }
+                    }
+                    val bmpVal = bmp
+                    if (bmpVal != null) Image(bmpVal, null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                     else Text(profileName.take(1), fontSize = 20.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
                 } else Text(profileName.take(1), fontSize = 20.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
             }

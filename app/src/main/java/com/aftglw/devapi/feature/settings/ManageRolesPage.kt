@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -54,8 +55,14 @@ fun ManageRolesPage(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).background(Color(0xFFF0F0F0), RoundedCornerShape(24.dp)), contentAlignment = Alignment.Center) {
                     if (newChatAvatarUri.isNotEmpty()) {
-                        val bmp = remember(newChatAvatarUri) { try { BitmapFactory.decodeFile(newChatAvatarUri)?.asImageBitmap() } catch (_: Exception) { null } }
-                        if (bmp != null) Image(bmp, null, Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
+                        var bmp by remember(newChatAvatarUri) { mutableStateOf<ImageBitmap?>(null) }
+                        LaunchedEffect(newChatAvatarUri) {
+                            bmp = withContext(Dispatchers.IO) {
+                                try { BitmapFactory.decodeFile(newChatAvatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                            }
+                        }
+                        val bmpVal = bmp
+                        if (bmpVal != null) Image(bmpVal, null, Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
                     } else Text("+", fontSize = 20.sp, color = Color.Gray)
                 }
                 Spacer(Modifier.width(12.dp))

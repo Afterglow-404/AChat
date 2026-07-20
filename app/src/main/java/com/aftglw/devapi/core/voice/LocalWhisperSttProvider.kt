@@ -99,16 +99,18 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
                     ),
                 )
                 Log.i(TAG, "Loading sherpa-onnx whisper: enc=$encoderPath, dec=$decoderPath, lang=$whisperLang, task=transcribe")
-                recognizer?.release()
-                recognizer = OfflineRecognizer(config = config)
-                loadedSignature = signature
+                // 加载互斥：避免 releaseNative 与加载并发导致 use-after-free
+                inferMutex.withLock {
+                    recognizer?.release()
+                    recognizer = OfflineRecognizer(config = config)
+                    loadedSignature = signature
+                }
                 Log.i(TAG, "sherpa-onnx whisper loaded")
             } catch (e: Exception) {
                 Log.e(TAG, "sherpa-onnx load failed", e)
                 return@withContext SttOutcome.Failed("Whisper 加载失败: ${e.message?.take(80)}", e)
             }
         }
-        val rec = recognizer ?: return@withContext SttOutcome.Failed("Whisper 未初始化")
 
         // 解码音频为 16kHz mono float[]（解码不需要互斥，放在 mutex 外可与其他推理并行）
         val samples = try {
@@ -123,8 +125,11 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
         Log.d(TAG, "Decoded ${samples.size} samples (${samples.size / 16000f}s), recognizing...")
 
         // 推理（OfflineRecognizer 非线程安全，加锁串行化）
+        // 关键：rec 引用必须在 inferMutex.withLock 内读取，保证与 releaseNative 互斥，
+        // 避免 onTrimMemory 释放 native 后推理仍持有旧引用导致 SIGSEGV
         try {
             inferMutex.withLock {
+                val rec = recognizer ?: return@withContext SttOutcome.Failed("Whisper 未初始化")
                 val stream = rec.createStream()
                 try {
                     stream.acceptWaveform(samples, 16000)
@@ -211,12 +216,25 @@ class LocalWhisperSttProvider(ctx: Context) : SttProvider {
          * - 实例 [shutdown]（[SttProviderManager] 切换引擎/退出时）
          *
          * 幂等，多次调用安全。
+         *
+         * 关键：用 [Mutex.tryLock] 而非 withLock，避免与 [transcribe] 推理竞态导致 use-after-free：
+         * - 推理持锁时 tryLock 失败 → 跳过本次 release（下次 onTrimMemory 再释放）
+         * - 推理空闲时 tryLock 成功 → 安全 release + 置 null
+         * 这样 onTrimMemory 永远不会阻塞主线程（推理可能持锁 3-15s）。
          */
         @JvmStatic
         fun releaseNative() {
-            try { recognizer?.release() } catch (_: Exception) {}
-            recognizer = null
-            loadedSignature = null
+            if (!inferMutex.tryLock()) {
+                Log.i(TAG, "releaseNative skipped: inference in progress")
+                return
+            }
+            try {
+                try { recognizer?.release() } catch (_: Exception) {}
+                recognizer = null
+                loadedSignature = null
+            } finally {
+                inferMutex.unlock()
+            }
         }
 
         /**

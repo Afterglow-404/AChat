@@ -1201,12 +1201,16 @@ fun ChatContent(
                                 val myAvatar = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
                                     .getString("profile_avatar_uri", "")?.takeIf { it.isNotEmpty() }
                                 if (myAvatar != null) {
-                                    val myBmp = remember(myAvatar) {
-                                        try { BitmapFactory.decodeFile(myAvatar)?.asImageBitmap() }
-                                        catch (_: Exception) { null }
+                                    var myBmp by remember(myAvatar) { mutableStateOf<ImageBitmap?>(null) }
+                                    LaunchedEffect(myAvatar) {
+                                        myBmp = withContext(Dispatchers.IO) {
+                                            try { BitmapFactory.decodeFile(myAvatar)?.asImageBitmap() }
+                                            catch (_: Exception) { null }
+                                        }
                                     }
-                                    if (myBmp != null) {
-                                        Image(myBmp, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                    val myBmpVal = myBmp
+                                    if (myBmpVal != null) {
+                                        Image(myBmpVal, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                                     } else {
                                         Text("Me", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                     }

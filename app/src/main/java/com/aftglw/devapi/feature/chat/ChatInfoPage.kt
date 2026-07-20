@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.network.AiServiceFactory
 import com.aftglw.devapi.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -51,6 +53,7 @@ fun ChatInfoPage(
     onNavigateToWorldbook: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
     val hasKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key").isNotEmpty()
@@ -67,8 +70,14 @@ fun ChatInfoPage(
             Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(80.dp).clip(CircleShape).background(AchatTheme.colors.divider), contentAlignment = Alignment.Center) {
                     if (avatarUri.isNotEmpty()) {
-                        val bmp = remember(avatarUri) { try { BitmapFactory.decodeFile(avatarUri)?.asImageBitmap() } catch (_: Exception) { null } }
-                        if (bmp != null) Image(bmp, null, Modifier.size(80.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        var bmp by remember(avatarUri) { mutableStateOf<ImageBitmap?>(null) }
+                        LaunchedEffect(avatarUri) {
+                            bmp = withContext(Dispatchers.IO) {
+                                try { BitmapFactory.decodeFile(avatarUri)?.asImageBitmap() } catch (_: Exception) { null }
+                            }
+                        }
+                        val bmpVal = bmp
+                        if (bmpVal != null) Image(bmpVal, null, Modifier.size(80.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                         else Text(name.take(1), fontSize = 28.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                     } else Text(name.take(1), fontSize = 28.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                 }
@@ -83,18 +92,26 @@ fun ChatInfoPage(
             }
             // 角色卡导入
             val cardPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-                uri?.let {
-                    try {
-                        val input = ctx.contentResolver.openInputStream(it)
-                        val card = com.aftglw.devapi.core.character.CharacterCardParser.parsePng(input!!); input.close()
-                        if (card != null && card.name.isNotBlank()) {
-                            val avatarDir = java.io.File(ctx.filesDir, "avatars"); avatarDir.mkdirs()
-                            val avatarFile = java.io.File(avatarDir, "${name}_card.png")
-                            ctx.contentResolver.openInputStream(it)?.use { src -> avatarFile.outputStream().use { dst -> src.copyTo(dst) } }
-                            com.aftglw.devapi.core.character.CharacterCardParser.importToChat(ctx, name, card, avatarFile.absolutePath)
-                            Toast.makeText(ctx, "已导入角色：${card.name}", Toast.LENGTH_SHORT).show()
-                        } else Toast.makeText(ctx, "未找到有效角色卡", Toast.LENGTH_SHORT).show()
-                    } catch (_: Exception) { Toast.makeText(ctx, "导入失败", Toast.LENGTH_SHORT).show() }
+                uri?.let { pickedUri ->
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            try {
+                                val input = ctx.contentResolver.openInputStream(pickedUri)
+                                val card = com.aftglw.devapi.core.character.CharacterCardParser.parsePng(input!!); input.close()
+                                if (card != null && card.name.isNotBlank()) {
+                                    val avatarDir = java.io.File(ctx.filesDir, "avatars"); avatarDir.mkdirs()
+                                    val avatarFile = java.io.File(avatarDir, "${name}_card.png")
+                                    ctx.contentResolver.openInputStream(pickedUri)?.use { src -> avatarFile.outputStream().use { dst -> src.copyTo(dst) } }
+                                    com.aftglw.devapi.core.character.CharacterCardParser.importToChat(ctx, name, card, avatarFile.absolutePath)
+                                    card.name
+                                } else null
+                            } catch (e: Exception) {
+                                android.util.Log.e("ChatInfoPage", "import card failed", e)
+                                null
+                            }
+                        }
+                        Toast.makeText(ctx, ok?.let { "已导入角色：$it" } ?: "导入失败", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             TextButton(onClick = { cardPicker.launch("image/png") }, modifier = Modifier.fillMaxWidth()) { Text("导入角色卡 (SillyTavern)", fontSize = 13.sp, color = Color(0xFF888888)) }
