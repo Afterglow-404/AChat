@@ -57,10 +57,11 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase {
             val ctx = context.applicationContext
-            // 仅对历史版本 1-4 允许破坏性迁移；版本 5+ 必须显式迁移，避免静默丢数据
+            // 显式迁移路径 1→2→3→4→5；不再用 fallbackToDestructiveMigrationFrom，
+            // 因为 Room 2.x+ 禁止对同一 start version 同时声明 addMigration + fallback（build 时抛 IllegalArgumentException）。
+            // 若未来 schema 变更未配迁移，让 Room 直接抛异常暴露问题，而不是静默丢数据。
             return Room.databaseBuilder(ctx, AppDatabase::class.java, DB_NAME)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
-                .fallbackToDestructiveMigrationFrom(1, 2, 3, 4)
                 .build()
         }
 
