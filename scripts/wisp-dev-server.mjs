@@ -612,6 +612,15 @@ async function handleWsMessage(socket, msg) {
       return
     }
 
+    if (msg.type === 'reply.cancelAll') {
+      let count = 0
+      for (const [, s] of state.interactiveSessions) {
+        if (s.status === 'pending') { s.status = 'cancelled'; s.resolveReply({ cancelled: true }); count++ }
+      }
+      wsSend(socket, { type: 'cancelledAll', count })
+      return
+    }
+
     if (msg.type === 'reply.action') {
       const { session, error } = findInteractiveSession(msg.requestId)
       if (error) return wsSend(socket, { type: 'error', requestId: msg.requestId, message: error.message })
@@ -625,36 +634,8 @@ async function handleWsMessage(socket, msg) {
       return wsSend(socket, { type: 'error', requestId: msg.requestId, message: 'Unknown action: ' + (msg.action || '') })
     }
 
-    if (msg.type === 'tts.test') {
-      const engine = msg.engine || 'gptsovits'
-      const text = msg.text || '你好，这是 Wisp 语音测试。'
-      try {
-        if (engine === 'qwen3' && qwen3TtsUrl) {
-          const resp = await fetch(`${qwen3TtsUrl}/tts`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text, language: msg.language || 'Chinese', speaker: msg.voice || 'Vivian', instruct: msg.instruct || '', response_format: 'wav' }),
-            signal: AbortSignal.timeout(15000),
-          })
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-          const buf = Buffer.from(await resp.arrayBuffer())
-          wsSend(socket, { type: 'tts.audio', engine, format: 'wav', data: buf.toString('base64') })
-        } else if (gptSovitsUrl) {
-          const resp = await fetch(`${gptSovitsUrl}/tts`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text, voice: msg.voice || 'default', prompt_lang: 'zh', text_lang: 'zh', response_format: 'wav' }),
-            signal: AbortSignal.timeout(15000),
-          })
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-          const buf = Buffer.from(await resp.arrayBuffer())
-          wsSend(socket, { type: 'tts.audio', engine, format: 'wav', data: buf.toString('base64') })
-        } else {
-          wsSend(socket, { type: 'error', message: 'No TTS upstream configured' })
-        }
-      } catch (e) {
-        wsSend(socket, { type: 'error', message: 'TTS test failed: ' + e.message })
-      }
-      return
-    }
+    // TTS now uses HTTP proxy (GET /api/v1/tts/proxy).
+    // WebSocket tts.test route removed — Dashboard plays via <audio src="/api/v1/tts/proxy?...">.
   } catch (e) {
     try { wsSend(socket, { type: 'error', message: e.message }) } catch { /* ignore */ }
   }
@@ -1111,6 +1092,7 @@ server.on('upgrade', (request, socket) => {
     stickers: [...state.stickers.entries()].map(([pack, entries]) => ({ pack, tags: [...new Set(entries.flatMap(e => e.tags || []))] })),
     tools: toolList(),
     interactive: interactiveMode,
+    ttsProxy: !!(gptSovitsUrl || qwen3TtsUrl),
   })
 
   let buffer = Buffer.alloc(0)
