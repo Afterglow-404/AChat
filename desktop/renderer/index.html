@@ -7,112 +7,69 @@
   <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-  <div class="window-shell">
+  <div class="app-shell">
     <header class="topbar">
-      <div class="brand-mark">W</div>
-      <div class="brand-copy"><strong>Wisp Desktop</strong><span>Phone companion</span></div>
-      <div class="topbar-divider"></div>
-      <div class="connection-state"><i></i><span id="connectionText">连接中</span></div>
-      <div class="topbar-spacer"></div>
-      <div class="service-meta"><span id="serviceText">本机服务启动中</span><span class="mono" id="portText"></span></div>
-      <button class="icon-button" id="restartButton" title="重启 Wisp 服务" aria-label="重启 Wisp 服务">↻</button>
+      <div class="brand"><span class="brand-mark">W</span><span><b>Wisp Desktop</b><small>Voice bridge workspace</small></span></div>
+      <div class="topbar-status"><span class="status-dot"></span><span id="connectionText">连接中</span><span class="topbar-separator"></span><span class="mono" id="portText">--</span></div>
+      <div class="topbar-actions"><span class="topbar-caption">本机调试服务</span><button class="icon-button" id="restartButton" title="重启 Wisp 服务" aria-label="重启 Wisp 服务">↻</button></div>
     </header>
 
-    <div class="app-body">
-      <aside class="nav-rail">
-        <div class="nav-section-label">工作台</div>
-        <button class="nav-item active" data-view="inbox"><span class="nav-icon">◈</span><span>回复工作台</span><b id="pendingBadge">0</b></button>
-        <button class="nav-item" data-view="voices"><span class="nav-icon">◉</span><span>语音收件箱</span><b id="voiceBadge">0</b></button>
-        <button class="nav-item" data-view="tools"><span class="nav-icon">⌘</span><span>工具中心</span></button>
-        <div class="nav-section-label secondary">系统</div>
-        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>服务设置</span></button>
-        <div class="nav-bottom">
-          <div class="phone-link"><span class="pulse"></span><div><strong>手机已接入</strong><small>等待消息同步</small></div></div>
-          <div class="version">Wisp Desktop 0.1.0</div>
-        </div>
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-title">工作区</div>
+        <button class="nav-item active" data-view="inbox"><span class="nav-symbol">◈</span><span>回复工作台</span><b id="pendingBadge">0</b></button>
+        <button class="nav-item" data-view="voices"><span class="nav-symbol">◉</span><span>语音收件箱</span><b id="voiceBadge">0</b></button>
+        <button class="nav-item" data-view="tools"><span class="nav-symbol">⌘</span><span>工具中心</span></button>
+        <div class="sidebar-title second">系统</div>
+        <button class="nav-item" data-view="settings"><span class="nav-symbol">⚙</span><span>服务设置</span></button>
+        <div class="sidebar-footer"><div class="phone-presence"><span></span><div><b>手机已接入</b><small>等待请求同步</small></div></div><small class="version">WISP DESKTOP 0.1.0</small></div>
       </aside>
 
-      <main class="workspace">
-        <section class="workspace-header">
-          <div>
-            <div class="eyebrow">LIVE WORKSPACE / HUMAN LOOP</div>
-            <h1>回复工作台</h1>
-            <p>从左侧选择手机请求，在同一个工作区完成回复、工具调用和贴纸发送。</p>
-          </div>
-          <div class="header-actions">
-            <span class="header-stat"><b id="requestCount">0</b><small>待处理</small></span>
-            <button class="quiet-button" id="cancelAllButton">全部忽略</button>
-          </div>
-        </section>
+      <main class="main-area">
+        <header class="page-header">
+          <div><div class="overline">CONVERSATION CONTROL</div><h1>语音与回复工作台</h1><p>接收手机请求，在同一条工作流中完成回复、工具调用与语音试听。</p></div>
+          <div class="page-metrics"><div><b id="requestCount">0</b><small>待处理</small></div><div><b id="voiceMetric">0</b><small>语音收件</small></div><button class="quiet-button" id="cancelAllButton">全部忽略</button></div>
+        </header>
 
-        <section class="workspace-grid">
-          <section class="request-column panel">
-            <div class="panel-heading">
-              <div><strong>手机请求</strong><span id="requestHint">实时同步队列</span></div>
-              <span class="count-pill" id="pendingCountLabel">0</span>
-            </div>
-            <div class="request-filter"><span class="filter-dot"></span><span>交互模式已开启</span></div>
-            <div class="request-list" id="requestList"><div class="empty-state"><span>◌</span><strong>还没有待回复消息</strong><small>从手机端发送一条消息开始测试</small></div></div>
+        <section class="dashboard-grid">
+          <section class="queue-panel panel">
+            <div class="panel-head"><div><b>手机请求</b><small>实时同步队列</small></div><span class="count-label" id="pendingCountLabel">0</span></div>
+            <div class="queue-state"><span></span>交互模式已开启</div>
+            <div class="queue-list" id="requestList"><div class="empty-state"><strong>没有待处理请求</strong><small>从手机端发送一条消息开始</small></div></div>
           </section>
 
-          <section class="reply-column panel">
-            <div class="panel-heading reply-heading">
-              <div><strong id="selectedTitle">选择一个请求</strong><span id="selectedMeta">回复内容会发送到手机端</span></div>
-              <span class="status-chip" id="selectedStatus">未选择</span>
-            </div>
-
-            <div class="incoming-box" id="incomingBox">
-              <div class="incoming-label">手机消息</div>
-              <div class="incoming-content">从左侧选择一条请求</div>
-            </div>
-
-            <div class="reply-composer-zone">
-              <div class="compose-column">
-                <div class="compose-label"><span>回复内容</span><span class="compose-state">人工回复</span></div>
-                <div class="composer-wrap">
-                  <textarea id="replyInput" placeholder="输入回复内容…" disabled></textarea>
-                  <div class="composer-footer"><span class="hint">Ctrl + Enter 发送</span><span id="draftCount">0 字</span></div>
-                </div>
-                <div class="quick-row" id="quickRow">
-                  <span>快捷回复</span>
-                  <button data-quick="你好呀~">你好呀~</button>
-                  <button data-quick="好的，我知道了">好的，我知道了</button>
-                  <button data-quick="我在听">我在听</button>
-                </div>
-                <div class="reply-actions">
-                  <button class="primary-button" id="sendButton" disabled>发送回复 <span>↵</span></button>
-                  <button class="secondary-button" id="stickerButton" disabled>贴纸</button>
-                  <button class="secondary-button" id="cancelButton" disabled>取消</button>
-                </div>
+          <section class="conversation-panel panel">
+            <div class="panel-head conversation-head"><div><b id="selectedTitle">选择一个请求</b><small id="selectedMeta">回复内容会发送到手机端</small></div><span class="status-label" id="selectedStatus">未选择</span></div>
+            <div class="message-preview" id="incomingBox"><div class="message-kicker">PHONE MESSAGE</div><div class="message-content">从左侧选择一条请求</div></div>
+            <div class="conversation-workspace">
+              <div class="composer-column">
+                <div class="section-line"><span>人工回复</span><span class="muted">Ctrl + Enter 发送</span></div>
+                <div class="composer"><textarea id="replyInput" placeholder="输入回复内容…" disabled></textarea><div class="composer-meta"><span>消息将直接返回手机端</span><span id="draftCount">0 字</span></div></div>
+                <div class="quick-row"><span>快捷回复</span><button data-quick="你好呀~">你好呀~</button><button data-quick="好的，我知道了">好的，我知道了</button><button data-quick="我在听">我在听</button></div>
+                <div class="reply-actions"><button class="send-button" id="sendButton" disabled>发送回复 <span>↵</span></button><button class="action-button" id="stickerButton" disabled>贴纸</button><button class="action-button" id="cancelButton" disabled>取消</button></div>
               </div>
-
-              <aside class="reply-toolbox" id="replyToolbox">
-                <div class="toolbox-heading"><div><strong>回复工具</strong><span>在当前请求中调用</span></div><button class="link-button" data-view="tools">全部</button></div>
-                <div class="toolbox-section-label">常用工具</div>
-                <div class="tool-mini-list" id="toolMiniList"><div class="muted">等待服务同步工具…</div></div>
-                <div class="toolbox-section-label">贴纸快捷发送</div>
-                <div class="sticker-mini-list" id="stickerMiniList"><div class="muted">等待服务同步贴纸…</div></div>
-                <div class="toolbox-divider"></div>
-                <div class="toolbox-note"><span>⌘</span><div><strong>工具结果</strong><small>会返回当前回复会话</small></div></div>
+              <aside class="reply-tools">
+                <div class="tool-head"><div><b>回复工具</b><small>当前请求上下文</small></div><button class="link-button" data-view="tools">全部</button></div>
+                <div class="tool-label">常用工具</div><div class="tool-list" id="toolMiniList"><span class="muted">等待服务同步工具…</span></div>
+                <div class="tool-label">贴纸</div><div class="sticker-list" id="stickerMiniList"><span class="muted">等待服务同步贴纸…</span></div>
+                <div class="tool-foot"><span>⌘</span><small>工具结果会回到当前回复会话</small></div>
               </aside>
             </div>
           </section>
 
-          <aside class="context-column">
-            <section class="side-panel" id="ttsPanel">
-              <div class="side-heading"><strong>TTS 试听</strong><span id="ttsStatus">未配置</span></div>
-              <textarea id="ttsText">你好，这是 Wisp Desktop 的语音测试。</textarea>
-              <div class="field-row"><select id="ttsEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select><button class="play-button" id="ttsButton" title="播放 TTS 试听" aria-label="播放 TTS 试听">▶</button></div>
+          <aside class="bridge-panel">
+            <section class="voice-bridge panel">
+              <div class="bridge-title"><div><div class="overline">VOICE BRIDGE</div><b>语音引擎桥</b></div><button class="link-button" id="voiceReloadButton">重新检测</button></div>
+              <div class="bridge-summary" id="voiceBridgeStatus">正在检测引擎…</div>
+              <div class="engine-list" id="engineStatusList"></div>
+              <div class="form-block"><label for="ttsEngine">引擎</label><select id="ttsEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select></div>
+              <div class="form-row"><div class="form-block"><label for="ttsVoice">角色 / 音色</label><select id="ttsVoice"><option value="default">default</option></select></div><div class="form-block"><label for="ttsLanguage">语言</label><select id="ttsLanguage"><option value="Chinese">中文</option><option value="English">English</option><option value="Japanese">日本語</option><option value="Korean">한국어</option><option value="Auto">自动</option></select></div></div>
+              <div class="form-block"><label for="ttsInstruct">语气指令 <span>Qwen3-TTS</span></label><input id="ttsInstruct" type="text" placeholder="例如：温柔、亲切地说"></div>
+              <div class="form-block"><label for="ttsText">试听文本</label><textarea id="ttsText">你好，这是 Wisp Desktop 的语音引擎测试。</textarea></div>
+              <button class="preview-button" id="ttsButton"><span>▶</span>生成并试听</button>
+              <div class="bridge-address"><span>桥接地址</span><code id="bridgeAddress">127.0.0.1</code></div>
             </section>
-            <section class="side-panel voice-summary">
-              <div class="side-heading"><strong>语音收件箱</strong><button class="link-button" data-view="voices">查看</button></div>
-              <div class="side-metric"><b id="voiceMetric">0</b><span>条待查看语音</span></div>
-              <div class="side-caption">手机上传的录音和 STT 结果会集中显示在这里。</div>
-            </section>
-            <section class="side-panel">
-              <div class="side-heading"><strong>当前连接</strong><span class="green-text">LOCAL</span></div>
-              <div class="connection-card"><div><span>服务地址</span><strong id="serverAddress">127.0.0.1</strong></div><div><span>交互模式</span><strong>已开启</strong></div><div><span>连接方式</span><strong>WebSocket</strong></div></div>
-            </section>
+            <section class="connection-panel panel"><div class="panel-head"><div><b>服务状态</b><small>本机 Wisp 服务</small></div><span class="online-label">LOCAL</span></div><div class="connection-rows"><div><span>交互模式</span><b>已开启</b></div><div><span>传输通道</span><b>WebSocket</b></div><div><span>语音收件</span><button class="link-button" data-view="voices">查看记录</button></div></div></section>
           </aside>
         </section>
       </main>

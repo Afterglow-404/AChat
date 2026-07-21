@@ -78,6 +78,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -105,6 +106,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
     var waiting by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // 拆句追加协程引用：用户按"停止"时一起 cancel，避免拆句追加继续刷屏
+    var segmentJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // TTS 顺序朗读协程引用：用户按"停止"时一起 cancel，避免下一段被自动朗读
+    val ttsSequenceJob = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     
     var currentSubPage by remember { mutableStateOf<ChatSubPage>(ChatSubPage.Chat) }
     // 本地维护 persona 状态：编辑器保存后可即时刷新，无需重进对话
@@ -148,7 +153,20 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             }
             val parts = e.text.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
             if (parts.size > 1) {
-                parts.forEach { bubbles.add(Bubble(it, e.isMe, e.time, imagePath = e.imagePath)) }
+                // 仅首段附 imagePath，避免图片在每段重复显示；voice 元信息也只挂首段
+                parts.forEachIndexed { i, part ->
+                    bubbles.add(
+                        Bubble(
+                            text = part,
+                            isMe = e.isMe,
+                            time = e.time,
+                            imagePath = if (i == 0) e.imagePath else null,
+                            voicePath = if (i == 0) e.voicePath else null,
+                            voiceDuration = if (i == 0) e.voiceDuration else 0,
+                            voiceTranscript = if (i == 0) e.voiceTranscript else null
+                        )
+                    )
+                }
             } else {
                 bubbles.add(
                     Bubble(
@@ -419,19 +437,37 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                     }
                     if (finalReply.isNotBlank()) {
                         val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
-                        val parts = finalReply.split(Regex("【顿】|\\n\\n"))
+                        // 拆句策略：优先 【顿】 / 空行；fallback 按句末标点（。！？!?) 拆长文本（>30 字且无 【顿】 时）
+                        val rawParts = finalReply.split(Regex("【顿】|\\n\\n"))
                             .flatMap { seg -> seg.split(Regex("(?=【sticker:)")) }
                             .map { it.trim() }.filter { it.isNotBlank() }
-                            .filter {
-                                val sm = stickerRegex.find(it)
-                                sm == null || com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2]) != null
+                        val parts = rawParts.flatMap { seg ->
+                            // 仅对纯文本段（无 sticker 标记）做句末标点 fallback
+                            if (stickerRegex.containsMatchIn(seg) || seg.length <= 30) {
+                                listOf(seg)
+                            } else {
+                                val sub = seg.split(Regex("(?<=[。！？!?])")).map { it.trim() }.filter { it.isNotBlank() }
+                                if (sub.size > 1) sub else listOf(seg)
                             }
+                        }.filter {
+                            val sm = stickerRegex.find(it)
+                            sm == null || com.aftglw.devapi.core.sticker.StickerEngine.match(sm.groupValues[1], sm.groupValues[2]) != null
+                        }
                         if (parts.size > 1) {
                             addSegment(parts[0])
-                            kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                            // 保存拆句 Job 引用：用户按"停止"时一起 cancel
+                            segmentJob = kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
                                 for (i in 1 until parts.size) {
-                                    delay((parts[i].length * 50L).coerceIn(200L, 1500L))
-                                    addSegment(parts[i])
+                                    // 按段类型差异化延迟：贴纸段前置 300ms 准备时间；文本段 80ms/字 最低 400ms 最高 1500ms
+                                    val seg = parts[i]
+                                    val isSticker = stickerRegex.containsMatchIn(seg)
+                                    val delayMs = if (isSticker) {
+                                        300L
+                                    } else {
+                                        (seg.length * 80L).coerceIn(400L, 1500L)
+                                    }
+                                    delay(delayMs)
+                                    addSegment(seg)
                                 }
                             }
                         } else if (parts.size == 1) {
@@ -502,6 +538,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 ChatContent(
                     name = name, bubbles = bubbles, input = input, waiting = waiting, chatKey = chatKey,
                     showTimestamps = showTimestamps,
+                    ttsSequenceJob = ttsSequenceJob,
                     onInfoClick = { currentSubPage = ChatSubPage.Info },
                     onInputChange = { input = it },
                     onSend = {
@@ -528,6 +565,13 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         try {
                             com.aftglw.devapi.network.AiServiceFactory.getService().cancel()
                         } catch (ce: Exception) { android.util.Log.w("ChatScreen", "cancel failed", ce) /* 忽略：即使取消失败也复位 waiting */ }
+                        // 取消拆句追加协程：避免 AI 已返回但拆句追加继续刷屏
+                        segmentJob?.cancel()
+                        segmentJob = null
+                        // 取消 TTS 顺序朗读协程：避免下一段被自动朗读
+                        ttsSequenceJob.value?.cancel()
+                        ttsSequenceJob.value = null
+                        try { com.aftglw.devapi.core.voice.TtsProviderManager.stop() } catch (_: Exception) {}
                         waiting = false
                     }
                 )
@@ -655,6 +699,7 @@ fun ChatContent(
     input: String,
     waiting: Boolean,
     showTimestamps: Boolean = true,
+    ttsSequenceJob: MutableState<kotlinx.coroutines.Job?> = mutableStateOf(null),
     onInfoClick: () -> Unit = {},
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
@@ -1142,29 +1187,44 @@ fun ChatContent(
                                                         voicePlayer.stop()  // 兼容旧 voicePlayer 路径
                                                         tts.stop()
                                                         playingTtsId = null
+                                                        // 取消顺序朗读协程
+                                                        ttsSequenceJob.value?.cancel()
+                                                        ttsSequenceJob.value = null
                                                     } else {
                                                         // 统一调用 TtsProviderManager：自动按引擎选择 + 失败降级
                                                         // voiceId 由 TtsVoiceRouter 按当前引擎 + 角色名解析（避免跨引擎污染）
                                                         // 用户在设置页选的 tts_voice 通过 tts_voice_<engine>_<characterName> 命名空间隔离
                                                         playingTtsId = ttsId
-                                                        scope.launch {
-                                                            val outcome = com.aftglw.devapi.core.voice.TtsProviderManager.speak(
-                                                                ctx = ctx,
-                                                                text = b.text,
-                                                                utteranceId = ttsId,
-                                                                characterName = name.takeIf { it.isNotEmpty() },
-                                                                onStart = { playingTtsId = ttsId },
-                                                                onDone = { success ->
-                                                                    if (playingTtsId == ttsId) playingTtsId = null
-                                                                    if (!success) {
-                                                                        Toast.makeText(ctx, "TTS 播放失败", Toast.LENGTH_SHORT).show()
-                                                                    }
+                                                        // 启动顺序朗读协程：从当前 idx 开始，读完自动读下一段（跳过贴纸段和空文本段）
+                                                        ttsSequenceJob.value?.cancel()
+                                                        ttsSequenceJob.value = scope.launch {
+                                                            var i = idx
+                                                            while (i < bubbles.size && this.isActive) {
+                                                                val cur = bubbles[i]
+                                                                // 跳过自己发送的、贴纸段、空文本段
+                                                                if (cur.isMe || cur.label == "sticker" || cur.text.isBlank()) {
+                                                                    i++; continue
                                                                 }
-                                                            )
-                                                            if (outcome is com.aftglw.devapi.core.voice.TtsOutcome.Failed) {
-                                                                playingTtsId = null
-                                                                Toast.makeText(ctx, "TTS 失败: ${outcome.reason.take(60)}", Toast.LENGTH_SHORT).show()
+                                                                val curId = "tts_${i}_${cur.time.hashCode()}"
+                                                                if (i != idx) playingTtsId = curId
+                                                                val outcome = com.aftglw.devapi.core.voice.TtsProviderManager.speak(
+                                                                    ctx = ctx,
+                                                                    text = cur.text,
+                                                                    utteranceId = curId,
+                                                                    characterName = name.takeIf { it.isNotEmpty() },
+                                                                    onStart = { playingTtsId = curId },
+                                                                    onDone = { success ->
+                                                                        if (playingTtsId == curId) playingTtsId = null
+                                                                    }
+                                                                )
+                                                                if (outcome is com.aftglw.devapi.core.voice.TtsOutcome.Failed) {
+                                                                    playingTtsId = null
+                                                                    Toast.makeText(ctx, "TTS 失败: ${outcome.reason.take(60)}", Toast.LENGTH_SHORT).show()
+                                                                    break
+                                                                }
+                                                                i++
                                                             }
+                                                            playingTtsId = null
                                                         }
                                                     }
                                                 },
