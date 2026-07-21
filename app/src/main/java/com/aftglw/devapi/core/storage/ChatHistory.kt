@@ -25,7 +25,8 @@ data class ChatHistoryEntry(
     val voicePath: String? = null,
     val voiceDuration: Int = 0,
     val voiceTranscript: String? = null,
-    val stickerPath: String? = null
+    val stickerPath: String? = null,
+    val sourceEventId: String? = null
 )
 
 /**
@@ -64,7 +65,8 @@ object ChatHistory {
                     voicePath = it.voicePath, voiceDuration = it.voiceDuration,
                     voiceTranscript = it.voiceTranscript,
                     stickerPath = it.stickerPath,
-                    fromName = null
+                    fromName = null,
+                    sourceEventId = it.sourceEventId
                 )
             })
         }
@@ -87,7 +89,8 @@ object ChatHistory {
                 voicePath = null,
                 voiceDuration = 0,
                 voiceTranscript = null,
-                fromName = null
+                fromName = null,
+                sourceEventId = message.sourceEventId
             )
         )
     }
@@ -101,5 +104,6 @@ private fun MessageEntity.toEntry() = ChatHistoryEntry(
     voicePath = voicePath,
     voiceDuration = voiceDuration,
     voiceTranscript = voiceTranscript,
-    stickerPath = stickerPath
+    stickerPath = stickerPath,
+    sourceEventId = sourceEventId
 )

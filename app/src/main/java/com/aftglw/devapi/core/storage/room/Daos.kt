@@ -161,3 +161,55 @@ interface WorldbookDao {
     @Query("DELETE FROM worldbook")
     fun deleteAll()
 }
+
+// ── 未完成事件 DAO（AffectiveField 体系） ──
+
+@Dao
+interface PendingEventDao {
+    @Query("SELECT * FROM pending_events WHERE chat_name = :chatName AND resolved = 0 AND archived = 0 ORDER BY created_at ASC")
+    suspend fun getActiveForChat(chatName: String): List<PendingEventEntity>
+
+    @Query("SELECT * FROM pending_events WHERE chat_name = :chatName AND resolved = 0 AND archived = 0 AND attempt_count = 0 ORDER BY created_at ASC")
+    suspend fun getUnattemptedForChat(chatName: String): List<PendingEventEntity>
+
+    @Query("SELECT * FROM pending_events WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): PendingEventEntity?
+
+    @Query("SELECT * FROM pending_events WHERE chat_name = :chatName ORDER BY created_at DESC LIMIT :limit")
+    suspend fun getRecentForChat(chatName: String, limit: Int = 20): List<PendingEventEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(event: PendingEventEntity)
+
+    @Query("UPDATE pending_events SET attempt_count = :attemptCount, last_attempt_at = :lastAttemptAt WHERE id = :id")
+    suspend fun updateAttempt(id: String, attemptCount: Int, lastAttemptAt: Long)
+
+    @Query("UPDATE pending_events SET resolved = 1 WHERE id = :id")
+    suspend fun markResolved(id: String)
+
+    @Query("UPDATE pending_events SET archived = 1 WHERE id = :id")
+    suspend fun markArchived(id: String)
+
+    @Query("DELETE FROM pending_events WHERE chat_name = :chatName")
+    suspend fun deleteForChat(chatName: String)
+
+    @Query("DELETE FROM pending_events")
+    suspend fun deleteAll()
+}
+
+// ── 已处理事件 DAO（幂等键，设计文档 14.8） ──
+
+@Dao
+interface ProcessedEventDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = :eventId)")
+    suspend fun isProcessed(eventId: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun markProcessed(event: ProcessedEventEntity)
+
+    @Query("DELETE FROM processed_events WHERE processed_at < :before")
+    suspend fun cleanupOlderThan(before: Long): Int
+
+    @Query("DELETE FROM processed_events")
+    suspend fun deleteAll()
+}

@@ -23,6 +23,15 @@ class ProactiveWorker(
 
     override suspend fun doWork(): Result {
         return try {
+            // P0.1：先跑 dry-run（只读，基于 AffectiveField 输出建议，不发送消息）
+            // 放在 runOnce 之前，即使 runOnce 失败也能记录建议
+            try {
+                ProactiveScheduler.dryRunScan(applicationContext)
+            } catch (e: Exception) {
+                // dry-run 失败不影响 runOnce
+                android.util.Log.w("ProactiveWorker", "dryRunScan failed", e)
+            }
+            // 实际发送（由 proactive_enabled_$chat 开关控制）
             ProactiveScheduler.runOnce(applicationContext)
             Result.success()
         } catch (e: Exception) {

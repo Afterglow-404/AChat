@@ -19,7 +19,7 @@
   "build": {
     "appId": "com.aftglw.wisp.desktop",
     "productName": "Wisp Desktop",
-    "files": ["main.mjs", "preload.mjs", "renderer/**/*"],
+    "files": ["main.mjs", "preload.cjs", "preload.mjs", "renderer/**/*"],
     "extraResources": [
       { "from": "../scripts/wisp-dev-server.mjs", "to": "project/scripts/wisp-dev-server.mjs" },
       { "from": "../app/src/main/assets", "to": "project/app/src/main/assets" }

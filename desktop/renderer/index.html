@@ -8,71 +8,93 @@
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark">W</span><span><b>Wisp Desktop</b><small>Voice bridge workspace</small></span></div>
-      <div class="topbar-status"><span class="status-dot"></span><span id="connectionText">连接中</span><span class="topbar-separator"></span><span class="mono" id="portText">--</span></div>
-      <div class="topbar-actions"><span class="topbar-caption">本机调试服务</span><button class="icon-button" id="restartButton" title="重启 Wisp 服务" aria-label="重启 Wisp 服务">↻</button></div>
+    <header class="appbar">
+      <div class="brand"><span class="brand-icon">W</span><span><strong>Wisp Desktop</strong><small>AI conversation control</small></span></div>
+      <nav class="top-nav" aria-label="主导航">
+        <button class="top-nav-item active" data-view="inbox">收件箱 <b id="pendingBadge">0</b></button>
+        <button class="top-nav-item" data-view="voices">语音 <b id="voiceBadge">0</b></button>
+        <button class="top-nav-item" data-view="voicebridge">语音引擎</button>
+        <button class="top-nav-item" data-view="tools">工具</button>
+        <button class="top-nav-item" data-view="affect">RELATION <b id="affectBadge">0</b></button>
+      </nav>
+      <div class="appbar-right"><span class="connection"><i class="connection-dot"></i><span id="connectionText">连接中</span></span><span class="appbar-port mono" id="portText">--</span><button class="icon-button" id="restartButton" title="重启服务" aria-label="重启服务">↻</button></div>
     </header>
 
-    <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-title">工作区</div>
-        <button class="nav-item active" data-view="inbox"><span class="nav-symbol">◈</span><span>回复工作台</span><b id="pendingBadge">0</b></button>
-        <button class="nav-item" data-view="voices"><span class="nav-symbol">◉</span><span>语音收件箱</span><b id="voiceBadge">0</b></button>
-        <button class="nav-item" data-view="tools"><span class="nav-symbol">⌘</span><span>工具中心</span></button>
-        <div class="sidebar-title second">系统</div>
-        <button class="nav-item" data-view="settings"><span class="nav-symbol">⚙</span><span>服务设置</span></button>
-        <div class="sidebar-footer"><div class="phone-presence"><span></span><div><b>手机已接入</b><small>等待请求同步</small></div></div><small class="version">WISP DESKTOP 0.1.0</small></div>
+    <div class="app-body">
+      <aside class="queue-sidebar">
+        <div class="queue-header"><div><span class="eyebrow">INBOX</span><h2>手机请求</h2></div><span class="queue-count" id="requestCount">0</span></div>
+        <div class="queue-mode"><i></i><span>交互回复模式</span><small>实时</small></div>
+        <div class="queue-list" id="requestList"><div class="empty-state"><strong>暂无请求</strong><small>从手机端发送消息开始</small></div></div>
+        <div class="queue-footer"><span class="presence-dot"></span><div><strong>手机已连接</strong><small>等待 Wisp 消息</small></div></div>
       </aside>
 
-      <main class="main-area">
-        <header class="page-header">
-          <div><div class="overline">CONVERSATION CONTROL</div><h1>语音与回复工作台</h1><p>接收手机请求，在同一条工作流中完成回复、工具调用与语音试听。</p></div>
-          <div class="page-metrics"><div><b id="requestCount">0</b><small>待处理</small></div><div><b id="voiceMetric">0</b><small>语音收件</small></div><button class="quiet-button" id="cancelAllButton">全部忽略</button></div>
-        </header>
-
-        <section class="dashboard-grid">
-          <section class="queue-panel panel">
-            <div class="panel-head"><div><b>手机请求</b><small>实时同步队列</small></div><span class="count-label" id="pendingCountLabel">0</span></div>
-            <div class="queue-state"><span></span>交互模式已开启</div>
-            <div class="queue-list" id="requestList"><div class="empty-state"><strong>没有待处理请求</strong><small>从手机端发送一条消息开始</small></div></div>
-          </section>
-
-          <section class="conversation-panel panel">
-            <div class="panel-head conversation-head"><div><b id="selectedTitle">选择一个请求</b><small id="selectedMeta">回复内容会发送到手机端</small></div><span class="status-label" id="selectedStatus">未选择</span></div>
-            <div class="message-preview" id="incomingBox"><div class="message-kicker">PHONE MESSAGE</div><div class="message-content">从左侧选择一条请求</div></div>
-            <div class="conversation-workspace">
-              <div class="composer-column">
-                <div class="section-line"><span>人工回复</span><span class="muted">Ctrl + Enter 发送</span></div>
-                <div class="composer"><textarea id="replyInput" placeholder="输入回复内容…" disabled></textarea><div class="composer-meta"><span>消息将直接返回手机端</span><span id="draftCount">0 字</span></div></div>
-                <div class="quick-row"><span>快捷回复</span><button data-quick="你好呀~">你好呀~</button><button data-quick="好的，我知道了">好的，我知道了</button><button data-quick="我在听">我在听</button></div>
-                <div class="reply-actions"><button class="send-button" id="sendButton" disabled>发送回复 <span>↵</span></button><button class="action-button" id="stickerButton" disabled>贴纸</button><button class="action-button" id="cancelButton" disabled>取消</button></div>
-              </div>
-              <aside class="reply-tools">
-                <div class="tool-head"><div><b>回复工具</b><small>当前请求上下文</small></div><button class="link-button" data-view="tools">全部</button></div>
-                <div class="tool-label">常用工具</div><div class="tool-list" id="toolMiniList"><span class="muted">等待服务同步工具…</span></div>
-                <div class="tool-label">贴纸</div><div class="sticker-list" id="stickerMiniList"><span class="muted">等待服务同步贴纸…</span></div>
-                <div class="tool-foot"><span>⌘</span><small>工具结果会回到当前回复会话</small></div>
+      <main class="main-content">
+        <section id="workspaceView" class="workspace-view">
+          <header class="content-header"><div><span class="eyebrow">REPLY WORKFLOW</span><h1>人工回复</h1><p>选择一条请求，按顺序开始回复、调用工具，最后发送并结束。</p></div><button class="quiet-button" id="cancelAllButton">忽略全部</button></header>
+          <section class="conversation-panel">
+            <header class="conversation-header"><div><h2 id="selectedTitle">选择一个请求</h2><small id="selectedMeta">请求内容和回复状态会显示在这里</small></div><span class="state-badge" id="selectedStatus">未选择</span></header>
+            <div class="incoming-message" id="incomingBox"><span class="message-label">PHONE MESSAGE</span><div class="message-body">从左侧选择一条手机请求</div></div>
+            <div class="flow-strip" id="flowStrip"><span class="flow-step current"><b>1</b>选择请求</span><span class="flow-line"></span><span class="flow-step"><b>2</b>开始回复</span><span class="flow-line"></span><span class="flow-step"><b>3</b>发送并结束</span></div>
+            <div class="composer-area">
+              <div class="composer-main"><textarea id="replyInput" placeholder="开始回复后在这里输入内容…" disabled></textarea><div class="composer-footer"><span>Ctrl + Enter 发送并结束</span><span id="draftCount">0 字</span></div></div>
+              <aside class="action-dock">
+                <div class="dock-title"><strong>当前操作</strong><small>按回复流程操作</small></div>
+                <button class="dock-action start" id="startReplyButton" disabled><b>1</b><span><strong>开始回复</strong><small>reply start</small></span></button>
+                <button class="dock-action" id="toolActionButton" disabled><b>⌘</b><span><strong>调用工具</strong><small>选择下方工具</small></span></button>
+                <button class="dock-action" id="stickerButton" disabled><b>☺</b><span><strong>发送贴纸</strong><small>选择下方贴纸</small></span></button>
+                <button class="dock-action finish" id="sendButton" disabled><b>↵</b><span><strong>发送并结束</strong><small>reply end</small></span></button>
+                <button class="dock-cancel" id="cancelButton" disabled>取消当前回复</button>
               </aside>
             </div>
+            <div class="quick-replies"><span>快捷回复</span><button data-quick="你好呀~">你好呀~</button><button data-quick="好的，我知道了">好的，我知道了</button><button data-quick="我在听">我在听</button></div>
           </section>
-
-          <aside class="bridge-panel">
-            <section class="voice-bridge panel">
-              <div class="bridge-title"><div><div class="overline">VOICE BRIDGE</div><b>语音引擎桥</b></div><button class="link-button" id="voiceReloadButton">重新检测</button></div>
-              <div class="bridge-summary" id="voiceBridgeStatus">正在检测引擎…</div>
-              <div class="engine-list" id="engineStatusList"></div>
-              <div class="form-block"><label for="ttsEngine">引擎</label><select id="ttsEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select></div>
-              <div class="form-row"><div class="form-block"><label for="ttsVoice">角色 / 音色</label><select id="ttsVoice"><option value="default">default</option></select></div><div class="form-block"><label for="ttsLanguage">语言</label><select id="ttsLanguage"><option value="Chinese">中文</option><option value="English">English</option><option value="Japanese">日本語</option><option value="Korean">한국어</option><option value="Auto">自动</option></select></div></div>
-              <div class="form-block"><label for="ttsInstruct">语气指令 <span>Qwen3-TTS</span></label><input id="ttsInstruct" type="text" placeholder="例如：温柔、亲切地说"></div>
-              <div class="form-block"><label for="ttsText">试听文本</label><textarea id="ttsText">你好，这是 Wisp Desktop 的语音引擎测试。</textarea></div>
-              <button class="preview-button" id="ttsButton"><span>▶</span>生成并试听</button>
-              <div class="bridge-address"><span>桥接地址</span><code id="bridgeAddress">127.0.0.1</code></div>
-            </section>
-            <section class="connection-panel panel"><div class="panel-head"><div><b>服务状态</b><small>本机 Wisp 服务</small></div><span class="online-label">LOCAL</span></div><div class="connection-rows"><div><span>交互模式</span><b>已开启</b></div><div><span>传输通道</span><b>WebSocket</b></div><div><span>语音收件</span><button class="link-button" data-view="voices">查看记录</button></div></div></section>
-          </aside>
+          <section class="inline-tools"><header><div><span class="eyebrow">ACTIONS</span><h3>可用工具与贴纸</h3></div><span class="inline-hint">开始回复后可用</span></header><div class="inline-tool-columns"><div><label>工具</label><div class="tool-list" id="toolMiniList"><span class="muted">等待服务同步工具…</span></div></div><div><label>贴纸</label><div class="sticker-list" id="stickerMiniList"><span class="muted">等待服务同步贴纸…</span></div></div></div></section>
         </section>
-      </main>
+
+        <section id="affectView" class="affect-view hidden">
+          <header class="content-header"><div><span class="eyebrow">AFFECTIVE FIELD</span><h1>Relationship State</h1><p>Observe the phone's local relationship snapshot without changing chat behavior.</p></div><div class="header-actions"><button class="quiet-button" id="refreshAffectButton" type="button">Refresh</button><button class="quiet-button danger-button" id="clearAffectButton" type="button">Clear</button></div></header>
+          <section class="affect-toolbar"><label>Character / chat<select id="affectChatSelect"><option value="">No snapshot received</option></select></label><span id="affectUpdated">Waiting for an Android snapshot</span></section>
+          <section class="affect-metric-grid" id="affectMetricGrid"></section>
+          <div class="affect-columns">
+            <section class="debug-surface"><header class="section-heading"><div><h2>RhythmSensor</h2><small>Behavioral observations only</small></div><span class="console-tag">SIGNALS</span></header><div id="rhythmPanel" class="debug-list"></div></section>
+            <section class="debug-surface"><header class="section-heading"><div><h2>ResponseAssessment</h2><small>Current round, local heuristic</small></div><span class="console-tag">ZERO TOKEN</span></header><div id="assessmentPanel" class="debug-list"></div></section>
+          </div>
+          <div class="affect-columns">
+            <section class="debug-surface"><header class="section-heading"><div><h2>PendingEvents</h2><small>Unfinished items that may need a gentle follow-up</small></div><span class="console-tag" id="pendingEventCount">0</span></header><div id="affectPendingList" class="pending-debug-list"></div></section>
+            <section class="debug-surface"><header class="section-heading"><div><h2>Recent updates</h2><small>eventId deduplicated on the server</small></div><span class="console-tag">EVENT LOG</span></header><div id="affectEventList" class="pending-debug-list"></div></section>
+          </div>
+        </section>
+
+        <section id="toolsView" class="tools-view hidden">
+          <header class="content-header"><div><span class="eyebrow">AI TOOL MONITOR</span><h1>AI 工具实时预览</h1><p>直接调用当前 Wisp 服务能执行的工具，查看最新返回值和耗时。</p></div><button class="quiet-button" id="refreshToolsButton" type="button">↻ 刷新全部</button></header>
+          <div class="tool-monitor-summary"><div><strong id="toolCountMetric">0</strong><small>已加载工具</small></div><div><strong id="toolLiveMetric">0</strong><small>已获得结果</small></div><div><strong id="toolErrorMetric">0</strong><small>最近失败</small></div><span id="toolPreviewUpdated">等待刷新</span></div>
+          <section class="tool-preview-surface"><header class="section-heading"><div><h2>当前工具返回</h2><small>只读工具会参与“刷新全部”，写入类工具需要在回复流程中调用。</small></div><span class="console-tag">LIVE</span></header><div id="toolPreviewGrid" class="tool-preview-grid"></div></section>
+        </section>
+
+        <section id="bridgeView" class="bridge-view hidden">
+          <header class="content-header"><div><span class="eyebrow">VOICE ENGINE BRIDGE</span><h1>语音引擎桥</h1><p>把手机端的语音能力延伸到电脑端的 GPT-SoVITS 或 Qwen3-TTS。</p></div><button class="quiet-button" id="voiceReloadButton">重新检测</button></header>
+          <div class="bridge-layout"><section class="engine-overview"><div class="section-heading"><div><h2>引擎状态</h2><small id="voiceBridgeStatus">正在检测引擎…</small></div><span class="bridge-address" id="bridgeAddress">127.0.0.1</span></div><div class="engine-list" id="engineStatusList"></div><div class="bridge-note"><b>桥接原则</b><span>手机只连接 Wisp，Wisp 再把请求转发给本机语音引擎。</span></div></section><section class="tts-console"><div class="section-heading"><div><h2>试听控制台</h2><small>试听参数会原样发送到桥接服务</small></div><span class="console-tag">TTS</span></div><div class="form-grid"><label>引擎<select id="ttsEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select></label><label>角色 / 音色<select id="ttsVoice"><option value="default">default</option></select></label><label>语言<select id="ttsLanguage"><option value="Chinese">中文</option><option value="English">English</option><option value="Japanese">日本語</option><option value="Korean">한국어</option><option value="Auto">自动</option></select></label><label>语气指令 <em>Qwen3</em><input id="ttsInstruct" type="text" placeholder="温柔、亲切地说"></label></div><label class="wide-field">试听文本<textarea id="ttsText">你好，这是 Wisp Desktop 的语音引擎测试。</textarea></label><div class="tts-footer"><span id="ttsStatus">等待检测</span><button class="preview-button" id="ttsButton">▶ 生成并试听</button></div></section></div>
+          <section class="voice-config-panel">
+            <header class="section-heading"><div><h2>语音引擎配置</h2><small>保存后会自动重启 Wisp 语音桥，配置会持久化到本机。</small></div><span class="console-tag">CONFIG</span></header>
+            <div class="config-section"><div class="config-section-title"><strong>上游服务地址</strong><small>留空表示暂不启用该引擎</small></div><div class="config-grid two-col"><label>GPT-SoVITS URL<input id="voiceConfigGptUrl" type="url" placeholder="http://127.0.0.1:9880"></label><label>Qwen3-TTS URL<input id="voiceConfigQwenUrl" type="url" placeholder="http://127.0.0.1:8000"></label></div></div>
+            <div class="config-section"><div class="config-section-title"><strong>GPT-SoVITS 默认参数</strong><small>对应 GPT-SoVITS /tts 请求字段</small></div><div class="config-grid two-col"><label>默认音色<input id="voiceConfigGsvVoice" type="text" placeholder="default"></label><label>参考音频路径<input id="voiceConfigGsvRefAudio" type="text" placeholder="可选，本机路径或 URL"></label><label>Prompt 文本<input id="voiceConfigGsvPromptText" type="text" placeholder="可选"></label><label>Prompt 语言<input id="voiceConfigGsvPromptLang" type="text" placeholder="zh"></label><label>输出语言<input id="voiceConfigGsvTextLang" type="text" placeholder="zh"></label><label>音频格式<select id="voiceConfigGsvMediaType"><option value="wav">wav</option><option value="raw">raw</option><option value="ogg">ogg</option><option value="mp3">mp3</option></select></label></div></div>
+            <div class="config-section"><div class="config-section-title"><strong>Qwen3-TTS 默认参数</strong><small>角色、语言和风格指令</small></div><div class="config-grid two-col"><label>默认 Speaker<input id="voiceConfigQwenSpeaker" type="text" placeholder="Vivian"></label><label>默认语言<input id="voiceConfigQwenLanguage" type="text" placeholder="Chinese"></label><label class="config-wide">默认 Instruct<input id="voiceConfigQwenInstruct" type="text" placeholder="温柔、自然地说"></label></div></div>
+            <div class="config-section"><div class="config-section-title"><strong>请求超时</strong><small>单位：毫秒，范围 1000 - 600000</small></div><div class="config-grid two-col"><label>GPT-SoVITS 超时<input id="voiceConfigTtsTimeout" type="number" min="1000" max="600000" step="1000"></label><label>Qwen3-TTS 超时<input id="voiceConfigQwenTimeout" type="number" min="1000" max="600000" step="1000"></label></div></div>
+            <div class="config-footer"><span id="voiceConfigStatus">正在读取配置</span><div><button class="quiet-button" id="voiceConfigResetButton" type="button">恢复默认</button><button class="preview-button" id="voiceConfigSaveButton" type="button">保存并重启语音桥</button></div></div>
+          </section>
+          <section class="voice-clone-panel">
+            <header class="section-heading"><div><h2>语音克隆工作台</h2><small>保存角色音色预设，并将其应用到当前语音桥默认配置。</small></div><span class="console-tag">VOICE LAB</span></header>
+            <div class="clone-toolbar"><label>角色预设<select id="cloneProfileSelect"><option value="">新建角色预设</option></select></label><button class="quiet-button" id="cloneDeleteButton" type="button">删除预设</button></div>
+            <div class="config-grid two-col clone-grid"><label>角色名称<input id="cloneProfileName" type="text" placeholder="例如：林夏"></label><label>克隆引擎<select id="cloneEngine"><option value="gptsovits">GPT-SoVITS</option><option value="qwen3">Qwen3-TTS</option></select></label><label>音色 / Speaker<input id="cloneVoice" type="text" placeholder="default 或 Vivian"></label><label>语言<input id="cloneLanguage" type="text" placeholder="Chinese 或 zh"></label><label class="config-wide">参考音频路径 <em>GPT-SoVITS</em><input id="cloneRefAudio" type="text" placeholder="H:\\voices\\linxia.wav"></label><label class="config-wide">参考音频文本 / Prompt <em>GPT-SoVITS</em><textarea id="clonePromptText" placeholder="填写参考音频中说的内容，能提升克隆稳定性"></textarea></label><label>Prompt 语言<input id="clonePromptLang" type="text" placeholder="zh"></label><label>语气指令 <em>Qwen3-TTS</em><input id="cloneInstruct" type="text" placeholder="温柔、自然地说"></label></div>
+            <div class="clone-footer"><span id="cloneStatus">尚未选择角色预设</span><div><button class="quiet-button" id="cloneApplyButton" type="button">应用到默认配置</button><button class="preview-button" id="cloneSaveButton" type="button">保存角色预设</button></div></div>
+            <div class="clone-note"><strong>当前适配范围</strong><span>GPT-SoVITS 使用参考音频、Prompt 文本和语言参数；当前 Qwen3-TTS 适配器使用 CustomVoice Speaker，不会伪装成已经支持 Base 模型的音频克隆。</span></div>
+          </section>
+        </section>
+        <section class="qwen-clone-controls">
+          <header class="section-heading"><div><h2>Qwen3-TTS voice clone controls</h2><small>Official Base model parameters. CustomVoice and VoiceDesign ignore clone-only fields.</small></div><span class="console-tag">QWEN3</span></header>
+          <div class="config-grid two-col"><label>Model mode<select id="cloneQwenMode"><option value="">Auto from model ID</option><option value="custom_voice">CustomVoice</option><option value="base">Base voice clone</option><option value="voice_design">VoiceDesign</option></select></label><label>Reference audio<div class="input-with-button"><input id="cloneRefAudioQwen" type="text" placeholder="H:\\voices\\reference.wav"><button class="quiet-button" id="clonePickAudioButton" type="button">Choose</button></div></label><label class="config-wide">Reference transcript<textarea id="cloneRefText" placeholder="Required for highest-quality Base cloning"></textarea></label><label class="check-field"><input id="cloneXVectorOnly" type="checkbox"><span>Speaker embedding only (reference transcript optional)</span></label></div>
+        </section>
+        </main>
     </div>
   </div>
   <audio id="audioPlayer" hidden></audio>

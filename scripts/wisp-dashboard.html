@@ -63,6 +63,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 #quickReplies { display: flex; flex-wrap: wrap; gap: 4px; }
 #quickReplies button { font-size: 11px; padding: 4px 8px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
 #quickReplies button:hover { border-color: var(--accent); }
+/* AffectiveField panel */
+.affectChat { padding: 8px; background: var(--surface2); border-radius: var(--radius); margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; }
+.affectChat:hover { border-color: var(--accent); }
+.affectChat.active { border-color: var(--accent); }
+.affectChat .affectName { font-size: 12px; color: var(--text); margin-bottom: 4px; font-weight: bold; }
+.affectChat .affectDims { font-size: 10px; color: var(--text2); line-height: 1.5; font-family: ui-monospace, 'SF Mono', monospace; }
+.affectChat .affectDim { display: inline-block; margin-right: 8px; }
+.affectChat .affectDim.warm { color: var(--accent); }
+.affectChat .affectDim.cool { color: var(--green); }
+.affectChat .affectHint { font-size: 10px; color: var(--warn); margin-top: 3px; }
+.affectChat .affectPending { font-size: 10px; color: var(--text2); margin-top: 2px; }
+.affectBar { display: inline-block; width: 36px; height: 4px; background: var(--border); border-radius: 2px; vertical-align: middle; margin-left: 2px; position: relative; }
+.affectBar > span { position: absolute; top: 0; height: 4px; border-radius: 2px; }
+.affectDetail { padding: 8px; background: var(--bg); border-radius: var(--radius); margin-top: 4px; font-size: 11px; line-height: 1.6; }
+.affectDetail .row { color: var(--text2); margin-bottom: 2px; }
+.affectDetail .row b { color: var(--text); }
 @media (max-width: 760px) {
   body { overflow: auto; }
   #main { overflow-y: auto; flex-direction: column; }
@@ -139,6 +155,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
       <h3>🎙 语音收件箱</h3>
       <div id="voiceList"><div class="emptyState">暂无</div></div>
     </div>
+    <div id="affectPanel">
+      <h3 style="cursor:pointer" onclick="toggleAffectPanel()">💚 情绪场 <span id="affectToggleIcon">▼</span></h3>
+      <div id="affectBody" style="display:block">
+        <div id="affectList" class="emptyState">等待 Android 端上报…</div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text2)" id="affectMeta"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -196,6 +219,8 @@ function connect() {
   ws.onopen = () => {
     document.getElementById('wsDot').className = 'dot';
     document.getElementById('wsStatus').textContent = '已连接';
+    // P0.1：连接后加载已有 affect snapshot
+    loadInitialAffect();
   };
   ws.onclose = () => {
     document.getElementById('wsDot').className = 'dot offline';
@@ -256,9 +281,147 @@ function handleMsg(msg) {
   if (msg.type === 'cancelledAll') {
     showToast('已忽略 ' + msg.count + ' 个请求');
   }
+  if (msg.type === 'affect.updated') {
+    // P0.1 三端联调：Android 端 PostLLMProcessor.syncAffectiveSnapshot 上报
+    affectSnapshots.set(msg.snapshot.chatName, msg.snapshot);
+    if (msg.event) affectEvents.unshift(msg.event);
+    affectEvents = affectEvents.slice(0, 100);
+    renderAffectPanel();
+  }
+  if (msg.type === 'affect.cleared') {
+    if (msg.chatName) {
+      affectSnapshots.delete(msg.chatName);
+      affectEvents = affectEvents.filter(e => e.chatName !== msg.chatName);
+    } else {
+      affectSnapshots.clear();
+      affectEvents = [];
+    }
+    renderAffectPanel();
+  }
   if (msg.type === 'error') {
     alert('错误: ' + (msg.message || '未知'));
   }
+}
+
+// ── P0.1 AffectiveField 展示 ──
+let affectSnapshots = new Map();  // chatName -> snapshot
+let affectEvents = [];              // 事件流（最近 100 条）
+let affectSelectedChat = null;      // 当前展开查看的角色
+
+function toggleAffectPanel() {
+  const body = document.getElementById('affectBody');
+  const icon = document.getElementById('affectToggleIcon');
+  body.style.display = body.style.display === 'none' ? 'block' : 'none';
+  icon.textContent = body.style.display === 'none' ? '▶' : '▼';
+}
+
+async function loadInitialAffect() {
+  try {
+    const resp = await dashboardFetch('/api/v1/debug/affect');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    affectSnapshots.clear();
+    for (const s of (data.snapshots || [])) affectSnapshots.set(s.chatName, s);
+    affectEvents = data.events || [];
+    renderAffectPanel();
+  } catch (e) {
+    console.warn('loadInitialAffect failed', e);
+  }
+}
+
+function warmthLabel(v) {
+  if (v > 0.6) return '亲密';
+  if (v > 0.2) return '熟络';
+  if (v > -0.2) return '初识';
+  if (v > -0.6) return '疏远';
+  return '冷淡';
+}
+function tensionLabel(v) {
+  if (v > 0.6) return '剑拔弩张';
+  if (v > 0.2) return '紧张';
+  if (v > -0.2) return '平和';
+  if (v > -0.6) return '和谐';
+  return '融洽';
+}
+
+function renderDim(label, value, colorClass) {
+  // bar 从中点向左/右延伸
+  const pct = (value + 1) / 2 * 100;  // -1→0%, 0→50%, +1→100%
+  let barHtml;
+  if (value >= 0) {
+    barHtml = `<span class="affectBar"><span style="left:50%;width:${pct - 50}%;background:var(--accent)"></span></span>`;
+  } else {
+    barHtml = `<span class="affectBar"><span style="left:${pct}%;width:${50 - pct}%;background:var(--green)"></span></span>`;
+  }
+  return `<span class="affectDim ${colorClass || ''}">${label}=${value.toFixed(2)}${barHtml}</span>`;
+}
+
+function renderAffectPanel() {
+  const list = document.getElementById('affectList');
+  const meta = document.getElementById('affectMeta');
+  if (affectSnapshots.size === 0) {
+    list.innerHTML = '<div class="emptyState">暂无上报<br><small>Android DebugPage 启用 sync 后生效</small></div>';
+    meta.textContent = '';
+    return;
+  }
+  const snaps = [...affectSnapshots.values()].sort((a, b) => (b.affectiveField.lastUpdatedTs || 0) - (a.affectiveField.lastUpdatedTs || 0));
+  list.innerHTML = snaps.map(s => {
+    const f = s.affectiveField;
+    const isActive = s.chatName === affectSelectedChat;
+    const hint = s.stateHint && s.stateHint.observation ? `<div class="affectHint">⚠ ${escHtml(s.stateHint.observation)}</div>` : '';
+    const pend = s.pendingEvents && s.pendingEvents.length > 0
+      ? `<div class="affectPending">⏳ ${s.pendingEvents.length} 件未完成${s.closureCandidates && s.closureCandidates.length > 0 ? ` · ${s.closureCandidates.length} 件待跟进` : ''}</div>`
+      : '';
+    const detail = isActive ? renderAffectDetail(s) : '';
+    return `<div class="affectChat ${isActive ? 'active' : ''}" data-affect-chat="${escHtml(s.chatName)}">
+      <div class="affectName">${escHtml(s.chatName)} <span style="font-weight:normal;color:var(--text2);font-size:10px">· ${warmthLabel(f.warmth)}</span></div>
+      <div class="affectDims">
+        ${renderDim('T', f.tension)}
+        ${renderDim('W', f.warmth, 'warm')}
+        ${renderDim('A', f.anticipation)}
+        ${renderDim('D', f.drift)}
+      </div>
+      ${hint}${pend}${detail}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-affect-chat]').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.affectChat;
+      affectSelectedChat = affectSelectedChat === name ? null : name;
+      renderAffectPanel();
+    });
+  });
+  const latest = snaps[0];
+  const ageSec = latest.affectiveField.lastUpdatedTs ? Math.floor((Date.now() - latest.affectiveField.lastUpdatedTs) / 1000) : -1;
+  const ageStr = ageSec < 0 ? '未知' : ageSec < 60 ? `${ageSec}s` : `${Math.floor(ageSec / 60)}min`;
+  meta.textContent = `${affectSnapshots.size} 个角色 · 事件 ${affectEvents.length} 条 · 最新更新 ${ageStr} 前`;
+}
+
+function renderAffectDetail(s) {
+  const f = s.affectiveField;
+  const r = s.rhythmProfile || {};
+  const h = s.stateHint || {};
+  const a = s.responseAssessment;
+  const lastTs = f.lastUpdatedTs ? new Date(f.lastUpdatedTs).toLocaleString('zh-CN') : '—';
+  const rows = [
+    `<div class="row"><b>张力</b> ${f.tension.toFixed(2)} (${tensionLabel(f.tension)})</div>`,
+    `<div class="row"><b>温度</b> ${f.warmth.toFixed(2)} (${warmthLabel(f.warmth)})</div>`,
+    `<div class="row"><b>期待</b> ${f.anticipation.toFixed(2)}</div>`,
+    `<div class="row"><b>漂移</b> ${f.drift.toFixed(2)}</div>`,
+    `<div class="row"><b>韵律样本</b> ${r.sampleCount || 0} · latencyP=${(r.latencyPercentile || 0).toFixed(2)} · lengthP=${(r.lengthPercentile || 0).toFixed(2)} · initiative7d=${(r.initiativeRate7d || 0).toFixed(2)}</div>`,
+    h.observation ? `<div class="row" style="color:var(--warn)"><b>观测</b> ${escHtml(h.observation)}</div>` : '',
+    h.hypothesis ? `<div class="row"><b>可能</b> ${escHtml(h.hypothesis)}</div>` : '',
+    h.actionSuggestion ? `<div class="row"><b>建议</b> ${escHtml(h.actionSuggestion)}</div>` : '',
+    (h.signals && h.signals.length > 0) ? `<div class="row" style="color:var(--green)"><b>signals</b> ${h.signals.map(escHtml).join(', ')}</div>` : '',
+    a ? `<div class="row"><b>本轮评估</b> disclosed=${a.userDisclosed} answered=${a.aiAnsweredContent} empath=${a.aiRespondedToEmotion} Δwarmth=${a.warmthDelta.toFixed(3)}${a.shouldCreatePending ? ' · 新增 pending' : ''}</div>` : '',
+    `<div class="row"><b>上次更新</b> ${lastTs}</div>`,
+  ].filter(Boolean).join('');
+  let pendingHtml = '';
+  if (s.pendingEvents && s.pendingEvents.length > 0) {
+    pendingHtml = '<div class="row" style="margin-top:4px;color:var(--text)"><b>未完成事件</b></div>'
+      + s.pendingEvents.slice(0, 5).map(p => `<div class="row">· ${escHtml(p.summary || '')} <span style="color:var(--text2)">(staleness=${(p.staleness || 0).toFixed(2)}, attempts=${p.attemptCount || 0})</span></div>`).join('');
+  }
+  return `<div class="affectDetail">${rows}${pendingHtml}</div>`;
 }
 
 function renderSessions() {

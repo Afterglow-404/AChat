@@ -76,6 +76,38 @@ $env:WISP_GPT_SOVITS_URL = 'http://127.0.0.1:9880'
 node scripts/wisp-dev-server.mjs
 ```
 
+## Qwen3-TTS 官方模式与音色克隆
+
+Wisp 的 Qwen3-TTS 适配器对应官方 `qwen-tts` 的三种调用：
+
+- `CustomVoice`：使用官方 Speaker，例如 `Vivian`，调用 `generate_custom_voice`。
+- `Base voice clone`：使用参考音频和参考文本，调用 `generate_voice_clone`。
+- `VoiceDesign`：使用自然语言描述设计音色，调用 `generate_voice_design`。
+
+Base 模型可使用官方的 `0.6B` 或 `1.7B` 权重，例如：
+
+```powershell
+$env:QWEN3_TTS_MODEL = 'Qwen/Qwen3-TTS-12Hz-0.6B-Base'
+$env:QWEN3_TTS_MODE = 'base'
+$env:QWEN3_TTS_REF_AUDIO = 'H:\voices\reference.wav'
+$env:QWEN3_TTS_REF_TEXT = '这是参考音频中的逐字稿。'
+$env:QWEN3_TTS_X_VECTOR_ONLY = '0'
+python scripts\qwen3_tts_server.py
+```
+
+JSON TTS 请求可以直接传递 `mode`、`ref_audio`、`ref_text` 和 `x_vector_only_mode`；Wisp 也提供 `POST /qwen3/clone`，接收 multipart 字段 `file`、`text`、`language`、`ref_text` 和 `x_vector_only_mode`。桌面端的 Voice Lab 会保存这些字段，并在保存配置时重启 Wisp 子服务。
+
+### 工具实时预览与语音克隆工作台
+
+桌面端的“工具”页现在是实时工具监控页，不再复用人工回复界面。它会展示 Wisp 当前加载的全部工具、参数、最近一次返回值和耗时；点击“刷新全部”会调用只读工具，写入类工具（例如 `note`、`send_message`）不会被自动触发。
+
+语音引擎页新增“语音克隆工作台”：
+
+- GPT-SoVITS 角色可保存参考音频路径、参考文本、Prompt 语言、输出语言和音色。
+- Qwen3-TTS 角色可保存 Speaker、语言和 Instruct。
+- 角色预设保存在桌面端本地，点击“应用到默认配置”后会写入语音配置并重启 Wisp 语音桥。
+- 当前 Qwen3-TTS 适配器使用 `CustomVoice`，因此面板不会把 Speaker/Instruct 冒充成 Base 模型的真正音频克隆；真正的参考音频克隆需要后续接入 Qwen3-TTS Base 模型接口。
+
 手机端若使用 GPT-SoVITS 引擎，应将 `tts_gptsovits_url` 设置为 fake server 的根地址：
 
 ```text
@@ -291,3 +323,52 @@ http://192.168.31.12:<日志中显示的端口>
 桌面端会优先尝试 `17890`；如果端口已占用，会自动选择后续空闲端口。重启服务时会等待旧进程退出，尽量保持原端口不变。手机和电脑必须连接同一局域网，并允许 Electron 通过 Windows 防火墙访问专用网络。
 
 桌面端使用独立的 `preload.cjs`，启用 `contextIsolation`、关闭 `nodeIntegration`，并通过 IPC 暴露服务状态和重启方法。Electron 用户数据保存在 `%TEMP%\WispDesktop-v2`，不依赖浏览器密码或 Cookie。
+
+### 桌面端语音引擎配置
+
+进入桌面端顶部的“语音引擎”页面，在“语音引擎配置”区域填写上游服务。保存时会校验地址和超时，并自动重启 Wisp 子服务；不需要手动关闭桌面端。
+
+- `GPT-SoVITS URL`：例如 `http://127.0.0.1:9880`，对应上游的 `/healthz`、`/speakers`、`/tts`。
+- `Qwen3-TTS URL`：例如 `http://127.0.0.1:8000`，对应上游的 `/healthz`、`/speakers`、`/tts`。
+- GPT-SoVITS 默认音色、参考音频、Prompt 文本、Prompt 语言、输出语言和音频格式会注入每次 `/tts` 请求。
+- Qwen3-TTS 默认 Speaker、语言和 Instruct 会注入每次 `/tts` 请求。
+- 两个引擎可以只配置一个；将地址留空即可禁用对应引擎。点击“恢复默认”会恢复启动环境变量中的值。
+- 配置文件位置为 `%TEMP%\WispDesktop-v2\voice-config.json`。用户在桌面端保存的值优先于 `WISP_*` 环境变量，环境变量优先于内置默认值。
+
+独立启动 `wisp-dev-server.mjs` 时仍使用环境变量配置，例如：
+
+```powershell
+$env:WISP_GPT_SOVITS_URL = 'http://127.0.0.1:9880'
+$env:WISP_GSV_VOICE = 'default'
+$env:WISP_GSV_REF_AUDIO_PATH = 'H:\voices\reference.wav'
+$env:WISP_GSV_PROMPT_TEXT = '你好，这是参考音频。'
+$env:WISP_GSV_PROMPT_LANG = 'zh'
+$env:WISP_GSV_TEXT_LANG = 'zh'
+$env:WISP_QWEN3_TTS_URL = 'http://127.0.0.1:8000'
+$env:WISP_QWEN3_SPEAKER = 'Vivian'
+$env:WISP_QWEN3_LANGUAGE = 'Chinese'
+$env:WISP_TTS_TIMEOUT_MS = '120000'
+$env:WISP_QWEN3_TTS_TIMEOUT_MS = '120000'
+node scripts/wisp-dev-server.mjs
+```
+## AffectiveField Desktop telemetry
+
+The Desktop relationship page reads development snapshots from the local Wisp server. The endpoint uses the same debug authorization as other `/api/v1/debug/*` routes and keeps data in memory only.
+
+```text
+GET  /api/v1/debug/affect
+POST /api/v1/debug/affect/snapshot
+POST /api/v1/debug/affect/clear
+```
+
+The snapshot payload may contain `chatName`, `eventId`, `affectiveField`, `rhythmProfile`, `stateHint`, `pendingEvents`, `closureCandidates`, and `responseAssessment`. Reusing an `eventId` for the same chat is idempotent. The server broadcasts `affect.updated` and `affect.cleared` through `/dashboard/ws`.
+
+The Android DebugPage now provides an explicit `AffectiveField Desktop sync` switch. The user must enter a separate Desktop URL; it is never inferred from the AI API URL. Android accepts only `localhost`, private IPv4, or private IPv6 addresses on ports `17890-17909`. An optional bearer token can be supplied when the Desktop server is protected by `WISP_API_KEY`.
+
+## Next development stages
+
+1. P0 verification: replay 100 conversation samples and compare field updates, pending closure, and eventId deduplication.
+2. P1 scheduler: read Desktop snapshots and implement a dry-run ProactiveScheduler with cooldown, quiet hours, and an approval log before sending any proactive message.
+3. P1 response loop: record the latest ResponseAssessment and expose a per-turn timeline so missed questions and emotional replies can be inspected.
+4. Group isolation: keep one relationship field per user-character pair and add a separate group atmosphere view.
+5. Privacy controls: add export, delete, retention, and sync diagnostics without sending relationship data to cloud providers by default.

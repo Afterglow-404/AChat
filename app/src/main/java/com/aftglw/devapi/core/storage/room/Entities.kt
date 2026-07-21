@@ -54,7 +54,9 @@ data class MessageEntity(
     @ColumnInfo(name = "is_error") val isError: Boolean = false,
     @ColumnInfo(name = "retry_prompt") val retryPrompt: String? = null,
     /** 贴纸消息路径（assets 内相对路径）；非贴纸消息为 null */
-    @ColumnInfo(name = "sticker_path") val stickerPath: String? = null
+    @ColumnInfo(name = "sticker_path") val stickerPath: String? = null,
+    /** 外部事件来源 ID，例如主动消息审批队列的 PendingMessage.id。 */
+    @ColumnInfo(name = "source_event_id") val sourceEventId: String? = null
 )
 
 /**
@@ -93,4 +95,49 @@ data class WorldbookEntity(
     @ColumnInfo(name = "priority") val priority: Int = 0,
     @ColumnInfo(name = "constant") val constant: Boolean = false,
     @ColumnInfo(name = "enabled") val enabled: Boolean = true
+)
+
+/**
+ * 未完成事件 — AffectiveField 体系的 PendingEvents 持久化（设计文档 2.3.7）。
+ *
+ * 当用户问句被 AI 漏答、AI 提了话题用户没接等场景生成一条，
+ * 由后续对话自然跟进，收尾后标记 resolved=true。
+ *
+ * 索引：(chat_name, resolved, archived) 用于快速查询某会话下未收尾、未归档的事件。
+ */
+@Entity(
+    tableName = "pending_events",
+    indices = [Index(value = ["chat_name", "resolved", "archived"])]
+)
+data class PendingEventEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "chat_name") val chatName: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "summary") val summary: String,
+    @ColumnInfo(name = "trigger_text") val triggerText: String,
+    @ColumnInfo(name = "weight") val weight: Float = 0.5f,
+    @ColumnInfo(name = "closure_type") val closureType: String,
+    @ColumnInfo(name = "attempt_count") val attemptCount: Int = 0,
+    @ColumnInfo(name = "last_attempt_at") val lastAttemptAt: Long? = null,
+    @ColumnInfo(name = "resolved") val resolved: Boolean = false,
+    @ColumnInfo(name = "archived") val archived: Boolean = false,
+)
+
+/**
+ * 已处理事件记录 — 幂等键（设计文档 14.8）。
+ *
+ * 每条 RelationshipEvent 的 eventId 被处理一次后写入此表。
+ * 手机端 / Desktop / 服务器重复处理同一条消息时，第二次直接跳过。
+ *
+ * 定期清理 7 天前的记录（由 PendingEventStore 维护）。
+ */
+@Entity(
+    tableName = "processed_events",
+    indices = [Index(value = ["processed_at"])]
+)
+data class ProcessedEventEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "event_id") val eventId: String,
+    @ColumnInfo(name = "processed_at") val processedAt: Long,
 )

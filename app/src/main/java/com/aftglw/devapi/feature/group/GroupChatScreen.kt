@@ -230,7 +230,12 @@ fun GroupChatScreen(
         )
     }
 
-    fun memberSystemPrompt(name: String, memoryBlock: String = "", toolsBlock: String = ""): String {
+    fun memberSystemPrompt(
+        name: String,
+        memoryBlock: String = "",
+        toolsBlock: String = "",
+        groupAtmosphereBlock: String = "",
+    ): String {
         val p = memberPersonas[name] ?: ""
         return buildString {
             append(p)
@@ -242,8 +247,58 @@ fun GroupChatScreen(
             appendLine("你可以引用和回应其他成员的话，像真人一样在群聊中和大家互动。")
             appendLine("请以 $name 的身份回复，不要说'作为AI'之类的话。")
             appendLine("用括号描述你的动作和表情，例如【高兴】【叹气】。")
+            // P2.2b: 群整体氛围注入（不改变角色音色，只影响语气倾向）
+            if (groupAtmosphereBlock.isNotEmpty()) append(groupAtmosphereBlock)
             if (memoryBlock.isNotEmpty()) append(memoryBlock)
             if (toolsBlock.isNotEmpty()) append(toolsBlock)
+        }
+    }
+
+    /**
+     * P2.2b: 构建群整体氛围的可读提示块。
+     *
+     * 调用 AffectiveEngine.snapshotGroup 读取群级 field（派生或覆盖），
+     * 转成自然语言注入 systemPrompt，让成员感知"群里现在的气氛"。
+     *
+     * 设计原则：
+     * - 不改变角色音色身份（voice_id 由 TtsVoiceRouter 独立路由）
+     * - 只在有实际数据时注入（全 0 的默认 field 跳过，避免误导）
+     * - 中性氛围不注入（warmth/tension/drift 都在 [-0.2, 0.2] 中性区间时不提示）
+     */
+    suspend fun buildGroupAtmosphereBlock(): String {
+        return try {
+            val snapshot = com.aftglw.devapi.core.affect.AffectiveEngine.snapshotGroup(
+                ctx, group.id, activeMembers,
+            )
+            // 无成员样本时跳过（避免"派生自 0 个成员"的误导）
+            if (snapshot.observedMemberCount == 0) return ""
+            val f = snapshot.field
+            // 中性区间跳过：所有维度都在 [-0.2, 0.2] 时不提示
+            val isNeutral = listOf(f.tension, f.warmth, f.anticipation, f.drift)
+                .all { it in -0.2f..0.2f }
+            if (isNeutral) return ""
+            buildString {
+                appendLine()
+                appendLine("【群聊当前氛围】")
+                appendLine("整体张力：${f.tensionLabel}（${"%.2f".format(f.tension)}）")
+                appendLine("整体温度：${f.warmthLabel}（${"%.2f".format(f.warmth)}）")
+                if (f.anticipation > 0.3f) {
+                    appendLine("有人在期待回应：${f.anticipationLabel}")
+                }
+                appendLine("整体走向：${f.driftLabel}")
+                // 氛围驱动的语气建议（不改变音色，只影响语气倾向）
+                val hints = mutableListOf<String>()
+                if (f.tension > 0.4f) hints.add("气氛有些紧张，说话注意分寸")
+                else if (f.tension > 0.2f) hints.add("气氛略紧张")
+                if (f.warmth > 0.4f) hints.add("大家关系融洽，可以更放松")
+                else if (f.warmth < -0.2f) hints.add("大家比较生疏，不要过于亲昵")
+                if (hints.isNotEmpty()) {
+                    appendLine("语气建议：${hints.joinToString("；")}")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("GroupChat", "buildGroupAtmosphereBlock failed", e)
+            ""
         }
     }
 
@@ -251,7 +306,14 @@ fun GroupChatScreen(
      * 统一的成员调用入口（首位发言 / 接话 / 主动插话共用）。
      * 走 Agent runtime → 具备工具调用能力（RestrictedToolGuard 自动拒绝 HIGH 风险）+ 群记忆检索。
      */
-    suspend fun callMember(name: String, userInput: String): String? {
+    suspend fun callMember(
+        name: String,
+        userInput: String,
+        // P1.3: 用于关系场分析的用户原始消息；为 null 时不更新 AffectiveField（接话成员/图片消息）
+        userMessageForAffect: String? = null,
+        // P2.2b: 群整体氛围块（由调用方在轮次入口预算一次，传给本轮所有 callMember）
+        groupAtmosphereBlock: String = "",
+    ): String? {
         val t = System.currentTimeMillis()
         android.util.Log.d("GroupChat", "callMember: $name, inputLen=${userInput.length}, historySize=${messages.size}")
         typingMember = name
@@ -278,7 +340,7 @@ fun GroupChatScreen(
                 }
             } else ""
             // 在切 IO 前快照 systemPrompt + 消息历史，避免 IO 线程读取 Compose 快照状态
-            val systemPrompt = memberSystemPrompt(name, memoryBlock, toolsBlock)
+            val systemPrompt = memberSystemPrompt(name, memoryBlock, toolsBlock, groupAtmosphereBlock)
             val historyForCall = buildHistory()
             return withContext(Dispatchers.IO) {
                 // 使用 Agent runtime，让成员具备工具调用能力
@@ -301,9 +363,26 @@ fun GroupChatScreen(
                 if (result.toolCalls.isNotEmpty()) {
                     android.util.Log.d("GroupChat", "Member $name used tools: ${result.toolCalls.map { it.name }}")
                 }
-                if (result.isSuccess) result.text
-                else if (result.text.isNotBlank()) result.text
-                else null
+                val reply = if (result.isSuccess) result.text
+                    else if (result.text.isNotBlank()) result.text
+                    else null
+
+                // P1.3: 群聊关系场隔离
+                // 命名空间 chatKey = "group_${groupId}_${memberName}"，与 GroupMemoryStore.topicFor 对齐
+                // 避免与单聊/其他群的同名角色冲突；接话成员不更新关系场（非直接回应用户）
+                if (reply != null && !userMessageForAffect.isNullOrBlank()) {
+                    try {
+                        val chatKey = "group_${group.id}_$name"
+                        // 每个成员独立 eventId（带 memberName 后缀），避免同轮多成员被幂等误杀
+                        val memberEventId = "${java.util.UUID.randomUUID()}_$name"
+                        com.aftglw.devapi.core.mood.PostLLMProcessor.process(
+                            ctx, chatKey, userMessageForAffect, reply, memberEventId,
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.w("GroupChat", "Affective update failed for $name in group ${group.id}", e)
+                    }
+                }
+                reply
             }.also { reply ->
                 android.util.Log.d("GroupChat", "callMember result: $name, replyLen=${reply?.length ?: 0}, ${System.currentTimeMillis() - t}ms")
             }
@@ -379,6 +458,8 @@ fun GroupChatScreen(
                 }
             val replied = mutableSetOf<String>()
             var totalAutoRounds = 0
+            // P2.2b: 本轮开始前预算一次群整体氛围块，传给首位 + 接话链所有 callMember
+            val groupAtmosphereBlock = buildGroupAtmosphereBlock()
             // Bound the complete automated turn, including delays and follow-up calls.
             withTimeout(MAX_GROUP_TURN_DURATION_MS) {
             // @提及决定首位发言人：若用户文本中提及了某成员，则由其先回；
@@ -402,7 +483,13 @@ fun GroupChatScreen(
             android.util.Log.d("GroupChat", "Turn start: firstSpeaker=$firstSpeaker, mentioned=$mentioned, members=${group.members}, roundIdx=${roundRobinIndex.value}")
 
             // 第一步：首位成员回复
-            val r1 = callMember(firstSpeaker, displayText)
+            // P1.3: 传 text（用户原始消息）作为关系场分析素材；图片消息(text="")时为 null 跳过关系场更新
+            // P2.2b: 传入本轮预算的 groupAtmosphereBlock
+            val r1 = callMember(
+                firstSpeaker, displayText,
+                userMessageForAffect = text.ifBlank { null },
+                groupAtmosphereBlock = groupAtmosphereBlock,
+            )
             if (r1 != null) {
                 val msg1 = GroupChatMessage(r1, firstSpeaker, GroupChatManager.now())
                 messages.add(msg1)
@@ -492,7 +579,7 @@ fun GroupChatScreen(
                     val contextPrompt = "${activeMembers.joinToString("、")}正在群聊中交谈。话题是最近的消息。轮到 $next 发言了。请自然接话。"
 
                     llmCallBudget--  // callMember 占用 1 次
-                    val rN = callMember(next, contextPrompt)
+                    val rN = callMember(next, contextPrompt, groupAtmosphereBlock = groupAtmosphereBlock)
                     if (rN != null) {
                         val msgN = GroupChatMessage(rN, next, GroupChatManager.now())
                         messages.add(msgN)
@@ -572,7 +659,9 @@ fun GroupChatScreen(
             var succeeded = false
             try {
                 withTimeout(MAX_GROUP_TURN_DURATION_MS) {
-                    val reply = callMember(failed.from, prompt)
+                    // P2.2b: 重试也注入当前氛围（状态可能已变化）
+                    val retryAtmosphereBlock = buildGroupAtmosphereBlock()
+                    val reply = callMember(failed.from, prompt, groupAtmosphereBlock = retryAtmosphereBlock)
                     if (!reply.isNullOrBlank()) {
                         val message = GroupChatMessage(reply, failed.from, GroupChatManager.now())
                         withContext(Dispatchers.IO) {
@@ -629,9 +718,11 @@ fun GroupChatScreen(
             android.util.Log.d("GroupChat", "Proactive trigger: speaker=$speaker, idle=${nowMs - lastActivityMs}ms")
             sending = true
             val spontaneousHint = GroupProactiveScheduler.buildSpontaneousHint(speaker)
+            // P2.2b: 主动插话也是群聊发言，注入当前氛围
+            val proactiveAtmosphereBlock = buildGroupAtmosphereBlock()
             try {
                 // 复用 callMember：走 Agent runtime + 工具 + 群记忆检索，与正常发言链路一致
-                val reply = callMember(speaker, spontaneousHint)
+                val reply = callMember(speaker, spontaneousHint, groupAtmosphereBlock = proactiveAtmosphereBlock)
                 if (!reply.isNullOrBlank()) {
                     val msg = GroupChatMessage(reply, speaker, GroupChatManager.now())
                     messages.add(msg)

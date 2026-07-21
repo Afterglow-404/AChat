@@ -51,6 +51,7 @@ object ChatDataManager {
                     if (!m.voicePath.isNullOrBlank()) put("voice_path", m.voicePath)
                     if (m.voiceDuration > 0) put("voice_duration", m.voiceDuration)
                     if (!m.voiceTranscript.isNullOrBlank()) put("voice_transcript", m.voiceTranscript)
+                    if (!m.sourceEventId.isNullOrBlank()) put("source_event_id", m.sourceEventId)
                 })
             }
             chatsJson.put(JSONObject().apply {

@@ -60,10 +60,29 @@ object GroupChatManager {
         withContext(Dispatchers.IO) {
             android.util.Log.i(TAG, "Deleting group: $groupId")
             val db = AppDatabase.get(ctx)
+            // P1.3: 先读 group 拿到 members 列表，删除后遍历清理每个成员的关系场数据
+            // 关系场命名空间 chatKey = "group_${groupId}_${memberName}"（与 callMember 内部一致）
+            val groupEntity = db.groupDao().getById(groupId)
+            val members = groupEntity?.toModel()?.members ?: emptyList()
             db.withTransaction {
                 db.groupDao().deleteById(groupId)
                 db.messageDao().deleteForChat(groupId, isGroup = true)
             }
+            // 事务外清理关系场（SharedPreferences IO，非 DB 操作）
+            for (memberName in members) {
+                try {
+                    val chatKey = "group_${groupId}_$memberName"
+                    com.aftglw.devapi.core.affect.AffectiveEngine.clearForChat(ctx, chatKey)
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "clearForChat failed for $memberName in group $groupId", e)
+                }
+            }
+            try {
+                com.aftglw.devapi.core.affect.AffectiveEngine.clearForGroup(ctx, groupId)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "clear group affect state failed for $groupId", e)
+            }
+            android.util.Log.i(TAG, "Deleted group $groupId, cleared affect state for ${members.size} members")
         }
     }
 
@@ -95,6 +114,12 @@ object GroupChatManager {
         val members = parseMembers(e.members)
         if (!members.contains(memberName)) return@withContext false
         dao.upsert(e.copy(members = JSONArray(members.filter { it != memberName }).toString()))
+        // P1.3: 清理该成员在群里的关系场数据（chatKey = "group_${groupId}_${memberName}"）
+        try {
+            com.aftglw.devapi.core.affect.AffectiveEngine.clearForChat(ctx, "group_${groupId}_$memberName")
+        } catch (e2: Exception) {
+            android.util.Log.w(TAG, "clearForChat failed for $memberName in group $groupId", e2)
+        }
         true
     }
 

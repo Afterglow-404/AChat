@@ -47,6 +47,10 @@ function wsSend(socket, data) {
 
 const gptSovitsUrl = (process.env.WISP_GPT_SOVITS_URL || '').replace(/\/$/, '')
 const qwen3TtsUrl = (process.env.WISP_QWEN3_TTS_URL || '').replace(/\/$/, '')
+const qwen3Mode = process.env.WISP_QWEN3_MODE || ''
+const qwen3RefAudio = process.env.WISP_QWEN3_REF_AUDIO || ''
+const qwen3RefText = process.env.WISP_QWEN3_REF_TEXT || ''
+const qwen3XVectorOnly = ['1', 'true', 'yes'].includes(String(process.env.WISP_QWEN3_X_VECTOR_ONLY || '').toLowerCase())
 const defaultScenario = process.env.WISP_AI_SCENARIO || 'echo'
 const interactiveMode = ['1', 'true'].includes(String(process.env.WISP_INTERACTIVE || '').toLowerCase())
 const interactiveTimeoutMs = Number.parseInt(process.env.WISP_INTERACTIVE_TIMEOUT_MS || '180000', 10)
@@ -72,6 +76,25 @@ const state = {
   tools: new Map(),
   stickers: new Map(),
   interactiveSessions: new Map(),
+  // Development-only telemetry. The phone remains the source of truth.
+  affectSnapshots: new Map(),
+  affectEvents: [],
+  affectEventKeys: new Set(),
+  // P1.5: 同步数据保留期限 + GC 调度
+  // affectTtlMs: 快照/事件保留时长（默认 24h），超期由 maybeGcAffect 清理
+  // affectLastGcAt: 上次 GC 时间戳，每 10min 最多执行一次清理（避免每次写入都 GC）
+  affectTtlMs: 24 * 60 * 60 * 1000,
+  affectLastGcAt: 0,
+  affectGcIntervalMs: 10 * 60 * 1000,
+  // P2.1: 主动消息审批队列（Desktop 端只做"建议列表 + 决策记录"，不做实际发送）
+  // proactiveQueue: id → pending message（含 status: pending/approved/rejected/cancelled）
+  // proactiveDecisions: 决策历史数组（Android 增量拉取用）
+  // proactiveDecisionKeys: 决策幂等去重集合（与 proactiveDecisions 同步重建，参考 affectEventKeys 模式）
+  proactiveQueue: new Map(),
+  proactiveDecisions: [],
+  proactiveDecisionKeys: new Set(),
+  proactiveTtlMs: 24 * 60 * 60 * 1000,
+  proactiveLastGcAt: 0,
   voiceInbox: [],
   imageCache: new Map(), // requestId → [{ id, mime }]
 }
@@ -191,6 +214,281 @@ function requestIdOf(request) {
   return typeof request?.requestId === 'string' && request.requestId
     ? request.requestId
     : `wisp_dbg_${randomUUID()}`
+}
+
+function numberInRange(value, min, max, fallback = 0) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback
+}
+
+function shortText(value, max = 300) {
+  return String(value ?? '').trim().slice(0, max)
+}
+
+function normalizePendingEvent(value) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    id: shortText(value.id, 120),
+    summary: shortText(value.summary, 300),
+    triggerText: shortText(value.triggerText, 300),
+    weight: numberInRange(value.weight, 0, 1, 0.5),
+    closureType: shortText(value.closureType, 40),
+    attemptCount: Math.max(0, Number.parseInt(value.attemptCount, 10) || 0),
+    lastAttemptAt: Number.isFinite(Number(value.lastAttemptAt)) ? Number(value.lastAttemptAt) : null,
+    createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : null,
+    resolved: Boolean(value.resolved),
+    archived: Boolean(value.archived),
+    staleness: numberInRange(value.staleness, 0, 1, 0),
+  }
+}
+
+function normalizeAffectSnapshot(payload) {
+  const field = payload?.affectiveField || payload?.field || {}
+  const rhythm = payload?.rhythmProfile || payload?.rhythm || {}
+  const hint = payload?.stateHint || payload?.rhythmHint || {}
+  const assessment = payload?.responseAssessment || payload?.assessment || null
+  const chatName = shortText(payload?.chatName || payload?.characterId || payload?.conversationId || 'default', 120) || 'default'
+  const pendingEvents = Array.isArray(payload?.pendingEvents) ? payload.pendingEvents.map(normalizePendingEvent).filter(Boolean).slice(0, 50) : []
+  const closureCandidates = Array.isArray(payload?.closureCandidates) ? payload.closureCandidates.map(normalizePendingEvent).filter(Boolean).slice(0, 20) : []
+
+  return {
+    chatName,
+    characterId: shortText(payload?.characterId, 120),
+    conversationId: shortText(payload?.conversationId, 120),
+    eventId: shortText(payload?.eventId, 120),
+    source: shortText(payload?.source || 'android', 40),
+    receivedAt: new Date().toISOString(),
+    affectiveField: {
+      tension: numberInRange(field.tension, -1, 1),
+      warmth: numberInRange(field.warmth, -1, 1),
+      anticipation: numberInRange(field.anticipation, -1, 1),
+      drift: numberInRange(field.drift, -1, 1),
+      lastUpdatedTs: Number.isFinite(Number(field.lastUpdatedTs)) ? Number(field.lastUpdatedTs) : null,
+    },
+    rhythmProfile: {
+      sampleCount: Math.max(0, Number.parseInt(rhythm.sampleCount, 10) || 0),
+      latencyPercentile: numberInRange(rhythm.latencyPercentile, 0, 1, 0.5),
+      lengthPercentile: numberInRange(rhythm.lengthPercentile, 0, 1, 0.5),
+      latencyTrend: numberInRange(rhythm.latencyTrend, -1, 1),
+      lengthTrend: numberInRange(rhythm.lengthTrend, -1, 1),
+      initiativeRate7d: numberInRange(rhythm.initiativeRate7d, 0, 1),
+    },
+    stateHint: {
+      observation: shortText(hint.observation, 300),
+      hypothesis: shortText(hint.hypothesis, 300),
+      actionSuggestion: shortText(hint.actionSuggestion, 300),
+      // 风险 2 修复：解析结构化 signals，供 Dashboard 调度逻辑使用
+      signals: Array.isArray(hint.signals) ? hint.signals.filter(s => typeof s === 'string').slice(0, 10) : [],
+    },
+    pendingEvents,
+    closureCandidates,
+    responseAssessment: assessment && typeof assessment === 'object' ? {
+      userDisclosed: Boolean(assessment.userDisclosed),
+      userAskedQuestion: Boolean(assessment.userAskedQuestion),
+      userSharedPositive: Boolean(assessment.userSharedPositive),
+      aiRespondedToEmotion: Boolean(assessment.aiRespondedToEmotion),
+      aiAnsweredContent: Boolean(assessment.aiAnsweredContent),
+      aiCelebrated: Boolean(assessment.aiCelebrated),
+      warmthDelta: numberInRange(assessment.warmthDelta, -1, 1),
+      shouldCreatePending: Boolean(assessment.shouldCreatePending),
+      pendingSummary: shortText(assessment.pendingSummary, 300),
+      pendingClosureType: shortText(assessment.pendingClosureType, 40),
+    } : null,
+  }
+}
+
+function storeAffectSnapshot(payload) {
+  const snapshot = normalizeAffectSnapshot(payload)
+  const key = snapshot.chatName
+  const eventKey = snapshot.eventId ? `${key}:${snapshot.eventId}` : ''
+  if (eventKey && state.affectEventKeys.has(eventKey)) {
+    return { snapshot: state.affectSnapshots.get(key) || snapshot, duplicate: true }
+  }
+
+  state.affectSnapshots.set(key, snapshot)
+  if (eventKey) state.affectEventKeys.add(eventKey)
+  const event = {
+    chatName: snapshot.chatName,
+    eventId: snapshot.eventId,
+    receivedAt: snapshot.receivedAt,
+    affectiveField: snapshot.affectiveField,
+    responseAssessment: snapshot.responseAssessment,
+    pendingCount: snapshot.pendingEvents.length,
+  }
+  state.affectEvents.unshift(event)
+  state.affectEvents = state.affectEvents.slice(0, 200)
+  // slice 后立即同步重建 affectEventKeys：
+  // - 消除"被挤掉的 eventId 在下次 GC 前仍残留于 Set 中被误判为重复"的窗口
+  // - 替代原先 size > 500 才重建的延迟策略
+  // - 开销：最多 200 条 map+filter+Set 构造，微秒级，可接受
+  state.affectEventKeys = new Set(
+    state.affectEvents
+      .map(item => `${item.chatName}:${item.eventId}`)
+      .filter(item => !item.endsWith(':'))
+  )
+  wsBroadcast({ type: 'affect.updated', snapshot, event })
+  // P1.5: 触发保留期限 GC（每 10min 一次，避免每次写入都 GC）
+  maybeGcAffect()
+  return { snapshot, event, duplicate: false }
+}
+
+/**
+ * P1.5: 同步数据保留期限 GC。
+ *
+ * 清理规则：
+ * - affectSnapshots: 删除 receivedAt 超过 affectTtlMs（默认 24h）的快照
+ * - affectEvents: 删除 receivedAt 超过 affectTtlMs 的事件
+ * - affectEventKeys: 同步清理已删除事件对应的 key
+ *
+ * 调度：每 affectGcIntervalMs（默认 10min）最多执行一次，避免高频写入时 GC 开销。
+ */
+function maybeGcAffect() {
+  const now = Date.now()
+  if (now - state.affectLastGcAt < state.affectGcIntervalMs) return
+  state.affectLastGcAt = now
+  const cutoff = now - state.affectTtlMs
+
+  // GC affectSnapshots（按 chatName key，value 含 receivedAt）
+  let gcSnapshots = 0
+  for (const [chatName, snapshot] of state.affectSnapshots) {
+    if (!snapshot.receivedAt || new Date(snapshot.receivedAt).getTime() < cutoff) {
+      state.affectSnapshots.delete(chatName)
+      gcSnapshots++
+    }
+  }
+
+  // GC affectEvents
+  const beforeEvents = state.affectEvents.length
+  state.affectEvents = state.affectEvents.filter(event => {
+    const ts = event.receivedAt ? new Date(event.receivedAt).getTime() : 0
+    return ts >= cutoff
+  })
+  const gcEvents = beforeEvents - state.affectEvents.length
+
+  // 无条件重建 affectEventKeys：
+  // - 清理 TTL 过期事件对应的 key
+  // - 清理被 affectEvents.slice(0, 200) 丢弃但仍残留在 affectEventKeys 中的 key
+  //   （storeAffectSnapshot 的 slice 上限 200 与 affectEventKeys 上限 500 不一致，
+  //    若不重建，过期 eventId 仍会被误判为重复）
+  // 开销：最多 200 条事件重建 Set，微秒级，可接受
+  state.affectEventKeys = new Set(
+    state.affectEvents
+      .map(item => `${item.chatName}:${item.eventId}`)
+      .filter(item => !item.endsWith(':'))
+  )
+  if (gcSnapshots > 0 || gcEvents > 0) {
+    console.log(`[affect-gc] cleaned ${gcSnapshots} snapshots, ${gcEvents} events (ttl=${state.affectTtlMs}ms)`)
+  }
+}
+
+/**
+ * P2.1: 主动消息审批队列 GC。
+ *
+ * 清理规则（与 maybeGcAffect 保持一致的模式）：
+ * - proactiveQueue: 删除 createdAt 超过 proactiveTtlMs（默认 24h）的条目
+ * - proactiveDecisions: 删除 decidedAt 超过 proactiveTtlMs 的条目
+ * - proactiveDecisionKeys: 无条件重建（参考 affectEventKeys 修复模式，避免 slice 后残留）
+ *
+ * 调度：复用 affectGcIntervalMs（每 10min 最多一次），与 affect GC 共享调度避免频繁 GC。
+ */
+function maybeGcProactive() {
+  const now = Date.now()
+  // 共享 affect 的 GC 调度间隔（同一时间窗口内 affect GC 已跑过则跳过）
+  if (now - state.proactiveLastGcAt < state.affectGcIntervalMs) return
+  state.proactiveLastGcAt = now
+  const cutoff = now - state.proactiveTtlMs
+
+  // GC proactiveQueue
+  let gcQueue = 0
+  for (const [id, msg] of state.proactiveQueue) {
+    if (!msg.createdAt || msg.createdAt < cutoff) {
+      state.proactiveQueue.delete(id)
+      gcQueue++
+    }
+  }
+
+  // GC proactiveDecisions
+  const beforeDecisions = state.proactiveDecisions.length
+  state.proactiveDecisions = state.proactiveDecisions.filter(d => {
+    const ts = d.decidedAt || 0
+    return ts >= cutoff
+  })
+  const gcDecisions = beforeDecisions - state.proactiveDecisions.length
+
+  // 无条件重建 proactiveDecisionKeys（参考 affectEventKeys 修复模式）
+  state.proactiveDecisionKeys = new Set(state.proactiveDecisions.map(d => d.id))
+
+  if (gcQueue > 0 || gcDecisions > 0) {
+    console.log(`[proactive-gc] cleaned ${gcQueue} queue entries, ${gcDecisions} decisions (ttl=${state.proactiveTtlMs}ms)`)
+  }
+}
+
+/**
+ * P2.1: 存储 Android 提交的 pending 消息到 Desktop 队列。
+ *
+ * 幂等：相同 id 重复提交时更新而非报错（Android 重试场景）。
+ * 上限：proactiveQueue 最多 200 条，超出丢弃最旧。
+ */
+function storeProactivePending(payload) {
+  const id = shortText(payload.id, 120)
+  if (!id) return { ok: false, error: 'missing id' }
+  const msg = {
+    id,
+    chatName: shortText(payload.chatName, 120),
+    content: shortText(payload.content, 1000),
+    createdAt: Number(payload.createdAt) || Date.now(),
+    gatekeeperReason: shortText(payload.gatekeeperReason, 500),
+    warmth: numberInRange(payload.warmth, -1, 1, 0),
+    tension: numberInRange(payload.tension, -1, 1, 0),
+    msSinceLastActive: Number(payload.msSinceLastActive) || -1,
+    status: 'pending',
+    receivedAt: Date.now(),
+  }
+  // 队列上限：200 条，超出丢弃最旧
+  while (state.proactiveQueue.size >= 200) {
+    const oldest = [...state.proactiveQueue.entries()]
+      .sort((a, b) => a[1].createdAt - b[1].createdAt)[0]
+    if (oldest) state.proactiveQueue.delete(oldest[0])
+    else break
+  }
+  state.proactiveQueue.set(id, msg)
+  wsBroadcast({ type: 'proactive.pending', msg })
+  maybeGcProactive()
+  return { ok: true, msg }
+}
+
+/**
+ * P2.1: 记录一条决策到 Desktop 队列。
+ *
+ * 内部行为：
+ * 1. 更新 proactiveQueue 中对应 msg 的 status
+ * 2. 追加到 proactiveDecisions（Android 增量拉取用）
+ * 3. 同步更新 proactiveDecisionKeys（幂等去重）
+ *
+ * 幂等：相同 id 重复决策时覆盖（保留最新决策）。
+ */
+function recordProactiveDecision(id, action, reason = '') {
+  const msg = state.proactiveQueue.get(id)
+  if (msg) {
+    msg.status = action.toLowerCase()  // approve → 'approve'（与 Android 端 'approved' 略不同，仅 Desktop 内部用）
+    msg.decidedAt = Date.now()
+    state.proactiveQueue.set(id, msg)
+  }
+  const decision = {
+    id,
+    action: action.toUpperCase(),  // APPROVE / REJECT / CANCEL
+    decidedAt: Date.now(),
+    reason: shortText(reason, 300),
+  }
+  // 去重：相同 id 移除旧决策，追加新决策
+  state.proactiveDecisions = state.proactiveDecisions.filter(d => d.id !== id)
+  state.proactiveDecisions.unshift(decision)
+  // 上限 500 条
+  state.proactiveDecisions = state.proactiveDecisions.slice(0, 500)
+  // 无条件重建 keys（与 maybeGcProactive 一致）
+  state.proactiveDecisionKeys = new Set(state.proactiveDecisions.map(d => d.id))
+  wsBroadcast({ type: 'proactive.decision', decision })
+  return decision
 }
 
 async function readBuffer(request) {
@@ -739,9 +1037,13 @@ async function proxyQwen3Tts(payload, request) {
   const body = {
     ...payload,
     text,
+    mode: payload.mode || qwen3Mode,
     language: payload.language || process.env.WISP_QWEN3_LANGUAGE || 'Chinese',
     speaker: payload.speaker || process.env.WISP_QWEN3_SPEAKER || 'Vivian',
     instruct: payload.instruct || payload.instruction || process.env.WISP_QWEN3_INSTRUCT || '',
+    ref_audio: payload.ref_audio || payload.refAudio || qwen3RefAudio,
+    ref_text: payload.ref_text || payload.refText || qwen3RefText,
+    x_vector_only_mode: payload.x_vector_only_mode ?? payload.xVectorOnlyMode ?? qwen3XVectorOnly,
     response_format: payload.response_format || 'wav',
   }
   const upstream = await fetch(`${qwen3TtsUrl}/tts`, {
@@ -759,7 +1061,19 @@ async function qwen3Health() {
   if (!qwen3TtsUrl) return { configured: false, healthy: false }
   try {
     const response = await fetch(`${qwen3TtsUrl}/healthz`, { signal: AbortSignal.timeout(3000) })
-    return { configured: true, healthy: response.ok, status: response.status, url: qwen3TtsUrl }
+    const body = await response.json().catch(() => ({}))
+    return { configured: true, healthy: response.ok, status: response.status, url: qwen3TtsUrl, ...body }
+  } catch (error) {
+    return { configured: true, healthy: false, url: qwen3TtsUrl, error: error.message }
+  }
+}
+
+async function qwen3Capabilities() {
+  if (!qwen3TtsUrl) return { configured: false, supports_voice_clone: false }
+  try {
+    const response = await fetch(`${qwen3TtsUrl}/capabilities`, { signal: AbortSignal.timeout(3000) })
+    const body = await response.json().catch(() => ({}))
+    return { configured: true, healthy: response.ok, status: response.status, url: qwen3TtsUrl, ...body }
   } catch (error) {
     return { configured: true, healthy: false, url: qwen3TtsUrl, error: error.message }
   }
@@ -776,6 +1090,32 @@ async function qwen3Speakers() {
   } catch {
     return []
   }
+}
+
+async function proxyQwen3Clone(request) {
+  if (!allowNetwork) throw new Error('NETWORK_DISABLED')
+  if (!qwen3TtsUrl) throw new Error('WISP_QWEN3_TTS_URL is not configured')
+  const contentType = String(request.headers['content-type'] || '')
+  if (!contentType.toLowerCase().startsWith('multipart/form-data')) throw new Error('Expected multipart/form-data')
+  const parts = parseMultipart(await readBuffer(request), contentType)
+  const filePart = parts.find((part) => (part.name === 'file' || part.name === 'ref_audio') && part.body.length > 0)
+  if (!filePart) throw new Error('A reference audio file field is required')
+  const fields = Object.fromEntries(parts.filter((part) => part.name && !part.filename).map((part) => [part.name, part.body.toString('utf8')]))
+  const form = new FormData()
+  form.append('file', new Blob([filePart.body], { type: filePart.contentType || 'application/octet-stream' }), filePart.filename || 'reference.wav')
+  form.append('text', fields.text || '')
+  form.append('language', fields.language || process.env.WISP_QWEN3_LANGUAGE || 'Chinese')
+  form.append('ref_text', fields.ref_text || fields.refText || qwen3RefText)
+  form.append('x_vector_only_mode', fields.x_vector_only_mode || fields.xVectorOnlyMode || String(qwen3XVectorOnly))
+  const upstream = await fetch(`${qwen3TtsUrl}/clone`, {
+    method: 'POST',
+    headers: request.headers.authorization ? { authorization: request.headers.authorization } : undefined,
+    body: form,
+    signal: AbortSignal.timeout(Number.parseInt(process.env.WISP_QWEN3_TIMEOUT_MS || '120000', 10)),
+  })
+  const audio = Buffer.from(await upstream.arrayBuffer())
+  if (!upstream.ok) throw new Error(`Qwen3-TTS clone HTTP ${upstream.status}: ${audio.toString('utf8').slice(0, 300)}`)
+  return { audio, contentType: upstream.headers.get('content-type') || 'audio/wav' }
 }
 
 async function callMcp(url, name, args, requestId) {
@@ -810,6 +1150,30 @@ async function executeTool(request) {
   if (toolName === 'send_message') {
     if (typeof args.text !== 'string' || !args.text.trim()) return result(requestId, toolName, false, null, { code: 'INVALID_ARGUMENTS', message: 'send_message requires text' }, started)
     return result(requestId, toolName, true, { simulated: true, accepted: true, chat: args.chat || '系统通知', text: args.text }, null, started)
+  }
+
+  if (toolName === 'time') {
+    const now = new Date()
+    return result(requestId, toolName, true, {
+      simulated: false,
+      iso: now.toISOString(),
+      local: now.toLocaleString('zh-CN'),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }, null, started)
+  }
+
+  if (toolName === 'calculator') {
+    const expression = String(args.expr || '').trim()
+    if (!expression || !/^[0-9+\-*/%().\s^]+$/.test(expression)) {
+      return result(requestId, toolName, false, null, { code: 'INVALID_ARGUMENTS', message: 'calculator only accepts arithmetic expressions' }, started)
+    }
+    try {
+      const value = Function(`"use strict"; return (${expression.replace(/\^/g, '**')})`)()
+      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('result is not finite')
+      return result(requestId, toolName, true, { simulated: false, expression, value }, null, started)
+    } catch (error) {
+      return result(requestId, toolName, false, null, { code: 'CALCULATION_FAILED', message: error.message }, started)
+    }
   }
 
   if (toolName === 'mcp.call') {
@@ -893,6 +1257,10 @@ async function handle(request, response) {
   if (request.method === 'GET' && url.pathname === '/qwen3/speakers') {
     return jsonResponse(response, 200, await qwen3Speakers())
   }
+  if (request.method === 'GET' && url.pathname === '/qwen3/capabilities') {
+    const capabilities = await qwen3Capabilities()
+    return jsonResponse(response, capabilities.healthy === false ? 503 : 200, capabilities)
+  }
 
   if (request.method === 'GET' && url.pathname === '/api/v1/health') {
     const [tts, qwen3Tts] = await Promise.all([gptSovitsHealth(), qwen3Health()])
@@ -921,6 +1289,56 @@ async function handle(request, response) {
       sessions: [...state.interactiveSessions.values()].map(interactiveSessionInfo),
     })
   }
+  if (request.method === 'GET' && url.pathname === '/api/v1/debug/affect') {
+    const requestedChat = shortText(url.searchParams.get('chatName'), 120)
+    // P2.4c: 支持时间范围查询（since/until），用于事件回放
+    const sinceParam = url.searchParams.get('since')
+    const untilParam = url.searchParams.get('until')
+    const sinceTs = sinceParam ? new Date(sinceParam).getTime() : 0
+    const untilTs = untilParam ? new Date(untilParam).getTime() : Number.MAX_SAFE_INTEGER
+    const events = state.affectEvents.filter(event => {
+      if (requestedChat && event.chatName !== requestedChat) return false
+      const eventTs = new Date(event.receivedAt).getTime()
+      return eventTs >= sinceTs && eventTs <= untilTs
+    })
+    const snapshots = [...state.affectSnapshots.values()].filter(snapshot => {
+      if (requestedChat && snapshot.chatName !== requestedChat) return false
+      const snapTs = new Date(snapshot.receivedAt).getTime()
+      return snapTs >= sinceTs && snapTs <= untilTs
+    })
+    // P1.5: 返回保留期限信息，便于 Dashboard / 调用方观察
+    return jsonResponse(response, 200, {
+      snapshots,
+      events,
+      updatedAt: new Date().toISOString(),
+      retention: {
+        ttlMs: state.affectTtlMs,
+        ttlHours: state.affectTtlMs / (60 * 60 * 1000),
+        lastGcAt: state.affectLastGcAt ? new Date(state.affectLastGcAt).toISOString() : null,
+        gcIntervalMs: state.affectGcIntervalMs,
+        totalSnapshots: state.affectSnapshots.size,
+        totalEvents: state.affectEvents.length,
+      },
+    })
+  }
+  // P1.5: 手动触发保留期限 GC（DebugPage/Dashboard 用）
+  if (request.method === 'POST' && url.pathname === '/api/v1/debug/affect/gc') {
+    state.affectLastGcAt = 0  // 强制下次 maybeGcAffect 执行
+    const beforeSnapshots = state.affectSnapshots.size
+    const beforeEvents = state.affectEvents.length
+    maybeGcAffect()
+    return jsonResponse(response, 200, {
+      ok: true,
+      cleaned: {
+        snapshots: beforeSnapshots - state.affectSnapshots.size,
+        events: beforeEvents - state.affectEvents.length,
+      },
+      remaining: {
+        snapshots: state.affectSnapshots.size,
+        events: state.affectEvents.length,
+      },
+    })
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/debug/voices') {
     return jsonResponse(response, 200, { voices: state.voiceInbox })
   }
@@ -944,19 +1362,39 @@ async function handle(request, response) {
       let resp
       if (engine === 'qwen3') {
         if (!qwen3TtsUrl) return jsonResponse(response, 503, { error: { message: 'Qwen3-TTS upstream is not configured' } })
+        const qwenPayload = {
+          text,
+          mode: url.searchParams.get('mode') || qwen3Mode,
+          language: url.searchParams.get('language') || process.env.WISP_QWEN3_LANGUAGE || 'Chinese',
+          speaker: url.searchParams.get('voice') || process.env.WISP_QWEN3_SPEAKER || 'Vivian',
+          instruct: url.searchParams.get('instruct') || process.env.WISP_QWEN3_INSTRUCT || '',
+          ref_audio: url.searchParams.get('ref_audio') || qwen3RefAudio,
+          ref_text: url.searchParams.get('ref_text') || qwen3RefText,
+          x_vector_only_mode: url.searchParams.get('x_vector_only_mode') === 'true' || qwen3XVectorOnly,
+          response_format: url.searchParams.get('response_format') || 'wav',
+        }
         resp = await fetch(`${qwen3TtsUrl}/tts`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, language: url.searchParams.get('language') || 'Chinese', speaker: url.searchParams.get('voice') || 'Vivian', instruct: url.searchParams.get('instruct') || '', response_format: 'wav' }),
-          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify(qwenPayload),
+          signal: AbortSignal.timeout(Number.parseInt(process.env.WISP_QWEN3_TTS_TIMEOUT_MS || '120000', 10)),
         })
       } else if (engine === 'gptsovits') {
         if (!gptSovitsUrl) return jsonResponse(response, 503, { error: { message: 'GPT-SoVITS upstream is not configured' } })
-        const textLang = url.searchParams.get('text_lang') || url.searchParams.get('language') || 'zh'
-        const promptLang = url.searchParams.get('prompt_lang') || textLang
+        const gptPayload = {
+          text,
+          voice: url.searchParams.get('voice') || process.env.WISP_GSV_VOICE || 'default',
+          prompt_lang: url.searchParams.get('prompt_lang') || process.env.WISP_GSV_PROMPT_LANG || 'zh',
+          text_lang: url.searchParams.get('text_lang') || url.searchParams.get('language') || process.env.WISP_GSV_TEXT_LANG || 'zh',
+          media_type: url.searchParams.get('media_type') || url.searchParams.get('response_format') || process.env.WISP_GSV_MEDIA_TYPE || 'wav',
+          ref_audio_path: url.searchParams.get('ref_audio_path') || process.env.WISP_GSV_REF_AUDIO_PATH || '',
+          prompt_text: url.searchParams.get('prompt_text') || process.env.WISP_GSV_PROMPT_TEXT || '',
+        }
+        if (!gptPayload.ref_audio_path) delete gptPayload.ref_audio_path
+        if (!gptPayload.prompt_text) delete gptPayload.prompt_text
         resp = await fetch(`${gptSovitsUrl}/tts`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, voice: url.searchParams.get('voice') || 'default', prompt_lang: promptLang, text_lang: textLang, response_format: url.searchParams.get('response_format') || 'wav' }),
-          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify(gptPayload),
+          signal: AbortSignal.timeout(Number.parseInt(process.env.WISP_TTS_TIMEOUT_MS || '120000', 10)),
         })
       } else {
         return jsonResponse(response, 400, { error: { message: `Unsupported TTS engine: ${engine}` } })
@@ -1015,6 +1453,14 @@ async function handle(request, response) {
         return jsonResponse(response, status, { error: { message: tooLarge ? 'Request exceeds the configured body limit' : error.message, type: 'stt_proxy_error' } })
       }
     }
+    if (url.pathname === '/qwen3/clone') {
+      try {
+        const audio = await proxyQwen3Clone(request)
+        return rawResponse(response, 200, audio.audio, audio.contentType)
+      } catch (error) {
+        return jsonResponse(response, 502, { error: { message: error.message, type: 'qwen3_clone_proxy_error' } })
+      }
+    }
     try { payload = await readJson(request) } catch (error) {
       const tooLarge = error.message === 'REQUEST_TOO_LARGE'
       return jsonResponse(response, tooLarge ? 413 : 400, { ok: false, error: { code: tooLarge ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON', message: tooLarge ? 'Request exceeds 1 MiB' : 'Request must be valid JSON' } })
@@ -1034,6 +1480,170 @@ async function handle(request, response) {
     found.session.status = 'replying'
     found.session.startedAt = Date.now()
     return jsonResponse(response, 200, { ok: true, session: interactiveSessionInfo(found.session) })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/debug/affect/snapshot') {
+    const result = storeAffectSnapshot(payload)
+    return jsonResponse(response, 200, { ok: true, duplicate: result.duplicate, snapshot: result.snapshot })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/debug/affect/clear') {
+    const chatName = shortText(payload.chatName, 120)
+    if (chatName) {
+      state.affectSnapshots.delete(chatName)
+      state.affectEvents = state.affectEvents.filter(event => event.chatName !== chatName)
+      for (const key of state.affectEventKeys) if (key.startsWith(`${chatName}:`)) state.affectEventKeys.delete(key)
+    } else {
+      state.affectSnapshots.clear()
+      state.affectEvents = []
+      state.affectEventKeys.clear()
+    }
+    wsBroadcast({ type: 'affect.cleared', chatName: chatName || null })
+    return jsonResponse(response, 200, { ok: true, chatName: chatName || null })
+  }
+  // P2.4d: 按时间范围 + 角色删除事件（比 /clear 更细粒度）
+  // body: { chatName?, since?, until? }
+  // - chatName 为空时删除所有角色
+  // - since/until 为 ISO 字符串或时间戳，省略则不限制
+  // - 非法时间参数返回 400（避免 NaN 导致全量删除）
+  // - 返回删除的 events 数量 + 重建后的 affectEventKeys
+  if (request.method === 'POST' && url.pathname === '/api/v1/debug/affect/delete') {
+    const chatName = shortText(payload.chatName, 120)
+    const sinceParam = payload.since
+    const untilParam = payload.until
+    // 修复 P1: NaN 校验 — 非法时间参数直接拒绝，避免比较失效导致全量删除
+    const sinceTs = sinceParam ? new Date(sinceParam).getTime() : 0
+    const untilTs = untilParam ? new Date(untilParam).getTime() : Number.MAX_SAFE_INTEGER
+    if (sinceParam && !Number.isFinite(sinceTs)) {
+      return jsonResponse(response, 400, { ok: false, error: 'invalid since parameter' })
+    }
+    if (untilParam && !Number.isFinite(untilTs)) {
+      return jsonResponse(response, 400, { ok: false, error: 'invalid until parameter' })
+    }
+    if (sinceTs > untilTs) {
+      return jsonResponse(response, 400, { ok: false, error: 'since > until' })
+    }
+    const beforeEvents = state.affectEvents.length
+    const removedChats = new Set()
+    state.affectEvents = state.affectEvents.filter(event => {
+      if (chatName && event.chatName !== chatName) return true  // 不匹配角色，保留
+      const eventTs = new Date(event.receivedAt).getTime()
+      // 修复 P1: eventTs 为 NaN 时保留（不应删除无法解析时间的事件）
+      if (!Number.isFinite(eventTs)) return true
+      if (eventTs < sinceTs || eventTs > untilTs) return true  // 不在时间范围，保留
+      removedChats.add(event.chatName)
+      return false  // 匹配删除条件
+    })
+    // 无条件重建 affectEventKeys（参考 slice 后重建模式）
+    state.affectEventKeys = new Set(
+      state.affectEvents
+        .map(item => `${item.chatName}:${item.eventId}`)
+        .filter(item => !item.endsWith(':'))
+    )
+    const deletedCount = beforeEvents - state.affectEvents.length
+    // 修复 P1: 清理 snapshot — chatName 非空时清理指定角色；chatName 为空时（全量删除）清理所有已无事件的角色
+    const chatsToCheck = chatName ? [chatName] : [...removedChats]
+    for (const chat of chatsToCheck) {
+      if (!state.affectEvents.some(e => e.chatName === chat)) {
+        state.affectSnapshots.delete(chat)
+      }
+    }
+    // 修复 P1: 广播含 since/until，便于前端精准更新
+    wsBroadcast({
+      type: 'affect.deleted',
+      chatName: chatName || null,
+      deletedCount,
+      since: sinceParam || null,
+      until: untilParam || null,
+    })
+    return jsonResponse(response, 200, {
+      ok: true,
+      deletedEvents: deletedCount,
+      remainingEvents: state.affectEvents.length,
+      affectEventKeysSize: state.affectEventKeys.size,
+    })
+  }
+  // ── P2.1: 主动消息审批队列端点 ──
+  // 设计原则：Desktop 端只做"建议列表 + 决策记录"，不做实际发送。
+  // 实际发送永远在 Android 端（避免远程操控风险）。
+  if (request.method === 'GET' && url.pathname === '/api/v1/proactive/pending') {
+    const requestedChat = shortText(url.searchParams.get('chatName'), 120)
+    const list = [...state.proactiveQueue.values()]
+      .filter(msg => !requestedChat || msg.chatName === requestedChat)
+      .sort((a, b) => b.createdAt - a.createdAt)
+    return jsonResponse(response, 200, {
+      pending: list,
+      total: state.proactiveQueue.size,
+      retention: {
+        ttlMs: state.proactiveTtlMs,
+        ttlHours: state.proactiveTtlMs / (60 * 60 * 1000),
+        lastGcAt: state.proactiveLastGcAt ? new Date(state.proactiveLastGcAt).toISOString() : null,
+      },
+    })
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/proactive/decisions') {
+    // Android 增量拉取：since 参数为时间戳（毫秒）
+    const since = Number(url.searchParams.get('since')) || 0
+    const decisions = state.proactiveDecisions.filter(d => d.decidedAt > since)
+    return jsonResponse(response, 200, {
+      decisions,
+      total: state.proactiveDecisions.length,
+      since,
+    })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/pending') {
+    // Android 提交一条 pending
+    const result = storeProactivePending(payload)
+    return jsonResponse(response, result.ok ? 200 : 400, result.ok ? result : { ok: false, error: result.error })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/approve') {
+    const id = shortText(payload.id, 120)
+    if (!id) return jsonResponse(response, 400, { ok: false, error: 'missing id' })
+    const reason = shortText(payload.reason, 300)
+    const decision = recordProactiveDecision(id, 'APPROVE', reason)
+    return jsonResponse(response, 200, { ok: true, decision })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/reject') {
+    const id = shortText(payload.id, 120)
+    if (!id) return jsonResponse(response, 400, { ok: false, error: 'missing id' })
+    const reason = shortText(payload.reason, 300)
+    const decision = recordProactiveDecision(id, 'REJECT', reason)
+    return jsonResponse(response, 200, { ok: true, decision })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/cancel') {
+    const id = shortText(payload.id, 120)
+    if (!id) return jsonResponse(response, 400, { ok: false, error: 'missing id' })
+    const reason = shortText(payload.reason, 300)
+    const decision = recordProactiveDecision(id, 'CANCEL', reason)
+    return jsonResponse(response, 200, { ok: true, decision })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/clear') {
+    // 清空 Desktop 端队列（不影响 Android 端队列）
+    const beforeQueue = state.proactiveQueue.size
+    const beforeDecisions = state.proactiveDecisions.length
+    state.proactiveQueue.clear()
+    state.proactiveDecisions = []
+    state.proactiveDecisionKeys.clear()
+    wsBroadcast({ type: 'proactive.cleared' })
+    return jsonResponse(response, 200, {
+      ok: true,
+      cleaned: { queue: beforeQueue, decisions: beforeDecisions },
+    })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/proactive/gc') {
+    state.proactiveLastGcAt = 0  // 强制下次 maybeGcProactive 执行
+    const beforeQueue = state.proactiveQueue.size
+    const beforeDecisions = state.proactiveDecisions.length
+    maybeGcProactive()
+    return jsonResponse(response, 200, {
+      ok: true,
+      cleaned: {
+        queue: beforeQueue - state.proactiveQueue.size,
+        decisions: beforeDecisions - state.proactiveDecisions.length,
+      },
+      remaining: {
+        queue: state.proactiveQueue.size,
+        decisions: state.proactiveDecisions.length,
+      },
+    })
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/debug/reply/action') {
     const action = await interactiveAction(payload)
@@ -1107,7 +1717,6 @@ async function handle(request, response) {
       return jsonResponse(response, 502, { error: { message: error.message, type: 'qwen3_tts_proxy_error' } })
     }
   }
-
   // Wisp's MCPClient accepts both the legacy array and standard object result shapes.
   if (request.method === 'POST' && url.pathname === '/mcp') {
     const rpc = payload
@@ -1159,6 +1768,8 @@ server.on('upgrade', (request, socket) => {
     voices: state.voiceInbox,
     stickers: [...state.stickers.entries()].map(([pack, entries]) => ({ pack, tags: [...new Set(entries.flatMap(e => e.tags || []))] })),
     tools: toolList(),
+    affectSnapshots: [...state.affectSnapshots.values()],
+    affectEvents: state.affectEvents,
     interactive: interactiveMode,
     ttsProxy: !!(gptSovitsUrl || qwen3TtsUrl),
   })

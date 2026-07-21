@@ -84,7 +84,7 @@ import java.util.UUID
 
 private fun now() = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
 
-data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null, val voicePath: String? = null, val voiceDuration: Int = 0, val voiceTranscript: String? = null, val imagePath: String? = null, val id: String = UUID.randomUUID().toString())
+data class Bubble(val text: String, val isMe: Boolean, val time: String = now(), val mood: String? = null, val label: String = "", val stickerPath: String? = null, val voicePath: String? = null, val voiceDuration: Int = 0, val voiceTranscript: String? = null, val imagePath: String? = null, val sourceEventId: String? = null, val id: String = UUID.randomUUID().toString())
 
 private sealed class ChatSubPage {
     data object Chat : ChatSubPage()
@@ -148,7 +148,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         bubbles.clear()
         saved.forEach { e ->
             if (!e.stickerPath.isNullOrEmpty()) {
-                bubbles.add(Bubble("", e.isMe, e.time, label = "sticker", stickerPath = e.stickerPath))
+                bubbles.add(Bubble("", e.isMe, e.time, label = "sticker", stickerPath = e.stickerPath, sourceEventId = e.sourceEventId))
                 return@forEach
             }
             val parts = e.text.split("【顿】").map { it.trim() }.filter { it.isNotBlank() }
@@ -163,7 +163,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             imagePath = if (i == 0) e.imagePath else null,
                             voicePath = if (i == 0) e.voicePath else null,
                             voiceDuration = if (i == 0) e.voiceDuration else 0,
-                            voiceTranscript = if (i == 0) e.voiceTranscript else null
+                            voiceTranscript = if (i == 0) e.voiceTranscript else null,
+                            sourceEventId = if (i == 0) e.sourceEventId else null
                         )
                     )
                 }
@@ -176,7 +177,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         imagePath = e.imagePath,
                         voicePath = e.voicePath,
                         voiceDuration = e.voiceDuration,
-                        voiceTranscript = e.voiceTranscript
+                        voiceTranscript = e.voiceTranscript,
+                        sourceEventId = e.sourceEventId
                     )
                 )
             }
@@ -189,7 +191,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 else -> e.text
             }.replace("【顿】", "").trim()
             val images = if (!e.imagePath.isNullOrEmpty()) listOf(e.imagePath) else emptyList()
-            ChatMessage(role, content, images = images)
+            ChatMessage(role, content, images = images, sourceEventId = e.sourceEventId)
         })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", chatKey).apply()
@@ -266,7 +268,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                 voicePath = it.voicePath,
                 voiceDuration = it.voiceDuration,
                 voiceTranscript = it.voiceTranscript,
-                stickerPath = it.stickerPath
+                stickerPath = it.stickerPath,
+                sourceEventId = it.sourceEventId
             )
         }
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
@@ -356,6 +359,10 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             android.widget.Toast.makeText(ctx, com.aftglw.devapi.network.AiError.Offline.message, android.widget.Toast.LENGTH_SHORT).show()
             return
         }
+        // 生成幂等 eventId（设计文档 14.8）：本轮用户消息的唯一标识，
+        // 贯穿 RhythmSensor / AffectiveEngine.update() / PendingEvents 全流程，
+        // 防止手机端 / Desktop / 服务器重复处理同一条消息
+        val eventId = java.util.UUID.randomUUID().toString()
         waiting = true
         val bubble = imageBubble ?: voiceBubble
         if (bubble != null) {
@@ -425,7 +432,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
             val lastError = result.error
 
             if (finalReply != null) {
-                PostLLMProcessor.process(ctx, name, text, finalReply)
+                PostLLMProcessor.process(ctx, name, text, finalReply, eventId)
                 val stickerRegex = Regex("【sticker:([^】]+):([^】]+)】")
                 val saveText = finalReply.replace(stickerRegex, "").trim()
                 // 本轮 AI 回复拆分为文本条目 + 贴纸条目分别持久化
@@ -451,7 +458,8 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                             voicePath = it.voicePath,
                             voiceDuration = it.voiceDuration,
                             voiceTranscript = it.voiceTranscript,
-                            stickerPath = it.stickerPath
+                             stickerPath = it.stickerPath,
+                             sourceEventId = it.sourceEventId
                         )
                     } + aiEntries
                 )
@@ -1235,6 +1243,16 @@ fun ChatContent(
                                                         // 启动顺序朗读协程：从当前 idx 开始，读完自动读下一段（跳过贴纸段和空文本段）
                                                         ttsSequenceJob.value?.cancel()
                                                         ttsSequenceJob.value = scope.launch {
+                                                            // P1.4: 读取 AffectiveField 快照计算 TTS 提示（关系场 → 语气/停顿）
+                                                            // 不改变角色音色身份（voice_id 由 TtsVoiceRouter 独立路由）
+                                                            // snapshot 失败时 ttsHints 用默认值，不阻塞 TTS
+                                                            val ttsHints = try {
+                                                                com.aftglw.devapi.core.affect.AffectiveTtsMapper.fromField(
+                                                                    com.aftglw.devapi.core.affect.AffectiveEngine.snapshot(ctx, name).field
+                                                                )
+                                                            } catch (e: Exception) {
+                                                                com.aftglw.devapi.core.affect.AffectiveTtsMapper.fromField(null)
+                                                            }
                                                             var i = idx
                                                             while (i < bubbles.size && this.isActive) {
                                                                 val cur = bubbles[i]
@@ -1249,6 +1267,8 @@ fun ChatContent(
                                                                     text = cur.text,
                                                                     utteranceId = curId,
                                                                     characterName = name.takeIf { it.isNotEmpty() },
+                                                                    // P1.4: 传入关系场驱动的语气指令（仅 Qwen3 真正使用，其他引擎静默忽略）
+                                                                    instructionOverride = ttsHints.instruction.ifBlank { null },
                                                                     onStart = { playingTtsId = curId },
                                                                     onDone = { success ->
                                                                         if (playingTtsId == curId) playingTtsId = null
@@ -1260,6 +1280,11 @@ fun ChatContent(
                                                                     break
                                                                 }
                                                                 i++
+                                                                // P1.4: 段间停顿（warmth 高→多停顿，tension 高→少停顿）
+                                                                // 对所有引擎生效（最普适的停顿通道），仅在还有下一段时延迟
+                                                                if (i < bubbles.size && this.isActive && ttsHints.pauseMs > 0) {
+                                                                    kotlinx.coroutines.delay(ttsHints.pauseMs)
+                                                                }
                                                             }
                                                             playingTtsId = null
                                                         }
