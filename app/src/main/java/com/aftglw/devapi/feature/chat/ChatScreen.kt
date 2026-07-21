@@ -193,19 +193,28 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         })
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putString("last_active_chat", chatKey).apply()
-        // 异步：归档检查
+        // 异步：启动日记归档检查
+        // 哨兵改用 SharedPreferences 精确判断"今天是否已归档"，避免用 query embedding 检索导致每次都判空重复跑 LLM
         launch(Dispatchers.IO) {
-            // 归档检查：用已加载的 saved，不再重复 load
-            if (saved.size >= 5) {
-                val chunkKey = "chunk:$name:${saved.size}"
-                if (MemoryStore.search(ctx, chunkKey, 1, "diary:$name").isEmpty()) {
+            if (saved.size >= 10) {
+                val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+                val archivePrefs = ctx.getSharedPreferences("wechat_archive", android.content.Context.MODE_PRIVATE)
+                val lastDate = archivePrefs.getString("last_diary_date_$name", "") ?: ""
+                val lastCount = archivePrefs.getInt("last_diary_count_$name", 0)
+                // 仅当今天未归档 且 对话条目较上次至少新增 10 条时归档（避免每次启动都跑 LLM）
+                if (lastDate != todayStr && saved.size - lastCount >= 10) {
                     val msgs = saved.takeLast(20)
-                    val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
                     val text = msgs.joinToString("\n") { "${if (it.isMe) "我" else name}：${it.text}" }
                     try {
                         val summary = com.aftglw.devapi.network.AiServiceFactory.getService()
                             .sendMessage(emptyList(), text, "概括这段对话的核心内容和情绪，像日记一样写两句话。")
-                        if (!summary.isNullOrBlank()) MemoryStore.save(ctx, "$dateStr $summary", "diary:$name")
+                        if (!summary.isNullOrBlank()) {
+                            MemoryStore.save(ctx, "$todayStr $summary", "diary:$name")
+                            archivePrefs.edit()
+                                .putString("last_diary_date_$name", todayStr)
+                                .putInt("last_diary_count_$name", saved.size)
+                                .apply()
+                        }
                     } catch (e: Exception) { Log.w("ChatScreen", "archive diary init failed", e) } /* 非关键 */
                 }
             }

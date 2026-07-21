@@ -49,8 +49,8 @@ object PromptBuilder {
         }
         val timeBlock = "\n\n【时间】${TimeService.getFormattedTime(ctx)}（${TimeService.getTimeOfDay(ctx)}）$reunionHint"
 
-        val recentDiary = MemoryStore.search(ctx, "最近", 1, "diary:$name")
-        val diaryMemoryBlock = recentDiary.firstOrNull()?.let {
+        val recentDiaries = MemoryStore.listRecentByTopic("diary:$name", 3)
+        val diaryMemoryBlock = recentDiaries.firstOrNull()?.let {
             val parts = it.text.split(" ", limit = 2)
             if (parts.size >= 2) {
                 val dateStr = parts[0]

@@ -2,34 +2,41 @@ package com.aftglw.devapi.feature.chat
 
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aftglw.devapi.core.worldbook.WorldbookEntry
 import com.aftglw.devapi.core.worldbook.WorldbookStore
-import com.aftglw.devapi.feature.settings.SubPageScaffold
 import com.aftglw.devapi.ui.theme.AchatTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 世界书页面 — 列表 + 内联编辑对话框。
+ * 世界书页面 — 列表 + 内联编辑对话框 + 导入/导出/批量操作。
  * 每个条目可设：关键词、内容、优先级、常驻、启用。
+ * 匹配上限 8 条（在 WorldbookStore.matchEntries 中限制），优先级数字越大越先注入。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,10 +59,147 @@ fun WorldbookPage(
     }
     var editing by remember { mutableStateOf<WorldbookEntry?>(null) }
     var creatingNew by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var confirmClearAll by remember { mutableStateOf(false) }
+    // 导出用：SAF CreateDocument，启动时设为待导出 JSON；null 表示无待处理
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val json = pendingExportJson
+        pendingExportJson = null
+        if (uri == null || json == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            try {
+                ctx.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(json.toByteArray(Charsets.UTF_8))
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "已导出", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("WorldbookPage", "export write failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "导出失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    // 导入用：SAF OpenDocument，读取 JSON 后调用 importJson
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            try {
+                val json = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    ?: throw java.io.IOException("无法读取文件")
+                val refreshed = WorldbookStore.importJson(ctx, chatName, json, merge = false)
+                withContext(Dispatchers.Main) {
+                    entries = refreshed
+                    Toast.makeText(ctx, "已导入 ${refreshed.size} 条", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("WorldbookPage", "import failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "导入失败：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            SubPageScaffold("世界书", onBack) {
+            CenterAlignedTopAppBar(
+                title = { Text("世界书", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = AchatTheme.colors.onSurface) } },
+                actions = {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, "更多", tint = AchatTheme.colors.onSurface)
+                        }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("导出 JSON") },
+                                onClick = {
+                                    menuExpanded = false
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val json = WorldbookStore.exportJson(ctx, chatName)
+                                            withContext(Dispatchers.Main) {
+                                                pendingExportJson = json
+                                                exportLauncher.launch("worldbook_$chatName.json")
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("WorldbookPage", "export build failed", e)
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(ctx, "导出失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导入 JSON（覆盖）") },
+                                onClick = {
+                                    menuExpanded = false
+                                    importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("全部启用") },
+                                onClick = {
+                                    menuExpanded = false
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val refreshed = WorldbookStore.setAllEnabled(ctx, chatName, true)
+                                            withContext(Dispatchers.Main) {
+                                                entries = refreshed
+                                                Toast.makeText(ctx, "已全部启用", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("WorldbookPage", "enable all failed", e)
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(ctx, "操作失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("全部禁用") },
+                                onClick = {
+                                    menuExpanded = false
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val refreshed = WorldbookStore.setAllEnabled(ctx, chatName, false)
+                                            withContext(Dispatchers.Main) {
+                                                entries = refreshed
+                                                Toast.makeText(ctx, "已全部禁用", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("WorldbookPage", "disable all failed", e)
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(ctx, "操作失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("清空全部") },
+                                onClick = {
+                                    menuExpanded = false
+                                    confirmClearAll = true
+                                }
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
+            )
+            HorizontalDivider(thickness = 0.5.dp, color = AchatTheme.colors.divider)
+
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                 if (entries.isEmpty()) {
                     Box(
                         Modifier.fillMaxWidth().padding(top = 80.dp),
@@ -69,6 +213,15 @@ fun WorldbookPage(
                         )
                     }
                 } else {
+                    // 数量提示：匹配上限 8 条
+                    if (entries.size > 8) {
+                        Text(
+                            "⚠ 共 ${entries.size} 条，匹配上限为 8 条；高优先级条目将优先注入",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFF9800),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
                         entries.forEach { entry ->
                             WorldbookEntryCard(
@@ -106,6 +259,35 @@ fun WorldbookPage(
         ) {
             Icon(Icons.Filled.Add, "添加", tint = Color.White, modifier = Modifier.size(24.dp))
         }
+    }
+
+    // 清空确认
+    if (confirmClearAll) {
+        AlertDialog(
+            onDismissRequest = { confirmClearAll = false },
+            title = { Text("清空全部世界书？") },
+            text = { Text("将删除当前角色（$chatName）的全部 ${entries.size} 条世界书条目，此操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearAll = false
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val refreshed = WorldbookStore.deleteAll(ctx, chatName)
+                            withContext(Dispatchers.Main) {
+                                entries = refreshed
+                                Toast.makeText(ctx, "已清空", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Log.e("WorldbookPage", "clear all failed", e)
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(ctx, "清空失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }) { Text("清空", color = Color(0xFFE53935)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearAll = false }) { Text("取消") } }
+        )
     }
 
     // 编辑现有条目

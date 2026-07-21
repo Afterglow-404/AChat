@@ -232,7 +232,7 @@ fun ChatInfoPage(
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                 var diaryCount by remember { mutableIntStateOf(0) }
                 LaunchedEffect(name) {
-                    diaryCount = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 1, "diary:$name").size }
+                    diaryCount = withContext(Dispatchers.IO) { MemoryStore.count("diary:$name") }
                 }
                 Row(Modifier.fillMaxWidth().clickable { onNavigateToDiary() }, verticalAlignment = Alignment.CenterVertically) {
                     Text("📖 日记 ($diaryCount)", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f))

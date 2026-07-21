@@ -110,6 +110,46 @@ object MemoryStore {
         db?.delete("memories", where, args)
     }
 
+    /** 精确统计某 topic 下记忆条数（LIKE 匹配，传 null 统计全部） */
+    suspend fun count(topic: String? = null): Int = withContext(Dispatchers.IO) {
+        if (topic == null) {
+            val cursor = db?.rawQuery("SELECT COUNT(*) FROM memories", null)
+            val cnt = cursor?.use { if (it.moveToFirst()) it.getInt(0) else 0 } ?: 0
+            cnt
+        } else {
+            val cursor = db?.rawQuery("SELECT COUNT(*) FROM memories WHERE topic LIKE ?", arrayOf("%$topic%"))
+            val cnt = cursor?.use { if (it.moveToFirst()) it.getInt(0) else 0 } ?: 0
+            cnt
+        }
+    }
+
+    /** 删除某 topic 下全部记忆（用于"清空日记"等批量清理） */
+    suspend fun deleteByTopic(topic: String): Int = withContext(Dispatchers.IO) {
+        db?.delete("memories", "topic LIKE ?", arrayOf("%$topic%")) ?: 0
+    }
+
+    /**
+     * 按 timestamp 倒序取某 topic 下最近 [limit] 条记忆，不做 embedding 相似度匹配。
+     * 用于"日记列表 / PromptBuilder 最近日记"等需要确定性排序的场景，避免 embedding 检索的不确定性。
+     */
+    suspend fun listRecentByTopic(topic: String, limit: Int = 50): List<MemoryItem> = withContext(Dispatchers.IO) {
+        val cursor = db?.rawQuery(
+            "SELECT id, text, topic, timestamp FROM memories WHERE topic LIKE ? ORDER BY timestamp DESC LIMIT ?",
+            arrayOf("%$topic%", limit.toString())
+        ) ?: return@withContext emptyList()
+        val out = mutableListOf<MemoryItem>()
+        while (cursor.moveToNext()) {
+            out.add(MemoryItem(
+                id = cursor.getLong(0),
+                text = cursor.getString(1),
+                topic = cursor.getString(2) ?: "",
+                timestamp = cursor.getLong(3)
+            ))
+        }
+        cursor.close()
+        out
+    }
+
     suspend fun save(ctx: Context, text: String, topic: String = "") {
         val vec = embed(ctx, text)
         val cv = ContentValues().apply {
