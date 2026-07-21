@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
  * - [SystemTtsProvider]：包装 Android [VoiceTts]，回调式直播，无文件输出
  * - [CloudTtsProvider]：包装 [CloudTtsService] + [VoicePlayer]，OpenAI 兼容云 TTS
  * - [RemoteGptSoVitsTtsProvider]：调用 PC 端 GPT-SoVITS 服务，支持音色克隆
+ * - [RemoteQwen3TtsProvider]：调用 PC 端 Qwen3-TTS 服务，支持音色、语言和语气指令
  *
  * 设计约定：
  * - 调用方只看 [speak]，不关心底层是回调式还是文件式
@@ -19,7 +20,7 @@ import kotlinx.coroutines.withContext
  * - 失败时由 [TtsProviderManager] 按降级链切换备用 Provider
  */
 interface TtsProvider {
-    /** Provider 标识：`system` / `cloud` / `gpt_sovits` */
+    /** Provider 标识：`system` / `cloud` / `gpt_sovits` / `qwen3_tts` */
     val id: String
 
     /**
@@ -36,6 +37,8 @@ interface TtsProvider {
      * @param text         待合成文本
      * @param voiceId      音色标识（SystemTts 忽略；CloudTts 用 alloy/echo 等；GPT-SoVITS 用音色 ID）
      * @param utteranceId  唯一追踪 ID（用于 stop / isPlaying）
+     * @param language     引擎语言；Qwen3-TTS 使用 Chinese/English 等值，其他 Provider 可忽略
+     * @param instruction  语气/情绪指令；Qwen3-TTS 使用，其他 Provider 可忽略
      * @param onStart      开始播放回调（主线程）
      * @param onDone       结束回调（success=true 表示正常播完，false 表示失败/中止）
      * @return TtsOutcome  最终结果（成功/失败原因）
@@ -45,6 +48,7 @@ interface TtsProvider {
         voiceId: String,
         utteranceId: String,
         language: String = "",
+        instruction: String = "",
         onStart: () -> Unit = {},
         onDone: (success: Boolean) -> Unit = {}
     ): TtsOutcome
@@ -80,7 +84,7 @@ sealed class TtsOutcome {
  * - 提供角色音色路由（[TtsVoiceRouter]）
  *
  * 用法：
- *   TtsProviderManager.configure(ctx, "gpt_sovits")
+ *   TtsProviderManager.configure(ctx, "qwen3_tts")
  *   TtsProviderManager.speak(
  *       ctx = ctx,
  *       text = "你好",
@@ -129,8 +133,13 @@ object TtsProviderManager {
         val system = SystemTtsProvider(ctx)
         val cloud = CloudTtsProvider(ctx)
         val gptsovits = RemoteGptSoVitsTtsProvider(ctx)
+        val qwen3 = RemoteQwen3TtsProvider(ctx)
 
         when (engine) {
+            "qwen3_tts" -> {
+                primary = qwen3
+                fallbacks = listOf(gptsovits, cloud, system)
+            }
             "gpt_sovits" -> {
                 primary = gptsovits
                 fallbacks = listOf(cloud, system)
@@ -155,6 +164,8 @@ object TtsProviderManager {
      *
      * @param characterName 角色名（可空）；非空时通过 [TtsVoiceRouter] 映射为 voiceId
      * @param voiceOverride 直接指定 voiceId（优先级高于 characterName）
+     * @param languageOverride 直接指定语言（优先级高于角色和引擎配置）
+     * @param instructionOverride 直接指定语气指令（优先级高于角色和引擎配置）
      */
     suspend fun speak(
         ctx: Context,
@@ -163,6 +174,7 @@ object TtsProviderManager {
         characterName: String? = null,
         voiceOverride: String? = null,
         languageOverride: String? = null,
+        instructionOverride: String? = null,
         onStart: () -> Unit = {},
         onDone: (success: Boolean) -> Unit = {}
     ): TtsOutcome = withContext(Dispatchers.IO) {
@@ -213,12 +225,21 @@ object TtsProviderManager {
                 val engineLanguage = prefs.getString(TtsVoiceRouter.languageEnginePrefsKey(provider.id), null)
                 val providerLanguage = languageOverride
                     ?: TtsVoiceRouter.resolveLanguage(provider.id, characterLanguage, engineLanguage)
+                val characterInstruction = if (characterName != null) {
+                    prefs.getString(TtsVoiceRouter.instructionPrefsKey(provider.id, characterName), null)
+                } else null
+                val engineInstruction = prefs.getString(TtsVoiceRouter.instructionEnginePrefsKey(provider.id), null)
+                val providerInstruction = instructionOverride
+                    ?: characterInstruction?.takeIf { it.isNotBlank() }
+                    ?: engineInstruction?.takeIf { it.isNotBlank() }
+                    ?: ""
 
                 val outcome = provider.speak(
                     text = text,
                     voiceId = providerVoice,
                     utteranceId = utteranceId,
                     language = providerLanguage,
+                    instruction = providerInstruction,
                     onStart = { safeStart() },
                     onDone = { success ->
                         // Provider 内部完成时回调；只有 success=true 才立即转发到 UI

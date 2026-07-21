@@ -1,37 +1,30 @@
 package com.aftglw.devapi.core.time
-import android.util.Log
-import com.aftglw.devapi.core.storage.ChatHistory
-import com.aftglw.devapi.core.memory.MemoryStore
-import com.aftglw.devapi.core.mood.AffinityManager
-import com.aftglw.devapi.core.storage.room.AppDatabase
-import com.aftglw.devapi.MainActivity
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-
+import android.os.Build
+import android.util.Log
+import com.aftglw.devapi.MainActivity
+import com.aftglw.devapi.core.memory.MemoryStore
+import com.aftglw.devapi.core.mood.AffinityManager
+import com.aftglw.devapi.core.storage.ChatHistory
+import com.aftglw.devapi.core.storage.room.AppDatabase
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 object ProactiveScheduler {
-    /**
-     * 通过 WorkManager 调度主动消息检查。
-     *
-     * 替代原 AlarmManager.setInexactRepeating 方案：
-     * - AlarmManager 在 Doze 模式下被严重延迟，且需要单独的 BroadcastReceiver
-     * - WorkManager 由系统统一调度，更省电，与 CoroutineWorker 天然集成
-     *
-     * 使用 OneTimeWorkRequest + 30s 初始延迟：
-     * - KEEP policy 保证同一 unique work 不会重复入队（多次调用 enqueue 安全）
-     * - 30s 延迟避免 app 启动时立即触发 IO（与 Task 1.1 的 preInit 错开）
-     *
-     * 注：周期性触发可后续用 PeriodicWorkRequestBuilder 替换，或在 [ProactiveWorker.doWork] 末尾链式 enqueue。
-     */
     fun enqueue(context: Context) {
         val request = OneTimeWorkRequestBuilder<ProactiveWorker>()
             .setInitialDelay(30, TimeUnit.SECONDS)
@@ -44,173 +37,171 @@ object ProactiveScheduler {
     }
 
     fun triggerNow(context: Context) {
-        // 立即触发：跳过 WorkManager 调度，直接在 IO 协程中跑一次
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            runOnce(context)
-        }
+        CoroutineScope(Dispatchers.IO).launch { runOnce(context) }
     }
 
     fun forceSend(context: Context, chatName: String) {
-        val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-        val msg = "👋 测试消息 ($now)"
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            ChatHistory.save(context, chatName, ChatHistory.load(context, chatName) + Triple(msg, false, now))
+        val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val message = "Test message ($now)"
+        CoroutineScope(Dispatchers.IO).launch {
+            ChatHistory.save(context, chatName, ChatHistory.load(context, chatName) + Triple(message, false, now))
         }
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) nm.createNotificationChannel(android.app.NotificationChannel("proactive", "主动消息", android.app.NotificationManager.IMPORTANCE_HIGH))
-        val pi = android.app.PendingIntent.getActivity(context, chatName.hashCode(), Intent(context, MainActivity::class.java).apply { putExtra("open_chat", chatName); flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        (android.app.Notification.Builder(context, "proactive").setContentTitle(chatName).setContentText(msg).setSmallIcon(android.R.drawable.ic_dialog_info).setContentIntent(pi).setAutoCancel(true).build()).let { nm.notify(chatName.hashCode(), it) }
+        sendNotif(context, chatName, message)
     }
 
     suspend fun runOnce(context: Context) {
-        // CoroutineWorker.doWork() 已在 Dispatchers.Default 调度，triggerNow 用 Dispatchers.IO.launch 包装。
-        // 此处直接执行，不再额外 launch。
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
-            val allChats = AppDatabase.get(context).chatDao().getAll()
-            for (item in allChats) {
+            for (item in AppDatabase.get(context).chatDao().getAll()) {
                 val chatDisplay = item.name
                 val chat = item.id.ifEmpty { chatDisplay }
-                if (!prefs.getBoolean("proactive_enabled_${chat}", false)) continue
-                if (System.currentTimeMillis() < prefs.getLong("proactive_silence_${chat}", 0L)) continue
-                val limit = prefs.getInt("proactive_daily_limit_${chat}", 10)
-                val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault()).format(java.util.Date())
+                if (!prefs.getBoolean("proactive_enabled_$chat", false)) continue
+                if (System.currentTimeMillis() < prefs.getLong("proactive_silence_$chat", 0L)) continue
+
+                val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
                 val todayCount = prefs.getInt("proactive_count_${chat}_$today", 0)
-                if (todayCount >= limit) continue
-                val triggerMode = prefs.getString("proactive_trigger_mode_${chat}", "custom") ?: "custom"
-                if (triggerMode == "ai") { /* AI 模式跳过触发条件 */ } else {
-                val idleHours = prefs.getInt("proactive_idle_hours_${chat}", 0)
-                val checkMode = prefs.getString("proactive_check_mode_${chat}", "random") ?: "random"
-                val triggers = prefs.getString("proactive_triggers_${chat}", "1,2,3,4,5,6") ?: "1,2,3,4,5,6"
-                if (checkMode == "random" && kotlin.random.Random.nextFloat() > 0.4f) continue
-                val affinity = AffinityManager.getAffinity(prefs, chat)
-                val affinityMin = prefs.getInt("proactive_affinity_min_${chat}", 0)
-                if (AffinityManager.levels.indexOf(AffinityManager.getLevel(affinity)) < affinityMin) continue
-                val lastActive = prefs.getLong("last_active_${chat}", 0L)
-                val hoursSince = if (lastActive > 0) (System.currentTimeMillis() - lastActive) / 3600000 else 999L
-                val lastProactive = prefs.getLong("proactive_last_${chat}", 0L)
-                val intervalMin = prefs.getInt("proactive_interval_min_${chat}", 30).coerceAtLeast(1)
-                if (System.currentTimeMillis() - lastProactive < (if (checkMode == "fixed") intervalMin * 60000L else 7200000L)) continue
-                val shouldTrigger = triggers.split(",").any { t ->
-                    when (t) {
-                        "1" -> if (idleHours == 0) true else hoursSince >= idleHours
-                        "2" -> { val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY); h in 1..4 && hoursSince < 12 }
-                        "3" -> { val m = prefs.getString("last_mood_${chat}", "") ?: ""; m in listOf("悲伤","愤怒","害怕","厌恶") && hoursSince < 3 }
-                        "4" -> hoursSince >= 24; "5" -> AffinityManager.levels.indexOf(AffinityManager.getLevel(affinity)) >= 3 && hoursSince < 6
-                        "6" -> hoursSince >= 72; else -> false
-                    }
+                if (todayCount >= prefs.getInt("proactive_daily_limit_$chat", 10)) continue
+
+                val mode = prefs.getString("proactive_trigger_mode_$chat", "custom") ?: "custom"
+                val shouldTrigger = if (mode == "ai") {
+                    true
+                } else {
+                    shouldTrigger(prefs, chat)
                 }
                 if (!shouldTrigger) continue
-                }
-                val msg = generateMessage(context, chat)
-                if (msg.isBlank() || msg == "在干嘛呢？") continue  // 跳过
-                val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-                ChatHistory.save(context, chat, ChatHistory.load(context, chat) + Triple(msg, false, now))
-                sendNotif(context, chatDisplay, msg)
-                prefs.edit().putInt("proactive_count_${chat}_$today", todayCount + 1).putLong("proactive_last_${chat}", System.currentTimeMillis()).apply()
+
+                val message = generateMessage(context, chat)
+                if (message.isBlank() || message == DEFAULT_MESSAGE) continue
+                val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                ChatHistory.save(context, chat, ChatHistory.load(context, chat) + Triple(message, false, now))
+                sendNotif(context, chatDisplay, message)
+                prefs.edit()
+                    .putInt("proactive_count_${chat}_$today", todayCount + 1)
+                    .putLong("proactive_last_$chat", System.currentTimeMillis())
+                    .apply()
             }
-        } catch (e: Exception) { Log.w("ProactiveScheduler", "trigger failed", e) }(ctx: Context, chatName: String): String {
-        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
-        val mode = prefs.getString("proactive_trigger_mode_$chatName", "custom") ?: "custom"
-        if (mode == "ai") return generateMessageAiDriven(ctx, chatName)
-        // 以下为原有的自定义规则模式
-        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
-        if (apiKey.isBlank()) return "在干嘛呢？"
-        val persona = loadPersona(ctx, chatName)
-        val affinity = AffinityManager.getAffinity(prefs, chatName).toInt()
-        val level = AffinityManager.getLevel(affinity.toFloat())
-        val hint = AffinityManager.getLevelHint(level) ?: ""
-        val optimized = prefs.getString("persona_optimized_$chatName", "") ?: ""
-        val optBlock = if (optimized.isNotBlank()) "\n【聊天偏好】$optimized" else ""
-        val nc = prefs.getBoolean("proactive_need_care_$chatName", false); if (nc) prefs.edit().putBoolean("proactive_need_care_$chatName", false).apply()
-        val moodHint = if (nc) "\n对方可能心情不好，关心一下。" else ""
-        val affinityBlock = if (prefs.getBoolean("affinity_enabled", false)) "\n【当前关系】${level.name}\n$hint" else ""
-        val mems = MemoryStore.search(ctx, chatName, 1).joinToString("\n") { "- ${it.text}" }
-        val memBlock = if (mems.isNotEmpty()) "\n【关于对方的记忆】\n$mems" else ""
-        val customRules = prefs.getString("proactive_custom_rules_$chatName", "") ?: ""
-        val nowTime = com.aftglw.devapi.core.time.TimeService.getFormattedTime(ctx)
-        val nowPeriod = com.aftglw.devapi.core.time.TimeService.getTimeOfDay(ctx)
-        val baseInstruction = "\n回复要求：每句话不超过15个字，一次只说1-2句。禁止AI套话。"
-        val systemPrompt = buildString {
-            append(if (persona.isNotBlank()) "$persona\n\n" else "")
-            append(baseInstruction)
-            append("\n当前时间：$nowTime（$nowPeriod）")
-            if (customRules.isNotBlank()) append("\n【自定义规则】\n$customRules")
-            append(affinityBlock)
-            append(optBlock)
-            append(memBlock)
-            append(if (moodHint.isNotEmpty()) "\n$moodHint" else "")
+        } catch (e: Exception) {
+            Log.w(TAG, "Proactive trigger failed", e)
         }
-        val chatHistory = ChatHistory.load(ctx, chatName)
-        val msgHistory = chatHistory.map { com.aftglw.devapi.model.ChatMessage(if (it.second) "user" else "assistant", it.first) }
-        // 复用已有的 AiServiceFactory，它在 ChatScreen 里工作正常
+    }
+
+    private fun shouldTrigger(prefs: android.content.SharedPreferences, chat: String): Boolean {
+        val checkMode = prefs.getString("proactive_check_mode_$chat", "random") ?: "random"
+        if (checkMode == "random" && kotlin.random.Random.nextFloat() > 0.4f) return false
+        val affinity = AffinityManager.getAffinity(prefs, chat)
+        val minLevel = prefs.getInt("proactive_affinity_min_$chat", 0)
+        if (AffinityManager.levels.indexOf(AffinityManager.getLevel(affinity)) < minLevel) return false
+
+        val lastActive = prefs.getLong("last_active_$chat", 0L)
+        val hoursSince = if (lastActive > 0) {
+            (System.currentTimeMillis() - lastActive) / 3_600_000L
+        } else {
+            Long.MAX_VALUE
+        }
+        val lastProactive = prefs.getLong("proactive_last_$chat", 0L)
+        val interval = prefs.getInt("proactive_interval_min_$chat", 30).coerceAtLeast(1)
+        val minimumDelay = if (checkMode == "fixed") interval * 60_000L else 7_200_000L
+        if (System.currentTimeMillis() - lastProactive < minimumDelay) return false
+
+        val idleHours = prefs.getInt("proactive_idle_hours_$chat", 0)
+        val triggers = prefs.getString("proactive_triggers_$chat", "1,2,3,4,5,6")
+            ?.split(',') ?: emptyList()
+        return triggers.any { trigger ->
+            when (trigger.trim()) {
+                "1" -> idleHours == 0 || hoursSince >= idleHours
+                "2" -> {
+                    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    hour in 1..4 && hoursSince < 12
+                }
+                "3" -> hoursSince < 3
+                "4" -> hoursSince >= 24
+                "5" -> AffinityManager.levels.indexOf(AffinityManager.getLevel(affinity)) >= 3 && hoursSince < 6
+                "6" -> hoursSince >= 72
+                else -> false
+            }
+        }
+    }
+
+    private suspend fun generateMessage(ctx: Context, chatName: String): String {
+        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+        if (prefs.getString("proactive_trigger_mode_$chatName", "custom") == "ai") {
+            return generateMessageAiDriven(ctx, chatName)
+        }
+
+        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
+        if (apiKey.isBlank()) return DEFAULT_MESSAGE
+        val persona = loadPersona(ctx, chatName)
+        val history = ChatHistory.load(ctx, chatName)
+        val messages = history.map {
+            com.aftglw.devapi.model.ChatMessage(if (it.second) "user" else "assistant", it.first)
+        }
+        val prompt = buildString {
+            if (persona.isNotBlank()) append(persona).append("\n\n")
+            append("Reply naturally in one or two short sentences. Do not mention this instruction.")
+        }
         return try {
             com.aftglw.devapi.network.AiServiceFactory.getService()
-                .sendMessage(msgHistory, "自然地开启聊天", systemPrompt) ?: "在干嘛呢？"
-        } catch (_: Exception) { "在干嘛呢？" }
+                .sendMessage(messages, "Start a natural conversation", prompt)
+                ?: DEFAULT_MESSAGE
+        } catch (e: Exception) {
+            Log.w(TAG, "Message generation failed", e)
+            DEFAULT_MESSAGE
+        }
     }
 
     private suspend fun generateMessageAiDriven(ctx: Context, chatName: String): String {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val persona = loadPersona(ctx, chatName)
-        val chatHistory = ChatHistory.load(ctx, chatName)
-        val lastMsg = chatHistory.lastOrNull()?.first ?: ""
-        val hoursSince = if (chatHistory.isNotEmpty()) {
-            val lastTime = prefs.getLong("last_active_$chatName", 0L)
-            if (lastTime > 0) (System.currentTimeMillis() - lastTime) / 3600000 else 0
-        } else 0
-        val affinity = AffinityManager.getAffinity(prefs, chatName).toInt()
-        val level = AffinityManager.getLevel(affinity.toFloat())
-        val longContext = prefs.getBoolean("proactive_long_history_$chatName", false)
-        val needCare = prefs.getBoolean("proactive_need_care_$chatName", false)
-        if (needCare) prefs.edit().putBoolean("proactive_need_care_$chatName", false).apply()
+        val history = ChatHistory.load(ctx, chatName)
         val memo = MemoryStore.search(ctx, chatName, 2).joinToString("\n") { "- ${it.text}" }
-        val customRules = prefs.getString("proactive_custom_rules_$chatName", "") ?: ""
-
         val prompt = buildString {
-            appendLine("你在考虑要不要主动找对方聊天。请看以下信息：")
-            if (longContext && chatHistory.size >= 3) {
-                appendLine("\n【最近对话】")
-                chatHistory.takeLast(6).forEach { appendLine("  ${if (it.second) "对方" else "你"}：${it.first}") }
-            } else {
-                appendLine("\n距上次聊天：${hoursSince}小时")
-                appendLine("对方上一条消息：$lastMsg")
-                appendLine("你们的关系：${level.name}")
-                if (memo.isNotEmpty()) appendLine("记忆片段：$memo")
-            }
-            if (needCare) appendLine("\n（对方似乎需要关心）")
-            if (customRules.isNotBlank()) appendLine("\n【自定义规则】\n$customRules")
-            appendLine("\n当前时间：${com.aftglw.devapi.core.time.TimeService.getFormattedTime(ctx)}（${com.aftglw.devapi.core.time.TimeService.getTimeOfDay(ctx)}）")
-            if (persona.isNotBlank()) appendLine("\n你的人物设定：$persona")
-            appendLine("\n如果你觉得现在适合主动说话，按以下格式回复：")
-            appendLine("决定：发")
-            appendLine("消息：[你想说的话]")
-            appendLine("\n如果觉得不适合，只回复：决定：不发")
+            append("Decide whether to proactively message the user. Return only a short message.\n")
+            if (persona.isNotBlank()) append("Persona: ").append(persona).append('\n')
+            history.takeLast(6).forEach { append(if (it.second) "User: " else "Assistant: ").append(it.first).append('\n') }
+            if (memo.isNotBlank()) append("Memory:\n").append(memo)
         }
-
-        try {
+        return try {
             val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
-                .sendMessage(emptyList(), prompt, "你是角色本人。")
-            if (reply != null && reply.contains("决定：发")) {
-                val msg = reply.substringAfter("消息：").trim().take(100)
-                return if (msg.isNotBlank()) msg else "在干嘛呢？"
-            }
-        } catch (e: Exception) { Log.w("ProactiveScheduler", "ai msg generation failed", e) }
-    }
-
-    private suspend fun loadPersona(ctx: Context, chatName: String): String {
-        return withContext(Dispatchers.IO) {
-            val dao = AppDatabase.get(ctx).chatDao()
-            val e = dao.getById(chatName) ?: dao.getAll().firstOrNull { it.name == chatName }
-            e?.persona ?: ""
+                .sendMessage(emptyList(), prompt, "You are the character in this chat.")
+            reply?.trim()?.takeIf { it.isNotBlank() }?.take(100) ?: DEFAULT_MESSAGE
+        } catch (e: Exception) {
+            Log.w(TAG, "AI proactive generation failed", e)
+            DEFAULT_MESSAGE
         }
     }
 
-    private fun sendNotif(ctx: Context, chat: String, msg: String) {
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) nm.createNotificationChannel(android.app.NotificationChannel("proactive", "主动消息", android.app.NotificationManager.IMPORTANCE_HIGH))
-        val pi = android.app.PendingIntent.getActivity(ctx, chat.hashCode(), Intent(ctx, MainActivity::class.java).apply { putExtra("open_chat", chat); flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        (android.app.Notification.Builder(ctx, "proactive").setContentTitle(chat).setContentText(msg).setSmallIcon(android.R.drawable.ic_dialog_info).setContentIntent(pi).setAutoCancel(true).build()).let { nm.notify(chat.hashCode(), it) }
+    private suspend fun loadPersona(ctx: Context, chatName: String): String = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.get(ctx).chatDao()
+        val entity = dao.getById(chatName) ?: dao.getAll().firstOrNull { it.name == chatName }
+        entity?.persona ?: ""
     }
+
+    private fun sendNotif(ctx: Context, chat: String, message: String) {
+        val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel("proactive", "Proactive messages", NotificationManager.IMPORTANCE_HIGH)
+            )
+        }
+        val intent = Intent(ctx, MainActivity::class.java).apply {
+            putExtra("open_chat", chat)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            ctx, chat.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = android.app.Notification.Builder(ctx, "proactive")
+            .setContentTitle(chat)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(chat.hashCode(), notification)
+    }
+
+    private const val TAG = "ProactiveScheduler"
+    private const val DEFAULT_MESSAGE = "..."
 }

@@ -101,6 +101,7 @@ fun GroupInfoPage(
             memberInfo = loaded
         } catch (e: Exception) {
             Log.e("GroupInfoPage", "loadMemberInfo failed", e)
+            Toast.makeText(ctx, "成员信息加载失败", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -113,6 +114,7 @@ fun GroupInfoPage(
             availableCandidates = all.filter { it.first !in existing }
         } catch (e: Exception) {
             Log.e("GroupInfoPage", "getAvailableMembers failed", e)
+            Toast.makeText(ctx, "候选成员加载失败", Toast.LENGTH_SHORT).show()
         }
     }
 

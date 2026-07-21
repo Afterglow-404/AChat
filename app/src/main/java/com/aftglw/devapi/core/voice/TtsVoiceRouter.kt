@@ -26,11 +26,15 @@ object TtsVoiceRouter {
     /** GPT-SoVITS 的 text_lang 可选值（与官方推理接口保持一致）。 */
     val GPT_SOVITS_LANGUAGES = listOf("zh", "en", "ja", "ko", "yue")
 
+    /** Qwen3-TTS 的语言值；保存时允许短码，Provider 会转换为官方名称。 */
+    val QWEN3_TTS_LANGUAGES = listOf("zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it", "auto")
+
     /** 各引擎默认音色（硬编码兜底） */
     val DEFAULT_VOICE = mapOf(
         "system" to "",        // SystemTts 忽略 voiceId
         "cloud" to "alloy",    // OpenAI 默认
-        "gpt_sovits" to "default"
+        "gpt_sovits" to "default",
+        "qwen3_tts" to "Vivian"
     )
 
     /**
@@ -52,6 +56,13 @@ object TtsVoiceRouter {
     /** 角色级语言配置 key，例如 tts_lang_gpt_sovits_钦灵。 */
     fun languagePrefsKey(engine: String, characterName: String): String =
         "tts_lang_${engine}_${characterName}"
+
+    /** 引擎级语气指令配置 key，例如 tts_instruction_qwen3_tts。 */
+    fun instructionEnginePrefsKey(engine: String): String = "tts_instruction_$engine"
+
+    /** 角色级语气指令配置 key，例如 tts_instruction_qwen3_tts_钦灵。 */
+    fun instructionPrefsKey(engine: String, characterName: String): String =
+        "tts_instruction_${engine}_${characterName}"
 
     /**
      * 纯函数路由：根据引擎 + 已合并的 storedVoice 返回 voiceId。
@@ -82,9 +93,13 @@ object TtsVoiceRouter {
 
     /** 根据角色级 > 引擎级 > 默认值解析 TTS 语言。 */
     fun resolveLanguage(engine: String, characterLanguage: String?, engineLanguage: String?): String {
-        if (engine != "gpt_sovits") return ""
-        return characterLanguage?.takeIf { it in GPT_SOVITS_LANGUAGES }
-            ?: engineLanguage?.takeIf { it in GPT_SOVITS_LANGUAGES }
-            ?: defaultLanguageFor(engine)
+        val valid = when (engine) {
+            "gpt_sovits" -> GPT_SOVITS_LANGUAGES
+            "qwen3_tts" -> QWEN3_TTS_LANGUAGES
+            else -> return ""
+        }
+        return characterLanguage?.takeIf { it in valid }
+            ?: engineLanguage?.takeIf { it in valid }
+            ?: if (engine == "qwen3_tts") "zh" else defaultLanguageFor(engine)
     }
 }

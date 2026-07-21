@@ -1,4 +1,5 @@
 package com.aftglw.devapi.feature.chat
+import android.util.Log
 import com.aftglw.devapi.core.mood.MoodInfo
 import com.aftglw.devapi.core.ai.PromptBuilder
 import com.aftglw.devapi.core.mood.PostLLMProcessor
@@ -526,7 +527,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
                         // 取消当前在飞的 AI 请求：service.cancel() 让 OkHttp Call 抛 IOException("Canceled")
                         try {
                             com.aftglw.devapi.network.AiServiceFactory.getService().cancel()
-                        } catch (_: Exception) { /* 忽略：即使取消失败也复位 waiting */ }
+                        } catch (ce: Exception) { android.util.Log.w("ChatScreen", "cancel failed", ce) /* 忽略：即使取消失败也复位 waiting */ }
                         waiting = false
                     }
                 )

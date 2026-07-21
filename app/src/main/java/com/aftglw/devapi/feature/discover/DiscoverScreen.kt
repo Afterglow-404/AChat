@@ -107,6 +107,7 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
     val challengeTabIndex = remember { derivedStateOf { if (isLeetCode) 1 else 0 } }
     val challengeBackdrop = rememberLayerBackdrop(onDraw = { drawRect(Color.Transparent); drawContent() })
 
+    /*
     fun fetchBoredChallenge() {
         challengeLoading = true; challengeDone = false
         CoroutineScope(Dispatchers.IO).launch {
@@ -135,7 +136,11 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                 withContext(Dispatchers.Main) {
                     challengeText = "网络不佳，稍后再试喵～"; challengeLoading = false
                 }
-            } {
+            }
+        }
+    }
+
+    fun fetchLeetCodeChallenge() {
         challengeLoading = true; challengeDone = false
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -165,6 +170,71 @@ fun DiscoverScreen(items: List<DiscoverItem> = emptyList(), onSubPageChange: (Bo
                     challengeText = "LeetCode 不可用，换个挑战喵～"; challengeLoading = false
                 }
             } by remember { mutableStateOf(false) }
+    */
+    fun fetchBoredChallenge() {
+        challengeLoading = true
+        challengeDone = false
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val conn = URL("https://bored-api.appbrewery.com/random").openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                val activity = json.optString("activity", "Try something new")
+                val text = buildString {
+                    append(activity)
+                    json.optString("type").takeIf { it.isNotBlank() }?.let { append("\nType: ").append(it) }
+                }
+                withContext(Dispatchers.Main) {
+                    challengeText = text
+                    challengeLoading = false
+                    isLeetCode = false
+                }
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "Bored challenge request failed", e)
+                withContext(Dispatchers.Main) {
+                    challengeText = "Network unavailable. Try again later."
+                    challengeLoading = false
+                }
+            }
+        }
+    }
+
+    fun fetchLeetCodeChallenge() {
+        challengeLoading = true
+        challengeDone = false
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val conn = URL("https://leetcode-api-pied.vercel.app/daily").openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                conn.disconnect()
+                val question = json.optJSONObject("question")
+                val title = question?.optString("title").orEmpty().ifBlank { "LeetCode daily challenge" }
+                val difficulty = question?.optString("difficulty").orEmpty()
+                withContext(Dispatchers.Main) {
+                    val link = json.optString("link", "")
+                    leetCodeLink = if (link.startsWith("/")) "https://leetcode.com$link" else link
+                    challengeText = buildString {
+                        append("Coding challenge\n").append(title)
+                        if (difficulty.isNotBlank()) append("\nDifficulty: ").append(difficulty)
+                    }
+                    challengeLoading = false
+                    isLeetCode = true
+                }
+            } catch (e: Exception) {
+                Log.w("DiscoverScreen", "LeetCode challenge request failed", e)
+                withContext(Dispatchers.Main) {
+                    challengeText = "LeetCode is unavailable. Try another challenge."
+                    challengeLoading = false
+                }
+            }
+        }
+    }
+
+    var showCatPage by remember { mutableStateOf(false) }
     var catImg by remember { mutableStateOf<String?>(null) }
     var catLoading by remember { mutableStateOf(false) }
     val fortunes = arrayOf("大吉 🐱", "中吉 😺", "小吉 😸", "末吉 😿", "凶 😾", "大凶 🙀")

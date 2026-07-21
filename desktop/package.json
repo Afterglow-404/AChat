@@ -1,0 +1,35 @@
+{
+  "name": "wisp-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wisp desktop companion for phone conversation debugging",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "dev": "electron . --no-sandbox",
+    "start:compat": "set WISP_DESKTOP_DISABLE_GPU=1&& electron . --no-sandbox --disable-gpu",
+    "start:secure": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.aftglw.wisp.desktop",
+    "productName": "Wisp Desktop",
+    "files": ["main.mjs", "preload.mjs", "renderer/**/*"],
+    "extraResources": [
+      { "from": "../scripts/wisp-dev-server.mjs", "to": "project/scripts/wisp-dev-server.mjs" },
+      { "from": "../app/src/main/assets", "to": "project/app/src/main/assets" }
+    ],
+    "extraMetadata": {
+      "main": "main.mjs"
+    },
+    "win": {
+      "target": ["portable"],
+      "artifactName": "Wisp-Desktop-${version}.${ext}"
+    }
+  }
+}

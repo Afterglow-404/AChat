@@ -133,9 +133,8 @@ fun CharacterEditorPage(
                         Toast.makeText(ctx, "已保存", Toast.LENGTH_SHORT).show()
                         onSaved(newPersona)
                         onBack()
-                    } else {
-                        Toast.makeText(ctx, "保存失败：未找到角色", Toast.LENGTH_SHORT).show()
                     }
+                    // 失败时 savePersona 内部已 Toast 提示
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = CircleShape,
@@ -190,17 +189,26 @@ private fun FieldSection(
     )
 }
 
-/** 把 persona 写回 chats 表中匹配 name 的项，返回是否找到并保存成功 */
+/** 把 persona 写回 chats 表中匹配 name 的项，返回是否保存成功。
+ *  失败时（未找到角色或异常）内部已 Toast 提示用户，调用方无需再 Toast。 */
 private fun savePersona(ctx: Context, chatName: String, persona: String): Boolean = runBlocking {
     try {
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).chatDao()
-            val e = dao.getAll().firstOrNull { it.name == chatName } ?: return@withContext false
+            val e = dao.getAll().firstOrNull { it.name == chatName } ?: run {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, "保存失败：未找到角色", Toast.LENGTH_SHORT).show()
+                }
+                return@withContext false
+            }
             dao.upsert(e.copy(persona = persona))
             true
         }
     } catch (e: Exception) {
         Log.e("CharacterEditorPage", "savePersona failed", e)
+        withContext(Dispatchers.Main) {
+            Toast.makeText(ctx, "保存失败：${e.message?.take(40)}", Toast.LENGTH_SHORT).show()
+        }
         false
     }
 }

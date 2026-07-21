@@ -1,4 +1,5 @@
 package com.aftglw.devapi.feature.chat
+import android.util.Log
 import com.aftglw.devapi.core.character.CharacterCardParser
 import com.aftglw.devapi.core.ui.InfoRow
 import com.aftglw.devapi.core.memory.MemoryStore

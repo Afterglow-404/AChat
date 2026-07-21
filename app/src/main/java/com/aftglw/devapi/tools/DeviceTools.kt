@@ -18,6 +18,21 @@ private fun isOpenBookMode(ctx: Context): Boolean {
     return prefs.getBoolean("open_book_mode", false)
 }
 
+/**
+ * 「开诚布公」模式下的隐私敏感工具名集合。
+ *
+ * 这些工具读取设备位置 / 通知 / 应用使用统计，即使在「开诚布公」开关已开启的情况下，
+ * 也仅在单聊 DialogToolGuard 路径下可用 —— 用户必须停留在屏幕前看到弹窗并确认。
+ *
+ * 群聊场景注入的 [RestrictedToolGuard] 会显式拒绝这些工具，避免群成员 AI 在用户
+ * 未关注屏幕时静默读取隐私数据。
+ */
+val OPEN_BOOK_TOOL_NAMES: Set<String> = setOf(
+    "access_location",
+    "read_notifications",
+    "read_app_usage"
+)
+
 // ─── 1. 获取设备位置 ──────────────────────────────────────────────
 
 class LocationTool : AiTool {

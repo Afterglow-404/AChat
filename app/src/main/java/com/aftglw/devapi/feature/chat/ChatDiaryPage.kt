@@ -39,6 +39,7 @@ fun DiaryPage(name: String, onBack: () -> Unit) {
             diaries = withContext(Dispatchers.IO) { MemoryStore.search(ctx, "日记", 50, "diary:$name") }
         } catch (e: Exception) {
             Log.e("ChatDiaryPage", "load diaries failed", e)
+            Toast.makeText(ctx, "日记加载失败", Toast.LENGTH_SHORT).show()
         }
     }
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {

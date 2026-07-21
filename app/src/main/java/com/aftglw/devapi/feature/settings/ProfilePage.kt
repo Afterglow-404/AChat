@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.settings
 
+import android.util.Log
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.widget.Toast
@@ -73,4 +74,4 @@ fun ProfilePage(
         TextFieldRow("个人签名", "Hello Wisp", profileWechatId, onProfileWechatIdChange)
     }
 }
-
+

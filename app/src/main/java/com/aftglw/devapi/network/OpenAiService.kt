@@ -220,7 +220,9 @@ class OpenAiService(context: Context) : AiService {
                                         }
                                     }
                                 }
-                            } catch (_: Exception) { }
+                            } catch (e: Exception) {
+                                android.util.Log.w("OpenAiService", "parse tool_call chunk failed: $data", e)
+                            }
                         }
                     } finally { reader.close(); httpResp.close(); currentCall = null }
                     if (toolCallAccum.isNotEmpty()) {

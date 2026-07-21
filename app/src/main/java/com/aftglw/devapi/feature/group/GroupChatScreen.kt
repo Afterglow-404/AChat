@@ -1,5 +1,6 @@
 package com.aftglw.devapi.feature.group
 
+import android.util.Log
 import android.content.Context
 import android.content.pm.PackageManager
 import android.widget.Toast
@@ -544,7 +545,7 @@ fun GroupChatScreen(
                 val total = System.currentTimeMillis() - t0
                 android.util.Log.d("GroupChat", "Turn done: replied=${replied.toList()}, autoRounds=$totalAutoRounds, ${total}ms")
             } catch (e: TimeoutCancellationException) {
-                try { AiServiceFactory.getService().cancel() } catch (_: Exception) { }
+                try { AiServiceFactory.getService().cancel() } catch (ce: Exception) { android.util.Log.w("GroupChat", "cancel failed", ce) }
                 android.util.Log.w("GroupChat", "Turn timed out after ${MAX_GROUP_TURN_DURATION_MS}ms")
                 Toast.makeText(ctx, "\u7fa4\u804a\u56de\u590d\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5", Toast.LENGTH_SHORT).show()
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -587,7 +588,7 @@ fun GroupChatScreen(
                     Toast.makeText(ctx, "\u91cd\u8bd5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: TimeoutCancellationException) {
-                try { AiServiceFactory.getService().cancel() } catch (_: Exception) { }
+                try { AiServiceFactory.getService().cancel() } catch (ce: Exception) { android.util.Log.w("GroupChat", "cancel failed", ce) }
                 Toast.makeText(ctx, "\u91cd\u8bd5\u8d85\u65f6\uff0c\u5931\u8d25\u6d88\u606f\u4ecd\u4fdd\u7559", Toast.LENGTH_SHORT).show()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -906,7 +907,7 @@ fun GroupChatScreen(
                         onClick = {
                             sendJob?.cancel()
                             sendJob = null
-                            try { AiServiceFactory.getService().cancel() } catch (_: Exception) { }
+                            try { AiServiceFactory.getService().cancel() } catch (ce: Exception) { android.util.Log.w("GroupChat", "cancel failed", ce) }
                             sending = false
                             typingMember = null
                         },

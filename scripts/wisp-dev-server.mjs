@@ -169,7 +169,8 @@ function rawResponse(response, statusCode, body, contentType = 'application/octe
 
 function authorized(request) {
   if (!apiKey) return true
-  return request.headers.authorization === `Bearer ${apiKey}`
+  if (request.headers.authorization === `Bearer ${apiKey}`) return true
+  return Boolean(dashboardToken && request.headers['x-wisp-dashboard-token'] === dashboardToken)
 }
 
 function result(requestId, tool, ok, value, error, started, status = ok ? 200 : 400) {
@@ -941,20 +942,22 @@ async function handle(request, response) {
     const text = url.searchParams.get('text') || '你好'
     try {
       let resp
-      if (engine === 'qwen3' && qwen3TtsUrl) {
+      if (engine === 'qwen3') {
+        if (!qwen3TtsUrl) return jsonResponse(response, 503, { error: { message: 'Qwen3-TTS upstream is not configured' } })
         resp = await fetch(`${qwen3TtsUrl}/tts`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ text, language: url.searchParams.get('language') || 'Chinese', speaker: url.searchParams.get('voice') || 'Vivian', instruct: url.searchParams.get('instruct') || '', response_format: 'wav' }),
           signal: AbortSignal.timeout(15000),
         })
-      } else if (gptSovitsUrl) {
+      } else if (engine === 'gptsovits') {
+        if (!gptSovitsUrl) return jsonResponse(response, 503, { error: { message: 'GPT-SoVITS upstream is not configured' } })
         resp = await fetch(`${gptSovitsUrl}/tts`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ text, voice: url.searchParams.get('voice') || 'default', prompt_lang: 'zh', text_lang: 'zh', response_format: 'wav' }),
           signal: AbortSignal.timeout(15000),
         })
       } else {
-        return jsonResponse(response, 503, { error: { message: 'No TTS upstream configured' } })
+        return jsonResponse(response, 400, { error: { message: `Unsupported TTS engine: ${engine}` } })
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const buf = Buffer.from(await resp.arrayBuffer())
@@ -1132,19 +1135,19 @@ server.on('upgrade', (request, socket) => {
   const key = request.headers['sec-websocket-key']
   if (!key) { socket.destroy(); return }
 
+  // Reject invalid dashboard tokens before completing the WebSocket handshake.
+  if (dashboardToken && url.searchParams.get('token') !== dashboardToken) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+    socket.destroy()
+    return
+  }
+
   const accept = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
   socket.write(
     'HTTP/1.1 101 Switching Protocols\r\n' +
     'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
     'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
   )
-
-  // Dashboard WebSocket: token auth via query param ?token=xxx
-  if (dashboardToken && url.searchParams.get('token') !== dashboardToken) {
-    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
-    socket.destroy()
-    return
-  }
 
   wsClients.add(socket)
   // Send current state snapshot

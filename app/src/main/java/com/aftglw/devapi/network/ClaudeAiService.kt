@@ -163,7 +163,10 @@ class ClaudeAiService(context: Context) : AiService {
                                         "content_block_delta" -> {
                                             val delta = try {
                                                 JSONObject(data).optJSONObject("delta")?.optString("text", "") ?: ""
-                                            } catch (_: Exception) { "" }
+                                            } catch (e: Exception) {
+                                                android.util.Log.w("ClaudeAiService", "parse content_block_delta failed: $data", e)
+                                                ""
+                                            }
                                             if (delta.isNotEmpty()) { full.append(delta); onChunk(delta) }
                                         }
                                         "content_block_start" -> {
@@ -176,12 +179,16 @@ class ClaudeAiService(context: Context) : AiService {
                                                     val initInput = block.optJSONObject("input")?.toString() ?: ""
                                                     if (initInput.isNotEmpty()) toolArgs.append(initInput)
                                                 }
-                                            } catch (_: Exception) { }
+                                            } catch (e: Exception) {
+                                                android.util.Log.w("ClaudeAiService", "parse content_block_start failed: $data", e)
+                                            }
                                         }
                                         "input_json_delta" -> {
                                             try {
                                                 toolArgs.append(JSONObject(data).optJSONObject("delta")?.optString("partial_json", "") ?: "")
-                                            } catch (_: Exception) { }
+                                            } catch (e: Exception) {
+                                                android.util.Log.w("ClaudeAiService", "parse input_json_delta failed: $data", e)
+                                            }
                                         }
                                         "content_block_stop" -> {
                                             if (toolName.isNotEmpty()) {

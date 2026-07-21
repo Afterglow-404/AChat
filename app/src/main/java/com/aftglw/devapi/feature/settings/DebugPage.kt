@@ -243,6 +243,7 @@ fun DebugPage(
                                         if (voices.isNotEmpty()) healthStatus = "✓ 在线（${voices.size} 个音色）"
                                     }
                                 } catch (e: Exception) {
+                                    android.util.Log.e("DebugPage", "TTS health check failed", e)
                                     healthStatus = "✗ ${e.message?.take(40)}"
                                 }
                                 checking = false
@@ -380,6 +381,7 @@ fun DebugPage(
                                 }
                                 whisperHealthStatus = if (ok) "✓ 在线" else "✗ 无法连接"
                             } catch (e: Exception) {
+                                android.util.Log.e("DebugPage", "Whisper health check failed", e)
                                 whisperHealthStatus = "✗ ${e.message?.take(40)}"
                             }
                             whisperChecking = false

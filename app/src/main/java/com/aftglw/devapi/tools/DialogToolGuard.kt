@@ -70,6 +70,10 @@ class DialogToolGuard(
  * 但也不应让它们静默执行 HIGH 风险工具（如发通知、运行 shell）。
  *
  * 默认 [maxAllowedRisk] = [RiskLevel.MEDIUM]，即只允许 LOW + MEDIUM。
+ *
+ * 例外：[OPEN_BOOK_TOOL_NAMES] 中的隐私敏感工具（位置/通知/应用使用统计）
+ * 即使风险等级为 MEDIUM 也一律拒绝 —— 这些工具要求用户停留在屏幕前确认，
+ * 与群聊"无人值守"语义冲突。
  */
 class RestrictedToolGuard(
     private val appContext: Context,
@@ -79,6 +83,8 @@ class RestrictedToolGuard(
     override suspend fun confirm(tool: AiTool, argsJson: String): Boolean {
         // 白名单仍然生效
         if (ToolWhitelist.isDisabled(appContext, tool.name)) return false
+        // 隐私敏感工具在群聊无人值守场景下一律拒绝
+        if (tool.name in OPEN_BOOK_TOOL_NAMES) return false
         return tool.riskLevel.ordinal <= maxAllowedRisk.ordinal
     }
 }

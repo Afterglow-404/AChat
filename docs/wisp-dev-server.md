@@ -251,3 +251,43 @@ Dashboard → Server:  { type: "reply.send", requestId, content }
 Dashboard → Server:  { type: "reply.cancel", requestId }
 Dashboard → Server:  { type: "tts.test", engine, text, voice }
 ```
+
+## Electron 桌面端
+
+桌面端位于 `desktop` 目录。它会自动启动 Wisp 开发服务、打开交互式回复工作台，并提供消息回复、贴纸、工具、语音收件箱和 TTS 试听功能。
+
+```powershell
+cd WeChatClone\desktop
+npm.cmd start
+```
+
+如果外接显卡导致 Electron 的 GPU 进程启动失败，使用兼容模式：
+
+```powershell
+npm.cmd run start:compat
+```
+
+切换到核显 780M 后，可以尝试完整沙箱模式：
+
+```powershell
+npm.cmd run start:secure
+```
+
+### 手机连接桌面端
+
+桌面端默认只监听 `127.0.0.1`，仅供电脑本机使用。手机联调时，需要在启动前指定电脑的局域网 IPv4 地址：
+
+```powershell
+$env:WISP_DESKTOP_HOST = '192.168.31.12'
+npm.cmd run start:compat
+```
+
+手机端的 fake AI API、STT 或 TTS 地址填写：
+
+```text
+http://192.168.31.12:<日志中显示的端口>
+```
+
+桌面端会优先尝试 `17890`；如果端口已占用，会自动选择后续空闲端口。重启服务时会等待旧进程退出，尽量保持原端口不变。手机和电脑必须连接同一局域网，并允许 Electron 通过 Windows 防火墙访问专用网络。
+
+桌面端使用独立的 `preload.cjs`，启用 `contextIsolation`、关闭 `nodeIntegration`，并通过 IPC 暴露服务状态和重启方法。Electron 用户数据保存在 `%TEMP%\WispDesktop-v2`，不依赖浏览器密码或 Cookie。

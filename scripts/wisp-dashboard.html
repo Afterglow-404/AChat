@@ -63,6 +63,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 #quickReplies { display: flex; flex-wrap: wrap; gap: 4px; }
 #quickReplies button { font-size: 11px; padding: 4px 8px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
 #quickReplies button:hover { border-color: var(--accent); }
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  #main { overflow-y: auto; flex-direction: column; }
+  #sidebar, #center, #right { width: 100%; flex: 0 0 auto; }
+  #sidebar { height: 180px; min-height: 0; border-right: none; border-bottom: 1px solid var(--border); }
+  #center { min-height: 440px; }
+  #right { border-left: none; border-top: 1px solid var(--border); overflow-y: visible; }
+  #replyInput { min-height: 180px; }
+}
 </style>
 </head>
 <body>
@@ -137,10 +146,50 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 
 <script>
 const params = new URLSearchParams(location.search);
-const WS_URL = `ws://${location.host}/dashboard/ws` + (params.get('token') ? `?token=${encodeURIComponent(params.get('token'))}` : '');
+const dashboardToken = params.get('token') || '';
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_URL = `${WS_PROTOCOL}://${location.host}/dashboard/ws` + (dashboardToken ? `?token=${encodeURIComponent(dashboardToken)}` : '');
 let ws, selectedSessionId = null, sendingReply = false;
 let sessions = new Map();
 let history = []; // completed sessions with result
+let voiceIds = new Set();
+let audioObjectUrl = null;
+
+function dashboardApiUrl(pathname) {
+  return new URL(pathname, location.href).toString();
+}
+
+function dashboardFetch(pathname, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (dashboardToken) headers.set('x-wisp-dashboard-token', dashboardToken);
+  return fetch(dashboardApiUrl(pathname), { ...options, headers });
+}
+
+function hydrateProtectedImages(root) {
+  root.querySelectorAll('img[data-protected-src]').forEach(async image => {
+    try {
+      const response = await dashboardFetch(image.dataset.protectedSrc);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      image.src = URL.createObjectURL(await response.blob());
+    } catch {
+      image.remove();
+    }
+  });
+}
+
+async function playProtectedAudio(pathname, errorMessage = '无法播放该音频') {
+  try {
+    const response = await dashboardFetch(pathname);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
+    audioObjectUrl = URL.createObjectURL(await response.blob());
+    const player = document.getElementById('audioPlayer');
+    player.src = audioObjectUrl;
+    await player.play();
+  } catch (error) {
+    showToast(`${errorMessage}: ${error.message}`);
+  }
+}
 
 function connect() {
   ws = new WebSocket(WS_URL);
@@ -165,6 +214,7 @@ function handleMsg(msg) {
     for (const s of msg.sessions || []) sessions.set(s.requestId, s);
     renderSessions();
     renderStickers(msg.stickers || []);
+    renderVoices(msg.voices || []);
     updateStats();
     const ttsLabel = document.getElementById('ttsLabel');
     const hasTts = msg.ttsProxy || false;
@@ -225,16 +275,20 @@ function renderSessions() {
   list.innerHTML = sorted.map(s => {
     const age = Math.floor((Date.now() - s.createdAt) / 1000);
     const ageStr = age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`;
-    const imgTags = (s.userImages || []).map(id => `<img src="/api/v1/debug/images/${encodeURIComponent(id)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin:2px">`).join('');
-    const stickerTag = s.sticker ? `<img src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="width:48px;height:48px;object-fit:contain;margin:2px" title="${escHtml(s.sticker.tag)}">` : '';
+    const imgTags = (s.userImages || []).map(id => `<img src="data:," data-protected-src="/api/v1/debug/images/${encodeURIComponent(id)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin:2px">`).join('');
+    const stickerTag = s.sticker ? `<img src="data:," data-protected-src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="width:48px;height:48px;object-fit:contain;margin:2px" title="${escHtml(s.sticker.tag)}">` : '';
     const label = s.userText || (imgTags ? '📷 图片消息' : stickerTag ? '🎭 贴纸' : '(空消息)');
-    return `<div class="sessionCard ${s.requestId === selectedSessionId ? 'active' : ''}" onclick="selectSession('${s.requestId}')">
+    return `<div class="sessionCard ${s.requestId === selectedSessionId ? 'active' : ''}" data-request-id="${escHtml(s.requestId)}">
       <div class="userText">${escHtml(label)}</div>
       ${stickerTag ? `<div>${stickerTag}</div>` : ''}
       ${!stickerTag && imgTags ? `<div style="margin-top:4px">${imgTags}</div>` : ''}
       <div class="meta">${ageStr} 前 <span class="status ${s.status}">${s.status === 'pending' ? '待处理' : '回复中'}</span></div>
     </div>`;
   }).join('');
+  list.querySelectorAll('[data-request-id]').forEach(card => {
+    card.addEventListener('click', () => selectSession(card.dataset.requestId));
+  });
+  hydrateProtectedImages(list);
 }
 
 let stickerPacks = [];
@@ -242,7 +296,10 @@ function renderStickers(stickers) {
   stickerPacks = stickers;
   const bar = document.getElementById('stickerBar');
   const tags = [...new Set(stickers.flatMap(p => (p.tags || []).slice(0, 5)))].slice(0, 20);
-  bar.innerHTML = tags.map(t => `<button onclick="sendSticker('${escHtml(t)}')">${escHtml(t)}</button>`).join('') || '<span style="font-size:11px;color:var(--text2)">无贴纸包</span>';
+  bar.innerHTML = tags.map(t => `<button data-sticker-tag="${escHtml(t)}">${escHtml(t)}</button>`).join('') || '<span style="font-size:11px;color:var(--text2)">无贴纸包</span>';
+  bar.querySelectorAll('[data-sticker-tag]').forEach(button => {
+    button.addEventListener('click', () => sendSticker(button.dataset.stickerTag));
+  });
 }
 
 function selectSession(id) {
@@ -250,9 +307,10 @@ function selectSession(id) {
   const s = sessions.get(id);
   if (!s) return;
   document.getElementById('selectedId').textContent = id;
-  const stickerHtml = s.sticker ? `<div style="margin-top:8px"><img src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="max-width:120px;max-height:120px;border-radius:8px" title="${escHtml(s.sticker.tag)}"><div style="font-size:10px;color:var(--text2)">🎭 ${escHtml(s.sticker.pack)} · ${escHtml(s.sticker.tag)}</div></div>` : '';
-  const imgs = (s.userImages || []).map(imgId => `<img src="/api/v1/debug/images/${encodeURIComponent(imgId)}" style="max-width:200px;max-height:200px;border-radius:8px;margin:4px">`).join('');
+  const stickerHtml = s.sticker ? `<div style="margin-top:8px"><img src="data:," data-protected-src="/api/v1/stickers/${encodeURIComponent(s.sticker.pack)}/${encodeURIComponent(s.sticker.file)}" style="max-width:120px;max-height:120px;border-radius:8px" title="${escHtml(s.sticker.tag)}"><div style="font-size:10px;color:var(--text2)">🎭 ${escHtml(s.sticker.pack)} · ${escHtml(s.sticker.tag)}</div></div>` : '';
+  const imgs = (s.userImages || []).map(imgId => `<img src="data:," data-protected-src="/api/v1/debug/images/${encodeURIComponent(imgId)}" style="max-width:200px;max-height:200px;border-radius:8px;margin:4px">`).join('');
   document.getElementById('selectedPrompt').innerHTML = (s.userText ? escHtml(s.userText) : '') + stickerHtml + (imgs && !s.sticker ? `<div style="margin-top:8px">${imgs}</div>` : '') || '👈 从左侧列表选择一条消息';
+  hydrateProtectedImages(document.getElementById('selectedPrompt'));
   document.getElementById('replyInput').disabled = false;
   document.getElementById('replyInput').value = '';
   document.getElementById('replyInput').focus();
@@ -322,27 +380,68 @@ function testTts() {
   if (!text) return;
   const params = new URLSearchParams({ engine, text });
   const player = document.getElementById('audioPlayer');
-  player.src = `/api/v1/tts/proxy?${params}`;
-  player.play().catch(() => showToast('TTS 播放失败'));
+  showToast('TTS 生成中…');
+  dashboardFetch(`/api/v1/tts/proxy?${params}`)
+    .then(async response => {
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error?.message || `HTTP ${response.status}`);
+      }
+      return response.blob();
+    })
+    .then(blob => {
+      if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
+      audioObjectUrl = URL.createObjectURL(blob);
+      player.src = audioObjectUrl;
+      return player.play();
+    })
+    .catch(error => showToast('TTS 失败: ' + error.message));
+}
+
+function renderVoices(voices) {
+  const container = document.getElementById('voiceList');
+  container.innerHTML = '';
+  voiceIds.clear();
+  for (const voice of [...voices].reverse().slice(-20)) addVoiceItem(voice);
+  if (!container.children.length) container.innerHTML = '<div class="emptyState">暂无</div>';
 }
 
 function addVoiceItem(voice) {
   const div = document.getElementById('voiceList');
+  if (!voice?.id || voiceIds.has(voice.id)) return;
+  voiceIds.add(voice.id);
   const placeholder = div.querySelector(':scope > .emptyState');
   if (placeholder) placeholder.remove();
   const item = document.createElement('div');
   item.className = 'voiceItem';
+  item.dataset.voiceId = voice.id;
   item.innerHTML = `<div style="font-size:10px;color:var(--text2)">${voice.receivedAt ? new Date(voice.receivedAt).toLocaleTimeString() : ''} · ${(voice.size / 1024).toFixed(1)}KB</div><div class="vtext">${escHtml(voice.text)}</div>`;
   // Left-click to play, right-click to download
   item.onclick = () => {
-    const player = document.getElementById('audioPlayer');
-    player.src = `/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`;
-    player.play().catch(() => showToast('无法播放该音频'));
+    playProtectedAudio(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`);
   };
-  item.oncontextmenu = (e) => { e.preventDefault(); window.open(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`, '_blank'); };
+  item.oncontextmenu = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await dashboardFetch(`/api/v1/debug/voices/${encodeURIComponent(voice.id)}/download`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = voice.filename || `${voice.id}.audio`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      showToast('下载失败: ' + error.message);
+    }
+  };
   item.title = '点击播放 · 右键下载';
   div.insertBefore(item, div.firstChild);
-  if (div.children.length > 20) div.removeChild(div.lastChild);
+  if (div.children.length > 20) {
+    const removed = div.lastChild;
+    if (removed?.dataset.voiceId) voiceIds.delete(removed.dataset.voiceId);
+    div.removeChild(removed);
+  }
 }
 
 function renderHistory() {
@@ -388,7 +487,7 @@ function updateStats() {
 }
 
 function escHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 document.getElementById('replyInput').addEventListener('keydown', (e) => {
