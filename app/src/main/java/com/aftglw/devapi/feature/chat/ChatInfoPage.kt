@@ -208,11 +208,146 @@ fun ChatInfoPage(
                     Switch(checked = proactiveEnabled, onCheckedChange = { v -> proactiveEnabled = v; prefs.edit().putBoolean("proactive_enabled_$name", v).apply() })
                 }
                 if (proactiveEnabled) {
-                    var dailyLimit by remember { mutableIntStateOf(prefs.getInt("proactive_daily_limit_$name", 3)) }
+                    // 状态显示：上次触发时间 + 今日已发条数
+                    val lastTs = prefs.getLong("proactive_last_$name", 0L)
+                    val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault()).format(java.util.Date())
+                    val todayCount = prefs.getInt("proactive_count_${name}_$today", 0)
+                    val dailyLimit = prefs.getInt("proactive_daily_limit_$name", 3)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (lastTs > 0L) "上次：${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastTs))}" else "上次：未触发",
+                            fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f)
+                        )
+                        Text("今日：$todayCount/$dailyLimit", fontSize = 11.sp, color = if (todayCount >= dailyLimit) Color(0xFFE53935) else AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                    }
+                    // 每日上限
+                    var dailyLimitState by remember { mutableIntStateOf(dailyLimit) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("每日上限", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
-                        Slider(value = dailyLimit.toFloat(), onValueChange = { v -> dailyLimit = v.toInt(); prefs.edit().putInt("proactive_daily_limit_$name", v.toInt()).apply() }, valueRange = 1f..20f, steps = 3, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
-                        Text("${dailyLimit}条", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                        Slider(value = dailyLimitState.toFloat(), onValueChange = { v -> dailyLimitState = v.toInt(); prefs.edit().putInt("proactive_daily_limit_$name", v.toInt()).apply() }, valueRange = 1f..20f, steps = 3, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text("${dailyLimitState}条", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    // 触发模式：custom（按规则触发）/ ai（AI 自主决定）
+                    val triggerMode = remember { mutableStateOf(prefs.getString("proactive_trigger_mode_$name", "custom") ?: "custom") }
+                    val triggerModeExpanded = remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("触发模式", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                        Box {
+                            Text(
+                                when (triggerMode.value) { "ai" -> "AI 自主"; else -> "按规则" },
+                                fontSize = 13.sp, color = AchatTheme.colors.primary,
+                                modifier = Modifier.clickable { triggerModeExpanded.value = true }
+                            )
+                            DropdownMenu(expanded = triggerModeExpanded.value, onDismissRequest = { triggerModeExpanded.value = false }) {
+                                DropdownMenuItem(text = { Text("按规则（custom）", fontSize = 13.sp) }, onClick = {
+                                    triggerMode.value = "custom"; prefs.edit().putString("proactive_trigger_mode_$name", "custom").apply(); triggerModeExpanded.value = false
+                                })
+                                DropdownMenuItem(text = { Text("AI 自主（ai）", fontSize = 13.sp) }, onClick = {
+                                    triggerMode.value = "ai"; prefs.edit().putString("proactive_trigger_mode_$name", "ai").apply(); triggerModeExpanded.value = false
+                                })
+                            }
+                        }
+                    }
+                    // 检查模式：random（概率触发）/ fixed（间隔触发）
+                    val checkMode = remember { mutableStateOf(prefs.getString("proactive_check_mode_$name", "random") ?: "random") }
+                    val checkModeExpanded = remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("检查模式", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Box {
+                            Text(
+                                when (checkMode.value) { "fixed" -> "按间隔"; else -> "概率" },
+                                fontSize = 13.sp, color = AchatTheme.colors.primary,
+                                modifier = Modifier.clickable { checkModeExpanded.value = true }
+                            )
+                            DropdownMenu(expanded = checkModeExpanded.value, onDismissRequest = { checkModeExpanded.value = false }) {
+                                DropdownMenuItem(text = { Text("概率（random）", fontSize = 13.sp) }, onClick = {
+                                    checkMode.value = "random"; prefs.edit().putString("proactive_check_mode_$name", "random").apply(); checkModeExpanded.value = false
+                                })
+                                DropdownMenuItem(text = { Text("按间隔（fixed）", fontSize = 13.sp) }, onClick = {
+                                    checkMode.value = "fixed"; prefs.edit().putString("proactive_check_mode_$name", "fixed").apply(); checkModeExpanded.value = false
+                                })
+                            }
+                        }
+                    }
+                    // 间隔分钟（fixed 模式下生效；random 模式下作为最小间隔）
+                    var intervalMin by remember { mutableIntStateOf(prefs.getInt("proactive_interval_min_$name", 30)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("最小间隔(分)", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Slider(value = intervalMin.toFloat(), onValueChange = { v -> intervalMin = v.toInt(); prefs.edit().putInt("proactive_interval_min_$name", v.toInt()).apply() }, valueRange = 10f..240f, steps = 22, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text("${intervalMin}m", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                    }
+                    // 闲置时长（小时）— 触发器 1 使用
+                    var idleHours by remember { mutableIntStateOf(prefs.getInt("proactive_idle_hours_$name", 0)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("闲置时长(时)", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Slider(value = idleHours.toFloat(), onValueChange = { v -> idleHours = v.toInt(); prefs.edit().putInt("proactive_idle_hours_$name", v.toInt()).apply() }, valueRange = 0f..72f, steps = 23, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text(if (idleHours == 0) "不限" else "${idleHours}h", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                    }
+                    // 好感度门槛（0-4 等级）
+                    var affMin by remember { mutableIntStateOf(prefs.getInt("proactive_affinity_min_$name", 0)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("好感门槛", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Slider(value = affMin.toFloat(), onValueChange = { v -> affMin = v.toInt(); prefs.edit().putInt("proactive_affinity_min_$name", v.toInt()).apply() }, valueRange = 0f..4f, steps = 3, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text("Lv$affMin", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                    }
+                    // 静音时段（分钟）— 在此期间不触发；0 表示不静音
+                    var silenceMin by remember { mutableIntStateOf(prefs.getInt("proactive_silence_min_$name", 0)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("静音时长(分)", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Slider(value = silenceMin.toFloat(), onValueChange = { v -> silenceMin = v.toInt(); prefs.edit().putInt("proactive_silence_min_$name", v.toInt()).apply() }, valueRange = 0f..480f, steps = 15, modifier = Modifier.width(120.dp), colors = SliderDefaults.colors(thumbColor = AchatTheme.colors.primary, activeTrackColor = AchatTheme.colors.primary))
+                        Text(if (silenceMin == 0) "关" else "${silenceMin}m", fontSize = 13.sp, color = AchatTheme.colors.onSurface)
+                    }
+                    // 触发器多选（1=闲置 2=深夜 3=刚离开 4=隔天 5=高好感 6=三天）
+                    val triggersText = prefs.getString("proactive_triggers_$name", "1,2,3,4,5,6") ?: "1,2,3,4,5,6"
+                    val triggersExpanded = remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("触发场景", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Text(
+                            triggersText.split(",").mapNotNull { it.trim().toIntOrNull() }.map { idx ->
+                                when (idx) { 1 -> "闲置"; 2 -> "深夜"; 3 -> "刚离开"; 4 -> "隔天"; 5 -> "高好感"; 6 -> "三天"; else -> null } }
+                                .joinToString("/").ifEmpty { "无" },
+                            fontSize = 12.sp, color = AchatTheme.colors.primary,
+                            modifier = Modifier.clickable { triggersExpanded.value = true }
+                        )
+                        DropdownMenu(expanded = triggersExpanded.value, onDismissRequest = { triggersExpanded.value = false }) {
+                            val triggerLabels = listOf(1 to "闲置", 2 to "深夜(1-4点)", 3 to "刚离开", 4 to "隔天", 5 to "高好感", 6 to "三天未联系")
+                            val currentSet = triggersText.split(",").mapNotNull { it.trim().toIntOrNull() }.toMutableSet()
+                            triggerLabels.forEach { (idx, label) ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+                                    Checkbox(
+                                        checked = currentSet.contains(idx),
+                                        onCheckedChange = { checked ->
+                                            if (checked) currentSet.add(idx) else currentSet.remove(idx)
+                                            val newStr = currentSet.sorted().joinToString(",")
+                                            prefs.edit().putString("proactive_triggers_$name", newStr).apply()
+                                        }
+                                    )
+                                    Text(label, fontSize = 13.sp)
+                                }
+                            }
+                            TextButton(onClick = { triggersExpanded.value = false }) { Text("完成") }
+                        }
+                    }
+                    // 一键测试触发按钮
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                val msg = withContext(Dispatchers.IO) {
+                                    com.aftglw.devapi.core.time.ProactiveScheduler.generateMessagePublic(ctx, name)
+                                }
+                                if (msg.isNullOrBlank()) {
+                                    Toast.makeText(ctx, "生成失败（API/网络/配额问题）", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(ctx, "生成预览：${msg.take(30)}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }) { Text("测试生成", fontSize = 13.sp) }
+                        TextButton(onClick = {
+                            com.aftglw.devapi.core.time.ProactiveScheduler.triggerNow(ctx)
+                            Toast.makeText(ctx, "已触发，稍后查看消息", Toast.LENGTH_SHORT).show()
+                        }) { Text("立即触发", fontSize = 13.sp, color = AchatTheme.colors.primary) }
                     }
                 }
             }

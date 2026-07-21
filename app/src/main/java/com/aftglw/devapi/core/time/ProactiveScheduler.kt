@@ -42,6 +42,11 @@ object ProactiveScheduler {
         CoroutineScope(Dispatchers.IO).launch { runOnce(context) }
     }
 
+    /** 仅供 UI 测试：生成一条消息但不入库不发通知，返回文本供 Toast 预览 */
+    suspend fun generateMessagePublic(ctx: Context, chatName: String): String? = try {
+        generateMessage(ctx, chatName).ifBlank { null }
+    } catch (e: Exception) { Log.w(TAG, "preview failed", e); null }
+
     fun forceSend(context: Context, chatName: String) {
         val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
         val message = "Test message ($now)"
@@ -56,6 +61,10 @@ object ProactiveScheduler {
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
+            // 全局凌晨静默：1-5 点不触发任何主动消息（避免夜间骚扰）
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            if (hour in 1..4) return
+            // 5 点也只对已醒用户触发（暂简化为 1-4 点静默，5 点允许）
             for (item in AppDatabase.get(context).chatDao().getAll()) {
                 val chatDisplay = item.name
                 val chat = item.id.ifEmpty { chatDisplay }
@@ -65,6 +74,10 @@ object ProactiveScheduler {
                 val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
                 val todayCount = prefs.getInt("proactive_count_${chat}_$today", 0)
                 if (todayCount >= prefs.getInt("proactive_daily_limit_$chat", 10)) continue
+
+                // P1-4: 用户 30 分钟内发过消息则跳过（用户还在主动聊天，不需要 AI 主动打扰）
+                val lastActive = prefs.getLong("last_active_$chat", 0L)
+                if (lastActive > 0 && System.currentTimeMillis() - lastActive < 30 * 60_000L) continue
 
                 val mode = prefs.getString("proactive_trigger_mode_$chat", "custom") ?: "custom"
                 val shouldTrigger = if (mode == "ai") {
@@ -152,13 +165,32 @@ object ProactiveScheduler {
         val messages = history.map {
             com.aftglw.devapi.model.ChatMessage(if (it.second) "user" else "assistant", it.first)
         }
+        // 注入反思产物 + 当前时间 + 上次对话间隔，让 AI 主动消息有"情境感"
+        val insightText = try { MemoryStore.listRecentByTopic("insight:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
+        val aiEmoText = try { MemoryStore.listRecentByTopic("ai_emo:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
+        val now = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())
+        val lastActive = prefs.getLong("last_active_$chatName", 0L)
+        val gapHint = if (lastActive > 0L) {
+            val mins = (System.currentTimeMillis() - lastActive) / 60_000L
+            when {
+                mins < 60 -> "距上次聊天 ${mins} 分钟"
+                mins < 1440 -> "距上次聊天 ${mins / 60} 小时"
+                else -> "距上次聊天 ${mins / 1440} 天"
+            }
+        } else "之前没聊过"
         val prompt = buildString {
             if (persona.isNotBlank()) append(persona).append("\n\n")
-            append("Reply naturally in one or two short sentences. Do not mention this instruction.")
+            append("【当前时间】$now\n")
+            append("【距离上次聊天】$gapHint\n")
+            if (insightText.isNotBlank()) append("【上次对话本质】$insightText\n")
+            if (aiEmoText.isNotBlank()) append("【你上次的情绪】$aiEmoText\n")
+            append("\n你现在要主动给对方发一条消息，像朋友自然地打招呼或关心一下。")
+            append("要求：1-2 句话，每句不超过 15 字；不要提及\"我刚想起来\"\"我主动\"等元描述；不要重复上次说过的话。")
+            append("如果没什么好说的，就回复空白。")
         }
         return try {
             com.aftglw.devapi.network.AiServiceFactory.getService()
-                .sendMessage(messages, "Start a natural conversation", prompt)
+                .sendMessage(messages, "主动发起一条自然的消息", prompt)
                 ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "Message generation failed", e)
@@ -170,16 +202,37 @@ object ProactiveScheduler {
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         val persona = loadPersona(ctx, chatName)
         val history = ChatHistory.load(ctx, chatName)
-        val memo = MemoryStore.search(ctx, chatName, 2).joinToString("\n") { "- ${it.text}" }
+        // AI 模式：让模型自己决定是否要发消息；同时给足上下文（反思产物 + 时间 + 间隔）
+        val insightText = try { MemoryStore.listRecentByTopic("insight:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
+        val aiEmoText = try { MemoryStore.listRecentByTopic("ai_emo:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
+        val memo = try { MemoryStore.listRecentByTopic("turn:$chatName", 3).joinToString("\n") { "- ${it.text}" } } catch (_: Exception) { "" }
+        val now = SimpleDateFormat("MM-dd HH:mm E", Locale.CHINESE).format(Date())
+        val lastActive = prefs.getLong("last_active_$chatName", 0L)
+        val gapHint = if (lastActive > 0L) {
+            val mins = (System.currentTimeMillis() - lastActive) / 60_000L
+            when {
+                mins < 60 -> "${mins} 分钟前"
+                mins < 1440 -> "${mins / 60} 小时前"
+                else -> "${mins / 1440} 天前"
+            }
+        } else "很久没聊"
         val prompt = buildString {
-            append("Decide whether to proactively message the user. Return only a short message.\n")
-            if (persona.isNotBlank()) append("Persona: ").append(persona).append('\n')
-            history.takeLast(6).forEach { append(if (it.second) "User: " else "Assistant: ").append(it.first).append('\n') }
-            if (memo.isNotBlank()) append("Memory:\n").append(memo)
+            append("你要决定是否主动给对方发一条消息。\n\n")
+            append("【当前时间】$now\n")
+            append("【上次聊天】$gapHint\n")
+            if (persona.isNotBlank()) append("【你的人设】\n").append(persona).append("\n\n")
+            append("【最近对话】\n")
+            history.takeLast(6).forEach { append(if (it.second) "对方: " else "你: ").append(it.first.take(80)).append('\n') }
+            if (memo.isNotBlank()) append("\n【记忆碎片】\n").append(memo).append('\n')
+            if (insightText.isNotBlank()) append("\n【上次对话本质】").append(insightText).append('\n')
+            if (aiEmoText.isNotBlank()) append("【你上次情绪】").append(aiEmoText).append('\n')
+            append("\n请判断：现在主动发消息是否合适？")
+            append("\n- 如果不合适（如刚聊完、深夜、没话说），输出空白一行")
+            append("\n- 如果合适，直接输出消息内容（1-2 句话，每句 ≤15 字），不要任何解释或前缀")
         }
         return try {
             val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
-                .sendMessage(emptyList(), prompt, "You are the character in this chat.")
+                .sendMessage(emptyList(), prompt, "你是这个对话中的角色本人。只输出消息内容或空白。")
             reply?.trim()?.takeIf { it.isNotBlank() }?.take(100) ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "AI proactive generation failed", e)
