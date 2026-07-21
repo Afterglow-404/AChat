@@ -370,6 +370,22 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
 
         ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
             .putLong("last_active_$name", System.currentTimeMillis()).apply()
+        // P0-1: 若上一条是 AI 主动消息 → 用户回复了，重置 miss_streak
+        if (bubbles.isNotEmpty()) {
+            val last = bubbles.last()
+            // 主动消息判定：来自 AI 且距上次主动消息时间戳 < 6h
+            val lastProactiveTs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+                .getLong("proactive_last_$name", 0L)
+            if (!last.isMe && lastProactiveTs > 0L && System.currentTimeMillis() - lastProactiveTs < 6 * 3600_000L) {
+                com.aftglw.devapi.core.time.ProactiveMessageStore.onUserReply(ctx, name)
+            }
+        }
+        // P2-3: 记录用户活跃小时，供作息学习
+        com.aftglw.devapi.core.time.ProactiveMessageStore.recordUserActiveHour(ctx, name)
+        // P1-2: 从用户消息中提取未来事件（明天/考试/约会等）
+        scope.launch(Dispatchers.IO) {
+            try { com.aftglw.devapi.core.time.ProactiveMessageStore.extractEvent(ctx, name, text) } catch (_: Exception) {}
+        }
         // 撤回机制
         val proPrefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
         val lastProactive = proPrefs.getLong("proactive_last_$name", 0L)

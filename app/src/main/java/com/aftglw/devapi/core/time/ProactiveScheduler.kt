@@ -61,10 +61,14 @@ object ProactiveScheduler {
         val prefs = context.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         prefs.edit().putLong("worker_last_run", System.currentTimeMillis()).apply()
         try {
-            // 全局凌晨静默：1-5 点不触发任何主动消息（避免夜间骚扰）
+            // 全局凌晨静默：1-4 点不触发任何主动消息（避免夜间骚扰）
             val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
             if (hour in 1..4) return
-            // 5 点也只对已醒用户触发（暂简化为 1-4 点静默，5 点允许）
+            // P0-3: 全局勿扰检查
+            if (ProactiveMessageStore.isGlobalPaused(context)) return
+            // P1-1: 跨角色协调 — 30 分钟内已有任意角色发过消息，本轮跳过
+            if (ProactiveMessageStore.shouldSkipByCrossChat(context)) return
+
             for (item in AppDatabase.get(context).chatDao().getAll()) {
                 val chatDisplay = item.name
                 val chat = item.id.ifEmpty { chatDisplay }
@@ -75,9 +79,15 @@ object ProactiveScheduler {
                 val todayCount = prefs.getInt("proactive_count_${chat}_$today", 0)
                 if (todayCount >= prefs.getInt("proactive_daily_limit_$chat", 10)) continue
 
-                // P1-4: 用户 30 分钟内发过消息则跳过（用户还在主动聊天，不需要 AI 主动打扰）
+                // P1-4: 用户 30 分钟内发过消息则跳过
                 val lastActive = prefs.getLong("last_active_$chat", 0L)
                 if (lastActive > 0 && System.currentTimeMillis() - lastActive < 30 * 60_000L) continue
+
+                // P0-1: 连续未回复降频
+                if (ProactiveMessageStore.shouldSkipByMissStreak(context, chat)) continue
+
+                // P2-3: 用户作息学习 — 当前小时不在用户活跃时段则跳过
+                if (!ProactiveMessageStore.isUserActiveHour(context, chat)) continue
 
                 val mode = prefs.getString("proactive_trigger_mode_$chat", "custom") ?: "custom"
                 val shouldTrigger = if (mode == "ai") {
@@ -87,12 +97,28 @@ object ProactiveScheduler {
                 }
                 if (!shouldTrigger) continue
 
-                val message = generateMessage(context, chat)
-                // 用空字符串表示"不发"；只判 isBlank，避免 AI 真返回 "..." 被误拦截
+                // P1-2: 事件驱动 — 检查今天是否有应跟进的事件，有则强制触发一次
+                val dueEvents = ProactiveMessageStore.getDueEvents(context, chat)
+                val message = if (dueEvents.isNotEmpty()) {
+                    generateEventFollowupMessage(context, chat, dueEvents.first())
+                } else {
+                    generateMessage(context, chat)
+                }
+                // 用空字符串表示"不发"；只判 isBlank
                 if (message.isBlank()) continue
+
+                // P1-4: 去重 — 若与最近 5 条主动消息相似度 >60% 则跳过本轮
+                if (ProactiveMessageStore.isDuplicate(context, chat, message)) continue
+
                 // 单条 append 避免全量 load+save 覆盖并发写入
                 ChatHistory.appendMessage(context, chat, com.aftglw.devapi.model.ChatMessage("assistant", message))
                 sendNotif(context, chatDisplay, message)
+
+                // 记录主动消息历史 + 跨角色协调时间戳 + streak+1（用户回复后会重置）
+                ProactiveMessageStore.recordSentMessage(context, chat, message)
+                ProactiveMessageStore.markAnyChatSent(context)
+                ProactiveMessageStore.incrMissStreak(context, chat)
+
                 prefs.edit()
                     .putInt("proactive_count_${chat}_$today", todayCount + 1)
                     .putLong("proactive_last_$chat", System.currentTimeMillis())
@@ -101,9 +127,7 @@ object ProactiveScheduler {
         } catch (e: Exception) {
             Log.w(TAG, "Proactive trigger failed", e)
         } finally {
-            // P0: 周期触发 —— 本轮跑完后重新 enqueue 自己，实现类似 AlarmManager.setInexactRepeating 的效果。
-            // 延迟 30 分钟（与默认 proactive_interval_min 一致），由 WorkManager 在 Doze 下由系统统一调度，比 AlarmManager 省电。
-            // ExistingWorkPolicy.KEEP 保证若已有 pending 工作不会重复排队。
+            // P0: 周期触发 —— 本轮跑完后重新 enqueue 自己
             val nextRequest = OneTimeWorkRequestBuilder<ProactiveWorker>()
                 .setInitialDelay(30, TimeUnit.MINUTES)
                 .build()
@@ -159,13 +183,27 @@ object ProactiveScheduler {
         }
 
         val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
-        if (apiKey.isBlank()) return ""
+        if (apiKey.isBlank()) {
+            // P0-2: API 未配置 → 走模板 fallback
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val mood = prefs.getString("last_mood_$chatName", null)
+            return ProactiveMessageStore.pickPresetTemplate(hour, mood)
+        }
         val persona = loadPersona(ctx, chatName)
         val history = ChatHistory.load(ctx, chatName)
         val messages = history.map {
             com.aftglw.devapi.model.ChatMessage(if (it.second) "user" else "assistant", it.first)
         }
-        // 注入反思产物 + 当前时间 + 上次对话间隔，让 AI 主动消息有"情境感"
+        // P1-3: 用户情绪适配
+        val userMood = prefs.getString("last_mood_$chatName", null)
+        val moodHint = if (userMood != null) {
+            val lowMoodSet = setOf("低落", "难过", "沮丧", "疲惫", "累", "烦")
+            if (lowMoodSet.any { userMood.contains(it) }) "【对方最近情绪】$userMood — 语气要更温柔、关心，不要嬉皮笑脸" else ""
+        } else ""
+        // P1-4: 注入最近主动消息文本，让 AI 知道不要重复
+        val recentSent = ProactiveMessageStore.getRecentSent(ctx, chatName, 3)
+        val recentHint = if (recentSent.isNotEmpty()) "【你最近主动发过的消息（不要重复类似内容）】\n${recentSent.joinToString("\n")}" else ""
+
         val insightText = try { MemoryStore.listRecentByTopic("insight:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
         val aiEmoText = try { MemoryStore.listRecentByTopic("ai_emo:$chatName", 1).firstOrNull()?.text ?: "" } catch (_: Exception) { "" }
         val now = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())
@@ -184,17 +222,56 @@ object ProactiveScheduler {
             append("【距离上次聊天】$gapHint\n")
             if (insightText.isNotBlank()) append("【上次对话本质】$insightText\n")
             if (aiEmoText.isNotBlank()) append("【你上次的情绪】$aiEmoText\n")
+            if (moodHint.isNotBlank()) append(moodHint).append('\n')
+            if (recentHint.isNotBlank()) append(recentHint).append('\n')
             append("\n你现在要主动给对方发一条消息，像朋友自然地打招呼或关心一下。")
             append("要求：1-2 句话，每句不超过 15 字；不要提及\"我刚想起来\"\"我主动\"等元描述；不要重复上次说过的话。")
             append("如果没什么好说的，就回复空白。")
         }
+        // P2-4: LLM 失败时重试 1 次；若仍失败则走模板 fallback
         return try {
-            com.aftglw.devapi.network.AiServiceFactory.getService()
+            val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
                 .sendMessage(messages, "主动发起一条自然的消息", prompt)
-                ?: ""
+            if (reply.isNullOrBlank()) {
+                // 第二次尝试：用简化 prompt
+                val reply2 = try {
+                    com.aftglw.devapi.network.AiServiceFactory.getService()
+                        .sendMessage(messages.takeLast(4), "主动发一条关心的消息", "现在主动给对方发一句话。")
+                } catch (_: Exception) { null }
+                if (reply2.isNullOrBlank()) {
+                    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    ProactiveMessageStore.pickPresetTemplate(hour, userMood)
+                } else reply2
+            } else reply
         } catch (e: Exception) {
-            Log.w(TAG, "Message generation failed", e)
-            ""
+            Log.w(TAG, "Message generation failed, using template", e)
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            ProactiveMessageStore.pickPresetTemplate(hour, userMood)
+        }
+    }
+
+    /** P1-2: 事件跟进消息 — 用户之前提到"明天XX"，今天主动跟进 */
+    private suspend fun generateEventFollowupMessage(ctx: Context, chatName: String, eventText: String): String {
+        val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
+        val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
+        if (apiKey.isBlank()) {
+            // 简化 fallback
+            return "你之前提到的「${eventText.take(15)}」怎么样了？"
+        }
+        val persona = loadPersona(ctx, chatName)
+        val prompt = buildString {
+            if (persona.isNotBlank()) append(persona).append("\n\n")
+            append("【情境】对方之前跟你提过：$eventText\n")
+            append("现在该到时间了，你主动关心一下这件事怎么样了。\n")
+            append("要求：1-2 句话，每句 ≤15 字；自然口语，不要像机器提醒。")
+        }
+        return try {
+            val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
+                .sendMessage(emptyList(), prompt, "你是这个对话中的角色。主动跟进对方之前提到的事。")
+            reply?.trim()?.takeIf { it.isNotBlank() }?.take(80) ?: "之前那件事怎么样了？"
+        } catch (e: Exception) {
+            Log.w(TAG, "event followup failed", e)
+            "你之前提到的「${eventText.take(15)}」怎么样了？"
         }
     }
 
@@ -250,7 +327,9 @@ object ProactiveScheduler {
         val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
-                NotificationChannel("proactive", "主动消息", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel("proactive", "主动消息", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "AI角色主动发起的关怀消息"
+                }
             )
         }
         val intent = Intent(ctx, MainActivity::class.java).apply {
@@ -261,14 +340,38 @@ object ProactiveScheduler {
             ctx, chat.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = android.app.Notification.Builder(ctx, "proactive")
-            .setContentTitle(chat)
-            .setContentText(message)
+        // P2-1: 通知 Action — 稍后免打扰 1h
+        val silenceIntent = Intent(ctx, ProactionNotificationReceiver::class.java).apply {
+            action = "com.aftglw.devapi.PROACTIVE_SILENCE_1H"
+            putExtra("chat", chat)
+        }
+        val silencePending = PendingIntent.getBroadcast(
+            ctx, chat.hashCode() + 1, silenceIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val actionSilence = android.app.Notification.Action.Builder(
+            android.R.drawable.ic_menu_close_clear_cancel, "免打扰1小时", silencePending
+        ).build()
+
+        // P2-2: 隐私模式 — 只显示"发来一条消息"，不显示全文
+        val (title, text) = if (ProactiveMessageStore.isPrivacyMode(ctx)) {
+            chat to "发来一条消息"
+        } else {
+            chat to message
+        }
+
+        val builder = android.app.Notification.Builder(ctx, "proactive")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .build()
-        manager.notify(chat.hashCode(), notification)
+            .addAction(actionSilence)
+        // 隐私模式锁屏不显示全文
+        if (ProactiveMessageStore.isPrivacyMode(ctx)) {
+            builder.setVisibility(android.app.Notification.VISIBILITY_PRIVATE)
+        }
+        manager.notify(chat.hashCode(), builder.build())
     }
 
     private const val TAG = "ProactiveScheduler"

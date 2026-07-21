@@ -201,6 +201,39 @@ fun ChatInfoPage(
             // 主动关怀
             Spacer(Modifier.height(8.dp))
             Text("主动关怀", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+            // P0-3: 全局勿扰控制（影响所有角色）
+            val globalPausedUntil = remember { mutableStateOf(com.aftglw.devapi.core.time.ProactiveMessageStore.getGlobalPauseUntil(ctx)) }
+            val isPaused = globalPausedUntil.value > System.currentTimeMillis()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
+                Text("全局勿扰", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        if (isPaused) "已暂停至 ${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(globalPausedUntil.value))}" else "未暂停",
+                        Modifier.weight(1f), fontSize = 13.sp,
+                        color = if (isPaused) Color(0xFFE53935) else AchatTheme.colors.onSurface.copy(alpha = 0.6f)
+                    )
+                    TextButton(onClick = {
+                        com.aftglw.devapi.core.time.ProactiveMessageStore.pauseGlobal(ctx, 1)
+                        globalPausedUntil.value = com.aftglw.devapi.core.time.ProactiveMessageStore.getGlobalPauseUntil(ctx)
+                        Toast.makeText(ctx, "已暂停 1 小时", Toast.LENGTH_SHORT).show()
+                    }) { Text("1h", fontSize = 12.sp) }
+                    TextButton(onClick = {
+                        com.aftglw.devapi.core.time.ProactiveMessageStore.pauseGlobal(ctx, 4)
+                        globalPausedUntil.value = com.aftglw.devapi.core.time.ProactiveMessageStore.getGlobalPauseUntil(ctx)
+                        Toast.makeText(ctx, "已暂停 4 小时", Toast.LENGTH_SHORT).show()
+                    }) { Text("4h", fontSize = 12.sp) }
+                    TextButton(onClick = {
+                        com.aftglw.devapi.core.time.ProactiveMessageStore.pauseGlobalUntilEndOfDay(ctx)
+                        globalPausedUntil.value = com.aftglw.devapi.core.time.ProactiveMessageStore.getGlobalPauseUntil(ctx)
+                        Toast.makeText(ctx, "已暂停到今天结束", Toast.LENGTH_SHORT).show()
+                    }) { Text("今天", fontSize = 12.sp) }
+                    TextButton(onClick = {
+                        com.aftglw.devapi.core.time.ProactiveMessageStore.pauseGlobal(ctx, 0)
+                        globalPausedUntil.value = 0L
+                        Toast.makeText(ctx, "已取消暂停", Toast.LENGTH_SHORT).show()
+                    }) { Text("取消", fontSize = 12.sp, color = AchatTheme.colors.primary) }
+                }
+            }
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
                 var proactiveEnabled by remember { mutableStateOf(prefs.getBoolean("proactive_enabled_$name", false)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -208,17 +241,24 @@ fun ChatInfoPage(
                     Switch(checked = proactiveEnabled, onCheckedChange = { v -> proactiveEnabled = v; prefs.edit().putBoolean("proactive_enabled_$name", v).apply() })
                 }
                 if (proactiveEnabled) {
-                    // 状态显示：上次触发时间 + 今日已发条数
+                    // 状态显示：上次触发时间 + 今日已发条数 + 连续未回复数
                     val lastTs = prefs.getLong("proactive_last_$name", 0L)
                     val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault()).format(java.util.Date())
                     val todayCount = prefs.getInt("proactive_count_${name}_$today", 0)
                     val dailyLimit = prefs.getInt("proactive_daily_limit_$name", 3)
+                    val missStreak = com.aftglw.devapi.core.time.ProactiveMessageStore.getMissStreak(ctx, name)
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             if (lastTs > 0L) "上次：${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastTs))}" else "上次：未触发",
                             fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f), modifier = Modifier.weight(1f)
                         )
                         Text("今日：$todayCount/$dailyLimit", fontSize = 11.sp, color = if (todayCount >= dailyLimit) Color(0xFFE53935) else AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (missStreak > 0) "未回复：$missStreak" else "",
+                            fontSize = 11.sp,
+                            color = when { missStreak >= 5 -> Color(0xFFE53935); missStreak >= 3 -> Color(0xFFFFA000); else -> AchatTheme.colors.onSurface.copy(alpha = 0.5f) }
+                        )
                     }
                     // 每日上限
                     var dailyLimitState by remember { mutableIntStateOf(dailyLimit) }
@@ -329,6 +369,13 @@ fun ChatInfoPage(
                             TextButton(onClick = { triggersExpanded.value = false }) { Text("完成") }
                         }
                     }
+                    // 隐私模式开关
+                    var privacyMode by remember { mutableStateOf(com.aftglw.devapi.core.time.ProactiveMessageStore.isPrivacyMode(ctx)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("通知隐私", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Switch(checked = privacyMode, onCheckedChange = { v -> privacyMode = v; com.aftglw.devapi.core.time.ProactiveMessageStore.setPrivacyMode(ctx, v) })
+                    }
+                    Text("开启后通知只显示\"发来一条消息\"，不显示内容", fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f))
                     // 一键测试触发按钮
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

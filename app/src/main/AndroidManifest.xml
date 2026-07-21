@@ -50,5 +50,14 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- 主动消息通知 Action 接收器：处理"免打扰1小时"按钮 -->
+        <receiver
+            android:name="com.aftglw.devapi.core.time.ProactionNotificationReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aftglw.devapi.PROACTIVE_SILENCE_1H" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>
