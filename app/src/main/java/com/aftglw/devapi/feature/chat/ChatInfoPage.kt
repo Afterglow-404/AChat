@@ -203,7 +203,7 @@ fun ChatInfoPage(
             Spacer(Modifier.height(8.dp))
             Text("对话功能", modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(AchatTheme.shapes.card).background(AchatTheme.colors.surface).padding(12.dp)) {
-                var dialogueOpt by remember { mutableStateOf(prefs.getBoolean("dialogue_optimization_$name", true)) }
+                var dialogueOpt by remember { mutableStateOf(prefs.getBoolean("dialogue_optimization_$name", false)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("对话优化", Modifier.weight(1f), fontSize = 14.sp)
                     Switch(checked = dialogueOpt, onCheckedChange = { v -> dialogueOpt = v; prefs.edit().putBoolean("dialogue_optimization_$name", v).apply() })

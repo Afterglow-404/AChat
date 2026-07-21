@@ -13,31 +13,29 @@ object PostLLMProcessor {
         // ① 存用户输入 → 轻量上下文记忆
         MemoryStore.save(ctx, userMessage, "turn:$name")
 
-        // ② 对话反思（需开启）
+        // ② 存 AI 回复 → 后续关键词事实提取的素材
+        MemoryStore.save(ctx, aiReply.take(100), "reply:$name")
+
+        // ③ 对话反思（需开启）：合并为单次 LLM 调用，一次输出 insight + ai_emo，省一半配额
         val prefs = ctx.getSharedPreferences("wechat_settings", Context.MODE_PRIVATE)
         if (prefs.getBoolean("reflection_$name", false)) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val prompt = "分析这段对话的本质。用户说：${userMessage.take(80)}。AI说：${aiReply.take(80)}。用一句话概括对话的核心（20字内，不要评价）："
-                    val insight = AiServiceFactory.getService()
-                        .sendMessage(emptyList(), prompt, "你是对话分析师。只输出概括，不要多余内容。")
-                    if (!insight.isNullOrBlank()) MemoryStore.save(ctx, insight.trim(), "insight:$name")
-                } catch (e: Exception) { Log.w("PostLLMProcessor", "insight extract failed", e) } /* 非关键 */
-            }
-        }
-
-        // ③ 存 AI 回复 → 后续关键词事实提取的素材
-        MemoryStore.save(ctx, aiReply.take(100), "reply:$name")
-
-        // ④ AI 自身情绪记忆 — 跟随反思开关
-        if (prefs.getBoolean("reflection_$name", false)) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val prompt = "分析你刚才回复的情绪。用户说：${userMessage.take(40)}。你回复：${aiReply.take(40)}。用一句话描述你（AI）在回复时的情绪状态（15字内）："
-                    val aiEmo = AiServiceFactory.getService()
-                        .sendMessage(emptyList(), prompt, "你是对话中的AI角色。")
-                    if (!aiEmo.isNullOrBlank()) MemoryStore.save(ctx, aiEmo.trim(), "ai_emo:$name")
-                } catch (e: Exception) { Log.w("PostLLMProcessor", "ai emotion memory failed", e) } /* 非关键 */
+                    val prompt = buildString {
+                    append("分析这段对话。\n用户说：${userMessage.take(80)}\nAI说：${aiReply.take(80)}\n\n")
+                    append("按以下格式输出，不要多余内容：\n")
+                    append("---INSIGHT---\n用一句话概括对话的核心（20字内，不要评价）\n")
+                    append("---EMO---\n用一句话描述AI在回复时的情绪状态（15字内）")
+                    }
+                    val full = AiServiceFactory.getService()
+                        .sendMessage(emptyList(), prompt, "你是对话分析师。只输出指定格式，不要多余内容。")
+                    if (!full.isNullOrBlank()) {
+                        val insightPart = full.split("---EMO---").getOrElse(0) { "" }.replace("---INSIGHT---", "").trim()
+                        val emoPart = full.split("---EMO---").getOrElse(1) { "" }.trim()
+                        if (insightPart.isNotBlank()) MemoryStore.save(ctx, insightPart.take(80), "insight:$name")
+                        if (emoPart.isNotBlank()) MemoryStore.save(ctx, emoPart.take(40), "ai_emo:$name")
+                    }
+                } catch (e: Exception) { Log.w("PostLLMProcessor", "reflection failed", e) } /* 非关键 */
             }
         }
     }

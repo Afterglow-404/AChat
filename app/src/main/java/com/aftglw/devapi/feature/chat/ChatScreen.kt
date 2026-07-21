@@ -293,7 +293,7 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         val enabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
             .getBoolean("dialogue_optimization_$name", false)
         if (enabled && bubbles.size >= 20 && bubbles.size % 20 == 0) {
-            val all = bubbles.joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
+            val all = bubbles.takeLast(40).joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
             kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val text = com.aftglw.devapi.network.AiServiceFactory.getService()
