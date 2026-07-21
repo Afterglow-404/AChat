@@ -951,9 +951,11 @@ async function handle(request, response) {
         })
       } else if (engine === 'gptsovits') {
         if (!gptSovitsUrl) return jsonResponse(response, 503, { error: { message: 'GPT-SoVITS upstream is not configured' } })
+        const textLang = url.searchParams.get('text_lang') || url.searchParams.get('language') || 'zh'
+        const promptLang = url.searchParams.get('prompt_lang') || textLang
         resp = await fetch(`${gptSovitsUrl}/tts`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, voice: url.searchParams.get('voice') || 'default', prompt_lang: 'zh', text_lang: 'zh', response_format: 'wav' }),
+          body: JSON.stringify({ text, voice: url.searchParams.get('voice') || 'default', prompt_lang: promptLang, text_lang: textLang, response_format: url.searchParams.get('response_format') || 'wav' }),
           signal: AbortSignal.timeout(15000),
         })
       } else {

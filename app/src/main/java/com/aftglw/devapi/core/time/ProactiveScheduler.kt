@@ -26,12 +26,14 @@ import java.util.concurrent.TimeUnit
 
 object ProactiveScheduler {
     fun enqueue(context: Context) {
+        // app 启动时调用：用 REPLACE 策略确保每次启动都会跑一次（取消 pending 的周期任务）。
+        // runOnce 末尾的 finally 会重新 enqueue 30min 周期任务，因此这里覆盖不会丢失后续调度。
         val request = OneTimeWorkRequestBuilder<ProactiveWorker>()
             .setInitialDelay(30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             "proactive",
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE,
             request
         )
     }
@@ -44,7 +46,8 @@ object ProactiveScheduler {
         val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
         val message = "Test message ($now)"
         CoroutineScope(Dispatchers.IO).launch {
-            ChatHistory.save(context, chatName, ChatHistory.load(context, chatName) + Triple(message, false, now))
+            // 单条 append 避免全量 load+save 覆盖并发写入
+            ChatHistory.appendMessage(context, chatName, com.aftglw.devapi.model.ChatMessage("assistant", message))
         }
         sendNotif(context, chatName, message)
     }
@@ -72,9 +75,10 @@ object ProactiveScheduler {
                 if (!shouldTrigger) continue
 
                 val message = generateMessage(context, chat)
-                if (message.isBlank() || message == DEFAULT_MESSAGE) continue
-                val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                ChatHistory.save(context, chat, ChatHistory.load(context, chat) + Triple(message, false, now))
+                // 用空字符串表示"不发"；只判 isBlank，避免 AI 真返回 "..." 被误拦截
+                if (message.isBlank()) continue
+                // 单条 append 避免全量 load+save 覆盖并发写入
+                ChatHistory.appendMessage(context, chat, com.aftglw.devapi.model.ChatMessage("assistant", message))
                 sendNotif(context, chatDisplay, message)
                 prefs.edit()
                     .putInt("proactive_count_${chat}_$today", todayCount + 1)
@@ -83,6 +87,18 @@ object ProactiveScheduler {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Proactive trigger failed", e)
+        } finally {
+            // P0: 周期触发 —— 本轮跑完后重新 enqueue 自己，实现类似 AlarmManager.setInexactRepeating 的效果。
+            // 延迟 30 分钟（与默认 proactive_interval_min 一致），由 WorkManager 在 Doze 下由系统统一调度，比 AlarmManager 省电。
+            // ExistingWorkPolicy.KEEP 保证若已有 pending 工作不会重复排队。
+            val nextRequest = OneTimeWorkRequestBuilder<ProactiveWorker>()
+                .setInitialDelay(30, TimeUnit.MINUTES)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "proactive",
+                ExistingWorkPolicy.KEEP,
+                nextRequest
+            )
         }
     }
 
@@ -130,7 +146,7 @@ object ProactiveScheduler {
         }
 
         val apiKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key")
-        if (apiKey.isBlank()) return DEFAULT_MESSAGE
+        if (apiKey.isBlank()) return ""
         val persona = loadPersona(ctx, chatName)
         val history = ChatHistory.load(ctx, chatName)
         val messages = history.map {
@@ -143,10 +159,10 @@ object ProactiveScheduler {
         return try {
             com.aftglw.devapi.network.AiServiceFactory.getService()
                 .sendMessage(messages, "Start a natural conversation", prompt)
-                ?: DEFAULT_MESSAGE
+                ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "Message generation failed", e)
-            DEFAULT_MESSAGE
+            ""
         }
     }
 
@@ -164,10 +180,10 @@ object ProactiveScheduler {
         return try {
             val reply = com.aftglw.devapi.network.AiServiceFactory.getService()
                 .sendMessage(emptyList(), prompt, "You are the character in this chat.")
-            reply?.trim()?.takeIf { it.isNotBlank() }?.take(100) ?: DEFAULT_MESSAGE
+            reply?.trim()?.takeIf { it.isNotBlank() }?.take(100) ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "AI proactive generation failed", e)
-            DEFAULT_MESSAGE
+            ""
         }
     }
 
@@ -181,7 +197,7 @@ object ProactiveScheduler {
         val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
-                NotificationChannel("proactive", "Proactive messages", NotificationManager.IMPORTANCE_HIGH)
+                NotificationChannel("proactive", "主动消息", NotificationManager.IMPORTANCE_HIGH)
             )
         }
         val intent = Intent(ctx, MainActivity::class.java).apply {
@@ -203,5 +219,4 @@ object ProactiveScheduler {
     }
 
     private const val TAG = "ProactiveScheduler"
-    private const val DEFAULT_MESSAGE = "..."
 }
