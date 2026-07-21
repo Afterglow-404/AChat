@@ -68,6 +68,7 @@ class ChatsViewModel(app: Application) : AndroidViewModel(app) {
             remove("last_mood_${target.name}")
             remove("persona_optimized_${target.name}")
             remove("persona_dialogue_traits_${target.name}")
+            remove("persona_dialogue_traits_ts_${target.name}")
             remove("dialogue_optimization_${target.name}")
             remove("reflection_${target.name}")
             remove("affinity_v2_${target.name}")

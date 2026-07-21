@@ -172,7 +172,7 @@ class DebugOverlayService : Service() {
         if (activeChat.isNotEmpty()) {
             CoroutineScope(Dispatchers.IO).launch {
                 val aiEmo = try {
-                    com.aftglw.devapi.core.memory.MemoryStore.search(this@DebugOverlayService, "情绪", 1, "ai_emo:$activeChat").firstOrNull()?.text?.take(20) ?: ""
+                    com.aftglw.devapi.core.memory.MemoryStore.listRecentByTopic("ai_emo:$activeChat", 1).firstOrNull()?.text?.take(20) ?: ""
                 } catch (_: Exception) { "" }
                 val finalText = baseEmoResult + if (aiEmo.isNotEmpty()) " | AI:$aiEmo" else ""
                 withContext(Dispatchers.Main) {

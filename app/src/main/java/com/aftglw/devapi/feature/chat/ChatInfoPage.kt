@@ -60,6 +60,23 @@ fun ChatInfoPage(
     val apiUrl = prefs.getString("ai_api_url", "")?.takeIf { it.isNotEmpty() } ?: "未配置"
     val hasKey = com.aftglw.devapi.core.security.SecureKeyStore.getString(ctx, "ai_api_key").isNotEmpty()
 
+    // 对话优化 traits 查看对话框 + 对话反思产物查看对话框
+    var showTraitsDialog by remember { mutableStateOf(false) }
+    var showReflectionDialog by remember { mutableStateOf(false) }
+    var reflectionInsights by remember { mutableStateOf<List<com.aftglw.devapi.core.memory.MemoryItem>>(emptyList()) }
+    var reflectionEmos by remember { mutableStateOf<List<com.aftglw.devapi.core.memory.MemoryItem>>(emptyList()) }
+    LaunchedEffect(showReflectionDialog) {
+        if (showReflectionDialog) {
+            try {
+                reflectionInsights = withContext(Dispatchers.IO) { MemoryStore.listRecentByTopic("insight:$name", 5) }
+                reflectionEmos = withContext(Dispatchers.IO) { MemoryStore.listRecentByTopic("ai_emo:$name", 10) }
+            } catch (e: Exception) {
+                Log.e("ChatInfoPage", "load reflection failed", e)
+                Toast.makeText(ctx, "加载反思产物失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(AchatTheme.colors.background)) {
         CenterAlignedTopAppBar(
             title = { Text("对话详情", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface) },
@@ -208,10 +225,33 @@ fun ChatInfoPage(
                     Text("对话优化", Modifier.weight(1f), fontSize = 14.sp)
                     Switch(checked = dialogueOpt, onCheckedChange = { v -> dialogueOpt = v; prefs.edit().putBoolean("dialogue_optimization_$name", v).apply() })
                 }
+                if (dialogueOpt) {
+                    val traitsText = prefs.getString("persona_dialogue_traits_$name", "") ?: ""
+                    val traitsTs = prefs.getLong("persona_dialogue_traits_ts_$name", 0L)
+                    Row(Modifier.fillMaxWidth().clickable { showTraitsDialog = true }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "查看用户特点${if (traitsText.isNotBlank()) " ✓" else "（暂无）"}",
+                            Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f)
+                        )
+                        if (traitsTs > 0L) {
+                            Text(
+                                java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(traitsTs)),
+                                fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.4f)
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
+                    }
+                }
                 var reflection by remember { mutableStateOf(prefs.getBoolean("reflection_$name", false)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("对话反思", Modifier.weight(1f), fontSize = 14.sp)
                     Switch(checked = reflection, onCheckedChange = { v -> reflection = v; prefs.edit().putBoolean("reflection_$name", v).apply() })
+                }
+                if (reflection) {
+                    Row(Modifier.fillMaxWidth().clickable { showReflectionDialog = true }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("查看反思产物", Modifier.weight(1f), fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "查看", tint = AchatTheme.colors.onSurface.copy(alpha = 0.3f))
+                    }
                 }
             }
             // 情绪可视化
@@ -277,5 +317,101 @@ fun ChatInfoPage(
                 }
             }
         }
+    }
+
+    // 用户特点 traits 查看对话框
+    if (showTraitsDialog) {
+        val traitsText = prefs.getString("persona_dialogue_traits_$name", "") ?: ""
+        val traitsTs = prefs.getLong("persona_dialogue_traits_ts_$name", 0L)
+        AlertDialog(
+            onDismissRequest = { showTraitsDialog = false },
+            title = { Text("用户特点（对话优化产物）") },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    if (traitsTs > 0L) {
+                        Text(
+                            "最近更新：${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(traitsTs))}",
+                            fontSize = 11.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    if (traitsText.isBlank()) {
+                        Text(
+                            "暂无特点记录。开启对话优化后，每 20 轮或 1 小时会自动分析。",
+                            fontSize = 13.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.6f)
+                        )
+                    } else {
+                        traitsText.lines().filter { it.isNotBlank() }.forEach { line ->
+                            Text("• $line", fontSize = 13.sp, color = AchatTheme.colors.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row {
+                        TextButton(onClick = {
+                            showTraitsDialog = false
+                            scope.launch {
+                                prefs.edit().remove("persona_dialogue_traits_$name").remove("persona_dialogue_traits_ts_$name").apply()
+                                Toast.makeText(ctx, "已重置用户特点", Toast.LENGTH_SHORT).show()
+                            }
+                        }) { Text("重置", color = Color(0xFFE53935)) }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { showTraitsDialog = false }) { Text("关闭") }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // 对话反思产物查看对话框
+    if (showReflectionDialog) {
+        AlertDialog(
+            onDismissRequest = { showReflectionDialog = false },
+            title = { Text("对话反思产物") },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Text("对话本质 (insight)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(4.dp))
+                    if (reflectionInsights.isEmpty()) {
+                        Text("暂无。开启反思后每轮会自动分析。", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                    } else {
+                        reflectionInsights.forEachIndexed { i, it ->
+                            Text("${i + 1}. ${it.text}", fontSize = 12.sp, color = AchatTheme.colors.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("AI 情绪 (ai_emo)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AchatTheme.colors.onSurface.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(4.dp))
+                    if (reflectionEmos.isEmpty()) {
+                        Text("暂无。", fontSize = 12.sp, color = AchatTheme.colors.onSurface.copy(alpha = 0.5f))
+                    } else {
+                        reflectionEmos.forEachIndexed { i, it ->
+                            Text("${i + 1}. ${it.text}", fontSize = 12.sp, color = AchatTheme.colors.onSurface, modifier = Modifier.padding(vertical = 1.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row {
+                        TextButton(onClick = {
+                            showReflectionDialog = false
+                            scope.launch {
+                                try {
+                                    MemoryStore.deleteByTopic("insight:$name")
+                                    MemoryStore.deleteByTopic("ai_emo:$name")
+                                    reflectionInsights = emptyList()
+                                    reflectionEmos = emptyList()
+                                    Toast.makeText(ctx, "已清空反思产物", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Log.e("ChatInfoPage", "clear reflection failed", e)
+                                    Toast.makeText(ctx, "清空失败：${e.message?.take(30)}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) { Text("清空全部", color = Color(0xFFE53935)) }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { showReflectionDialog = false }) { Text("关闭") }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
     }
 }

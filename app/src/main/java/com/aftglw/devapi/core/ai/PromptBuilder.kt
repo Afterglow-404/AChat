@@ -22,8 +22,9 @@ object PromptBuilder {
         val traitsBlock = if (traits.isNotBlank()) "\n\n【用户特点】$traits" else ""
         val memoryBlock = if (memoryContext.isNotBlank()) "\n\n【关于对方的记忆】\n$memoryContext" else ""
         // 反思产物：对话本质洞察 + AI 自身情绪记忆，合并为【你的记忆】块注入
-        val insightText = MemoryStore.search(ctx, "对话", 1, "insight:$name").firstOrNull()?.text ?: ""
-        val aiEmoText = MemoryStore.search(ctx, "情绪", 1, "ai_emo:$name").firstOrNull()?.text ?: ""
+        // 改用 listRecentByTopic 按 timestamp 倒序确定性取最新一条，避免 embedding 检索的不确定性
+        val insightText = MemoryStore.listRecentByTopic("insight:$name", 1).firstOrNull()?.text ?: ""
+        val aiEmoText = MemoryStore.listRecentByTopic("ai_emo:$name", 1).firstOrNull()?.text ?: ""
         val reflectionBlock = buildString {
             if (insightText.isNotBlank() || aiEmoText.isNotBlank()) {
                 append("\n\n【你的记忆】")

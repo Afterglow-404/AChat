@@ -297,21 +297,33 @@ fun ChatScreen(name: String, persona: String = "", avatarUri: String = "", id: S
         }
     }
 
-    // 对话优化：每 20 轮
+    // 对话优化：每 20 轮触发；若 1 小时未更新则 bubbles.size 变化时也触发一次
+    // 触发逻辑：
+    //  1) bubbles.size % 20 == 0 → 整数轮次触发
+    //  2) 距上次 traits 更新 >1 小时 + bubbles.size >=20 → 时间兜底触发
     LaunchedEffect(bubbles.size / 20) {
         val enabled = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
             .getBoolean("dialogue_optimization_$name", false)
-        if (enabled && bubbles.size >= 20 && bubbles.size % 20 == 0) {
-            val all = bubbles.takeLast(40).joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        if (enabled && bubbles.size >= 20) {
+            val prefs = ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE)
+            val nowMs = System.currentTimeMillis()
+            val lastTraitsTs = prefs.getLong("persona_dialogue_traits_ts_$name", 0L)
+            val hoursSince = (nowMs - lastTraitsTs) / 3600000
+            val byRound = bubbles.size % 20 == 0
+            val byTime = lastTraitsTs == 0L || hoursSince >= 1L
+            if (byRound || byTime) {
+                val all = bubbles.takeLast(40).joinToString("\n") { if (it.isMe) "我: ${it.text}" else "AI: ${it.text}" }
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val text = com.aftglw.devapi.network.AiServiceFactory.getService()
-                            .sendMessage(emptyList(), all, "你是对话分析师。分析这段对话中用户的说话特点：语气偏好、常用词汇、话题倾向、回复长度偏好、什么情况下会沉默或生气。输出一句话总结，不要超过40个字。")
-                        if (!text.isNullOrBlank()) {
-                            ctx.getSharedPreferences("wechat_settings", android.content.Context.MODE_PRIVATE).edit()
-                                .putString("persona_dialogue_traits_$name", text).apply()
+                        val newTraits = com.aftglw.devapi.core.mood.PostLLMProcessor.refineTraits(ctx, name, all)
+                        if (!newTraits.isNullOrBlank()) {
+                            prefs.edit()
+                                .putString("persona_dialogue_traits_$name", newTraits)
+                                .putLong("persona_dialogue_traits_ts_$name", nowMs)
+                                .apply()
                         }
                     } catch (e: Exception) { Log.w("ChatScreen", "dialogue opt failed", e) } /* 非关键 */
+                }
             }
         }
     }
